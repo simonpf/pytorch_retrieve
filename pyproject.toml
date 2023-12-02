@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "probreg"
+authors = [
+    {name = "Simon Pfreundschuh", email = "simon.pfreundschuh@colostate.edu"},
+]
+description = """
+Neural-network-based probabilistic regression for the busy
+remote sensing scientist.
+"""
+readme = "README.md"
+requires-python = ">=3.7"
+keywords = ["machine learning", "remote sensing"]
+license = {text = "BSD-3-Clause"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "pyyaml",
+    "toml",
+    "pytest"
+]
+dynamic = ["version"]
+
