@@ -1,0 +1,230 @@
+"""
+Tests for the pytorch_retrieve.modules.input module.
+"""
+import numpy as np
+import pytest
+import torch
+from torch.utils.data import DataLoader
+
+from pytorch_retrieve.data.synthetic import Synthetic1d, Synthetic3d
+from pytorch_retrieve.modules.input import InputLayer, StandardizationLayer
+
+
+def data_loader_1d(n_samples: int, batch_size: int) -> DataLoader:
+    """
+    A DataLoader providing batch of Synthetic1D data.
+    """
+    data = Synthetic1d(n_samples)
+    return DataLoader(data, batch_size=batch_size, shuffle=True)
+
+
+def test_input_1d(tmp_path):
+    """
+    Calculate statistic of 1D dataset and ensure that NANs are ignored
+    in the stats calculation.
+    """
+    data_loader = data_loader_1d(2048, 64)
+
+    input_layer = InputLayer("x", n_features=1, model_path=tmp_path)
+    for x, y in data_loader:
+        input_layer(x)
+    stats_1 = input_layer.compute_stats()
+
+    input_layer = InputLayer("x", n_features=1, model_path=tmp_path)
+    for x, y in data_loader:
+        mask = torch.rand(*x.shape) < 0.5
+        x[mask] = torch.nan
+        input_layer(x)
+
+    stats_2 = input_layer.compute_stats()
+
+    assert np.isclose(stats_1["mean"], stats_2["mean"], rtol=0.05)
+
+
+def test_hist_1d(tmp_path):
+    """
+    Test calculation of histograms for 1D data.
+    """
+    data_loader = data_loader_1d(2048, 64)
+
+    input_layer = InputLayer("x", n_features=1, model_path=tmp_path)
+    for x, y in data_loader:
+        input_layer(x)
+    stats_1 = input_layer.compute_stats()
+
+    input_layer.epoch_finished()
+
+    for x, y in data_loader:
+        input_layer(x)
+
+    assert len(input_layer.bins) == input_layer.n_features
+
+
+def test_finalization(tmp_path):
+    """
+    Test saving and loading of EDA results.
+    """
+    data_loader = data_loader_1d(2048, 64)
+
+    input_layer_1 = InputLayer("x", n_features=1, model_path=tmp_path)
+    for x, y in data_loader:
+        input_layer_1(x)
+    input_layer_1.epoch_finished()
+
+    for x, y in data_loader:
+        input_layer_1(x)
+    input_layer_1.epoch_finished()
+
+    assert (tmp_path / "stats" / "x.nc").exists()
+
+    input_layer_2 = InputLayer("x", n_features=1, model_path=tmp_path)
+    assert input_layer_2.finalized
+
+
+def test_normalization_1d(tmp_path):
+    """
+    Perform EDA on synthetic dataset and use input layers to normalize inputs.
+    Ensure that:
+        - Mean and std. dev. of standardized inputs are close to 0
+          and 1, respectively.
+        - Minimum and maximum of min-max normalized inputs are close to -1.0
+          and 1.0, respectively.
+    """
+    data_loader = data_loader_1d(2048, 64)
+
+    input_layer_1 = StandardizationLayer(
+        "x", n_features=1, model_path=tmp_path, kind="standardize"
+    )
+    for x, y in data_loader:
+        input_layer_1(x)
+    input_layer_1.epoch_finished()
+    for x, y in data_loader:
+        input_layer_1(x)
+    input_layer_1.epoch_finished()
+
+    # Standardization
+    input_layer_2 = StandardizationLayer("x", n_features=1, model_path=None)
+    for x, y in data_loader:
+        x = input_layer_1(x)
+        input_layer_2(x)
+    input_layer_2.epoch_finished()
+
+    stats = input_layer_2.compute_stats()
+    assert (np.isclose(stats["mean"], 0.0, atol=1e-2)).all()
+    assert (np.isclose(stats["std_dev"], 1.0, atol=1e-2)).all()
+
+    # Min-max normalization
+    input_layer_2 = StandardizationLayer("x", n_features=1, model_path=None)
+    input_layer_1.kind = "minmax"
+    for x, y in data_loader:
+        x = input_layer_1(x)
+        input_layer_2(x)
+    input_layer_2.epoch_finished()
+
+    stats = input_layer_2.compute_stats()
+    assert (np.isclose(stats["min"], -1.0, atol=1e-2)).all()
+    assert (np.isclose(stats["max"], 1.0, atol=1e-2)).all()
+
+
+def data_loader_3d(n_samples: int, batch_size: int) -> DataLoader:
+    """
+    Create DataLoader providing batchs of Synthetic3D data.
+
+    Args:
+        n_samples: The number of samples in the dataset.
+        batch_size: The size of the batches into which to combine the inputs.
+
+    Return:
+        A 'torch.utils.data.Dataloader' providing access to the training
+        batches.
+    """
+    data = Synthetic3d(n_samples)
+    return DataLoader(data, batch_size=batch_size, shuffle=True)
+
+
+def test_input_3d(tmp_path):
+    """
+    Test calculation of input statistics for 3D input.
+    """
+    data_loader = data_loader_3d(256, 4)
+
+    input_layer = InputLayer("x", n_features=4, model_path=tmp_path)
+    for x, y in data_loader:
+        input_layer(x)
+    stats_1 = input_layer.compute_stats()
+
+    input_layer = InputLayer("x", n_features=4, model_path=tmp_path)
+    for x, y in data_loader:
+        mask = torch.rand(*x.shape) < 0.5
+        x[mask] = torch.nan
+        input_layer(x)
+
+    stats_2 = input_layer.compute_stats()
+
+    assert np.isclose(stats_1["std_dev"], stats_2["std_dev"], rtol=0.05).all()
+
+
+def test_hist_3d(tmp_path):
+    """
+    Test calculation of histograms for 3D (spectral + spatial) input data and
+    ensure that:
+        - The number of bin arrays matches the number of input channels of the
+          data.
+    """
+    data_loader = data_loader_3d(256, 4)
+
+    input_layer = InputLayer("x", n_features=4, model_path=tmp_path)
+    for x, y in data_loader:
+        input_layer(x)
+    input_layer.epoch_finished()
+
+    for x, y in data_loader:
+        input_layer(x)
+    input_layer.epoch_finished()
+
+    assert len(input_layer.bins) == input_layer.n_features
+
+
+def test_normalization_3d(tmp_path):
+    """
+    Perform EDA on synthetic dataset and use input layers to normalize inputs.
+    Ensure that:
+        - Mean and std. dev. of standardized inputs are close to 0
+          and 1, respectively.
+        - Minimum and maximum of min-max normalized inputs are close to -1.0
+          and 1.0, respectively.
+    """
+    data_loader = data_loader_3d(256, 8)
+
+    input_layer_1 = StandardizationLayer(
+        "x", n_features=4, model_path=tmp_path, kind="standardize"
+    )
+    for x, y in data_loader:
+        input_layer_1(x)
+    input_layer_1.epoch_finished()
+    for x, y in data_loader:
+        input_layer_1(x)
+    input_layer_1.epoch_finished()
+
+    # Standardization
+    input_layer_2 = StandardizationLayer("x", n_features=4, model_path=None)
+    for x, y in data_loader:
+        x = input_layer_1(x)
+        input_layer_2(x)
+    input_layer_2.epoch_finished()
+
+    stats = input_layer_2.compute_stats()
+    assert (np.isclose(stats["mean"], 0.0, atol=1e-2)).all()
+    assert (np.isclose(stats["std_dev"], 1.0, atol=1e-2)).all()
+
+    # Min-max normalization
+    input_layer_2 = StandardizationLayer("x", n_features=4, model_path=None)
+    input_layer_1.kind = "minmax"
+    for x, y in data_loader:
+        x = input_layer_1(x)
+        input_layer_2(x)
+    input_layer_2.epoch_finished()
+
+    stats = input_layer_2.compute_stats()
+    assert (np.isclose(stats["min"], -1.0, atol=1e-2)).all()
+    assert (np.isclose(stats["max"], 1.0, atol=1e-2)).all()
