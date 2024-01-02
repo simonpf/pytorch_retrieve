@@ -21,7 +21,9 @@ classifiers = [
 dependencies = [
     "pyyaml",
     "toml",
-    "pytest"
+    "pytest",
+    "pytorch",
+    "lightning"
 ]
 dynamic = ["version"]
 
