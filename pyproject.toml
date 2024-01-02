@@ -24,6 +24,8 @@ dependencies = [
     "pytest",
     "torch",
     "lightning",
+    "scipy",
+    "numpy",
     "xarray"
 ]
 dynamic = ["version"]
