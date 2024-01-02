@@ -22,8 +22,9 @@ dependencies = [
     "pyyaml",
     "toml",
     "pytest",
-    "pytorch",
-    "lightning"
+    "torch",
+    "lightning",
+    "xarray"
 ]
 dynamic = ["version"]
 
