@@ -9,6 +9,7 @@ from pytorch_retrieve.utils import (
     read_training_config,
     read_compute_config,
     find_most_recent_checkpoint,
+    update_recursive,
 )
 
 
@@ -153,3 +154,36 @@ def test_find_most_recent_checkpoint(tmp_path):
     (ckpt_path / "retrieval_model-v1.ckpt").touch()
     ckpt = find_most_recent_checkpoint(ckpt_path, "retrieval_model")
     assert ckpt.name == "retrieval_model-v1.ckpt"
+
+
+def test_update_recursive():
+    """
+    Ensure that update_recursive:
+      - Correctly replaces keys in 'dest' that are in 'src'.
+      - Includes keys present in 'src' but not in 'dest'.
+
+    """
+
+    dest = {"a": 0, "b": 1}
+    src = {
+        "b": 2,
+        "c": 3,
+    }
+    res = update_recursive(dest, src)
+    assert res["b"] == 2
+    assert "c" in res
+
+    dest = {"a": 0, "b": 1, "c": {"a": 0}}
+    src = {
+        "b": 2,
+        "c": 3,
+    }
+    res = update_recursive(dest, src)
+    assert res["c"] == 3
+
+    src = {
+        "b": 2,
+        "c": {"a": 1},
+    }
+    res = update_recursive(dest, src)
+    assert res["c"]["a"] == 1

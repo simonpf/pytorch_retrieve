@@ -7,7 +7,7 @@ Shared utility functions.
 import logging
 from pathlib import Path
 import re
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import numpy as np
 
@@ -189,3 +189,26 @@ def find_most_recent_checkpoint(path: Path, model_name: str) -> Path:
             versions.append(int(match.group(1)[2:]))
     ind = np.argmax(versions)
     return checkpoint_files[ind]
+
+
+def update_recursive(dest: Dict[Any, Any], src: Dict[Any, Any]) -> Dict[Any, Any]:
+    """
+    Recursively update content in dictionary.
+
+    Args:
+        dest: The dictionary to update.
+        src: The keys to update.
+
+    Return:
+        An updated dictionary
+    """
+    res = {key: value for key, value in src.items() if key not in dest}
+    for key, value in dest.items():
+        if key in src:
+            if isinstance(value, dict) and isinstance(src[key], dict):
+                res[key] = update_recursive(dest[key], src[key])
+            else:
+                res[key] = src[key]
+        else:
+            res[key] = value
+    return res
