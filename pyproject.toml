@@ -3,17 +3,17 @@ requires = ["setuptools", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "probreg"
+name = "pytorch_retrieve"
 authors = [
     {name = "Simon Pfreundschuh", email = "simon.pfreundschuh@colostate.edu"},
 ]
 description = """
-Neural-network-based probabilistic regression for the busy
-remote sensing scientist.
+A framework for building remote sensing retrievals based on PyTorch and
+PyTorch lightning.
 """
 readme = "README.md"
 requires-python = ">=3.7"
-keywords = ["machine learning", "remote sensing"]
+keywords = ["PyTorch", "machine learning", "remote sensing", "satellite"]
 license = {text = "BSD-3-Clause"}
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -25,3 +25,8 @@ dependencies = [
 ]
 dynamic = ["version"]
 
+[project.scripts]
+"pytorch_retrieve" = "pytorch_retrieve.cli:pytorch_retrieve"
+
+[tool.setuptools]
+packages = ["pytorch_retrieve"]
