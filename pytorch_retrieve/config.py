@@ -52,7 +52,7 @@ def read_config_file(path: Path) -> dict:
     return config
 
 
-def get_config_attr(name, constr, config, what, default=None):
+def get_config_attr(name, constr, config, what, default=None, required=False):
     """
     Get attribute from config dict or raise appropriate runtime error.
 
@@ -64,12 +64,14 @@ def get_config_attr(name, constr, config, what, default=None):
         what: The name of the instance that is being configured.
         default: If default is not 'None', it will be returned if 'config' does
             not contain the key 'name' instead of raising a RuntimeError.
+        required: If 'True', a RuntimeError will be raised if 'config' does not
+            contain an entry 'name'.
 
     Return:
         If the key 'name' is present in 'config', returns the
         ``constr(config[name])``. Otherwise, 'default' is returned.
     """
-    if default is None and name not in config:
+    if required and name not in config:
         raise RuntimeError(
             f"Expected entry '{name}' in config '{what}' "
             f" but no such attribute is present."
