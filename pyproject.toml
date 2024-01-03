@@ -27,7 +27,8 @@ dependencies = [
     "lightning",
     "scipy",
     "numpy",
-    "xarray"
+    "xarray",
+    "tensorboard",
 ]
 dynamic = ["version"]
 
