@@ -7,6 +7,7 @@ from torch.optim.lr_scheduler import LRScheduler
 from torch import nn
 from torchmetrics import Metric
 import lightning as L
+from lightning.pytorch import loggers
 
 from pytorch_retrieve.tensors.masked_tensor import MaskedTensor
 from pytorch_retrieve.metrics import ScalarMetric
@@ -25,7 +26,7 @@ class LightningRetrieval(L.LightningModule):
         model: nn.Module,
         name: Optional[str] = None,
         training_schedule: Dict[str, "TrainingConfig"] = None,
-        log_dir: Optional[Path] = None,
+        model_dir: Optional[Path] = None,
         logger: Optional[Callable[[Path, str], L.pytorch.loggers.Logger]] = None,
     ):
         """
@@ -51,12 +52,12 @@ class LightningRetrieval(L.LightningModule):
 
         self.stage = 0
 
-        if log_dir is None:
-            log_dir = Path(".")
-        self.log_dir = log_dir
-        self.log_dir = Path(self.log_dir)
+        if model_dir is None:
+            model_dir = Path(".")
+        self.model_dir = model_dir
+        self.log_dir = Path(model_dir) / "logs"
         if logger is None:
-            logger = L.pytorch.loggers.TensorBoardLogger
+            logger = loggers.TensorBoardLogger
         self.logger_class = logger
 
     @property
@@ -64,14 +65,6 @@ class LightningRetrieval(L.LightningModule):
         if self.training_schedule is None:
             return self.stage > 0
         return self.stage >= len(self.training_schedule)
-
-    @property
-    def tensorboard(self):
-        if self._tensorboard is None:
-            self._tensorboard = pl.loggers.TensorBoardLogger(
-                self.log_dir, name=self.name + f" ({self.stage_name})"
-            )
-        return self._tensorboard
 
     @property
     def stage(self) -> int:
@@ -329,7 +322,6 @@ class LightningRetrieval(L.LightningModule):
         self.log_dict(log_dict)
         self.log("Validation loss", tot_loss)
 
-    @L.pytorch.utilities.rank_zero_only
     def on_validation_epoch_end(self):
         for output_name, metrics in self.metrics.items():
             for metric in metrics:
@@ -341,53 +333,10 @@ class LightningRetrieval(L.LightningModule):
                 )
                 metric.reset()
 
-    #     validation_step_output = self.validation_step_outputs
-
-    #     i_epoch = self.trainer.current_epoch
-    #     writer = self.tensorboard.experiment
-
-    #     # if self.trainer.is_global_zero:
-
-    #     figures = {}
-    #     values = {}
-
-    #     for metric in self.metrics:
-    #         # Log values.
-    #         if hasattr(metric, "get_values"):
-    #             m_values = metric.get_values()
-    #             if isinstance(m_values, dict):
-    #                 m_values = {
-    #                     f"{metric.name} ({key})": value
-    #                     for key, value in m_values.items()
-    #                 }
-    #             else:
-    #                 m_values = {metric.name: m_values}
-
-    #             values.update(m_values)
-
-    #         # Log figures.
-    #         if hasattr(metric, "get_figures"):
-    #             m_figures = metric.get_figures()
-    #             if isinstance(m_figures, dict):
-    #                 m_figures = {
-    #                     f"{metric.name} ({key})": value
-    #                     for key, value in m_figures.items()
-    #                 }
-    #             else:
-    #                 m_figures = {metric.name: m_figures}
-    #             figures.update(m_figures)
-
-    #     for key, value in values.items():
-    #         if isinstance(value, np.ndarray):
-    #             values[key] = value.item()
-
-    #     log_scalar = writer.add_scalar
-    #     for key, value in values.items():
-    #         log_scalar(key, value, i_epoch)
-
-    #     log_image = writer.add_figure
-    #     for key, value in figures.items():
-    #         log_image(key, value, i_epoch)
+        self.log(
+            "Learning rate",
+            self.trainer.optimizers[0].param_groups[0]["lr"],
+        )
 
     def configure_optimizers(self):
         if self.training_schedule is None:
@@ -397,9 +346,7 @@ class LightningRetrieval(L.LightningModule):
         curr_config = self.current_training_config
         curr_name = self.stage_name
 
-        optimizer, scheduler, _ = curr_config.get_optimizer_and_scheduler(
-            curr_name, self
-        )
+        optimizer, scheduler = curr_config.get_optimizer_and_scheduler(curr_name, self)
 
         conf = {"optimizer": optimizer}
         if scheduler is None:
@@ -423,6 +370,15 @@ class LightningRetrieval(L.LightningModule):
         training_config = self.current_training_config
         trainer.fit()
 
+    @property
+    def current_logger(self):
+        logger = self.logger_class(
+            save_dir=self.log_dir,
+            name=self.name,
+            version=self.stage_name,
+        )
+        return logger
+
     def on_fit_end(self):
         self._tensorboard = None
         self.stage += 1
@@ -438,48 +394,3 @@ class LightningRetrieval(L.LightningModule):
         Hook used load store 'stage' attribute from checkpoint.
         """
         self.stage = checkpoint["stage"]
-
-
-# class QuantnnLightning(L.LightningModule):
-#     """
-#     Pytorch Lightning module for quantnn pytorch models.
-#     """
-
-#     def __init__(
-#         self,
-#         qrnn,
-#         loss,
-#         name=None,
-#         optimizer=None,
-#         scheduler=None,
-#         metrics=None,
-#         mask=None,
-#         transformation=None,
-#         log_dir=None,
-#     ):
-#         super().__init__()
-#         self.validation_step_outputs = []
-#         self.qrnn = qrnn
-#         self.model = qrnn.model
-#         self.loss = loss
-#         self._stage = 0
-#         self._stage_name = None
-
-#         self.optimizer = optimizer
-#         self.current_optimizer = None
-#         self.scheduler = scheduler
-
-#         self.metrics = metrics
-#         if self.metrics is None:
-#             self.metrics = []
-#         for metric in self.metrics:
-#             metric.model = self.qrnn
-#             metric.mask = mask
-
-#         self.transformation = transformation
-
-#         if log_dir is None:
-#             log_dir = "lightning_logs"
-#         self.log_dir = log_dir
-#         self.name = name
-#         self._tensorboard = None
