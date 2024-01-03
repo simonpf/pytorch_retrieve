@@ -31,7 +31,7 @@ def run_training(model: nn.Module) -> None:
 
     """
     with TemporaryDirectory() as tmp:
-        mod = LightningRetrieval(model, log_dir=Path(tmp))
+        mod = LightningRetrieval(model, model_dir=Path(tmp))
         data_loader = data_loader_1d(256, 32)
         trainer = L.Trainer(max_epochs=1)
         trainer.fit(mod, train_dataloaders=data_loader)

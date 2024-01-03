@@ -84,9 +84,7 @@ def test_get_optimizer_and_scheduler(model_config_file, training_config_file):
     schedule = parse_training_config(read_config_file(training_config_file))
     model = load_and_compile_model(model_config_file)
     config = schedule["warm_up"]
-    optimizer, scheduler, callbacks = config.get_optimizer_and_scheduler(
-        "warm_up", model
-    )
+    optimizer, scheduler = config.get_optimizer_and_scheduler("warm_up", model)
 
 
 def test_get_metrics_dict(model_config_file, training_config_file):
@@ -108,7 +106,7 @@ def test_training(model_config_file, training_config_file, tmp_path):
     """
     model = load_and_compile_model(model_config_file)
     schedule = parse_training_config(read_config_file(training_config_file))
-    module = LightningRetrieval(model, training_schedule=schedule)
+    module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
     module.current_training_config
     run_training(tmp_path, module, None)
 

@@ -1,3 +1,8 @@
+"""
+pytorch_retrieve.lightning
+
+"""
+import copy
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Union
 
@@ -345,6 +350,12 @@ class LightningRetrieval(L.LightningModule):
 
         curr_config = self.current_training_config
         curr_name = self.stage_name
+
+        # If set, use 'lr' attribute. This is done to support the automatic
+        # LR search provided by Lightning.
+        if hasattr(self, "lr"):
+            curr_config = copy.copy(curr_config)
+            curr_config.optimizer_kwargs["lr"] = self.lr
 
         optimizer, scheduler = curr_config.get_optimizer_and_scheduler(curr_name, self)
 
