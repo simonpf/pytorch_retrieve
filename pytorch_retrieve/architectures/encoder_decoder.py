@@ -9,7 +9,8 @@ input data. The architecture supports multiple inputs at potentially different
 resolutions and multiple outputs.
 """
 from dataclasses import dataclass, asdict
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import nn
@@ -34,7 +35,8 @@ from pytorch_retrieve.modules.activation import get_activation_factory
 from pytorch_retrieve.modules.normalization import get_normalization_factory
 from pytorch_retrieve.modules.output import Mean
 from pytorch_retrieve.architectures.model import RetrievalModel
-from pytorch_retrieve.config import InputConfig, OutputConfig
+from pytorch_retrieve.config import InputConfig, OutputConfig, read_config_file
+from pytorch_retrieve.utils import update_recursive
 
 
 def get_block_factory(name: str) -> Callable[[int, int], nn.Module]:
@@ -163,7 +165,7 @@ class StemConfig:
         input_name: str,
         input_config: InputConfig,
         config_dict: Dict[str, Any],
-    ) -> StemConfig:
+    ) -> "StemConfig":
         """
         Parse stem configuration from configuration dict.
 
@@ -721,9 +723,19 @@ class EncoderDecoder(RetrievalModel):
             config_dict: A configuration dictionary defining the configuration of
                  the encoder-decoder architecture.
         """
+
         input_config = get_config_attr("input", dict, config_dict, "model config")
         output_config = get_config_attr("output", dict, config_dict, "model config")
+
         arch_config = get_config_attr("architecture", dict, config_dict, "model config")
+        preset = get_config_attr("preset", str, arch_config, "architecture", "none")
+        if preset != "none":
+            preset_file = Path(__file__).parent / "presets" / f"{preset}.toml"
+            if not preset_file.exists():
+                raise RuntimeError(f"The preset configuration {preset} does not exist.")
+            preset = read_config_file(preset_file)
+            arch_config = update_recursive(preset, arch_config)
+
         input_cfgs = {
             name: InputConfig.parse(name, cfg) for name, cfg in input_config.items()
         }
