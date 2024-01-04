@@ -459,6 +459,8 @@ def cli(
     module = LightningRetrieval(retrieval_model, "retrieval_module", training_schedule)
 
     compute_config = read_compute_config(LOGGER, model_path, compute_config)
+    if compute_config is not None:
+        compute_config = ComputeConfig.parse(compute_config)
 
     checkpoint = None
     if resume:

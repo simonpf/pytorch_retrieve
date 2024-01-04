@@ -175,6 +175,21 @@ class ComputeConfig:
     devices: Union[List[int]] = -1
     strategy: str = "ddp"
 
+    @classmethod
+    def parse(cls, cfg):
+        precision = get_config_attr(
+            "precision", str, cfg, f"compute config", "16-mixed"
+        )
+        accelerator = get_config_attr("acclerator", str, cfg, f"compute config", "cuda")
+        devices = get_config_attr("devices", list, cfg, f"compute config", None)
+        strategy = get_config_attr("strategy", str, cfg, f"compute config", "ddp")
+        return ComputeConfig(
+            precision=precision,
+            accelerator=accelerator,
+            devices=devices,
+            strategy=strategy,
+        )
+
     def __init__(
         self, precision="16-mixed", accelerator=None, devices=None, strategy="auto"
     ):
