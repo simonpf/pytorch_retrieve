@@ -48,6 +48,8 @@ def run_eda(
     # First epoch
     for x, y in training_loader:
         for name, mod in input_modules.items():
+            if not isinstance(x, dict):
+                x = {name: x}
             mod(x[name])
     for mod in input_modules.values():
         mod.epoch_finished()
@@ -55,6 +57,8 @@ def run_eda(
     # Second epoch
     for x, y in training_loader:
         for name, mod in input_modules.items():
+            if not isinstance(x, dict):
+                x = {name: x}
             mod(x[name])
     for mod in input_modules.values():
         mod.epoch_finished()
