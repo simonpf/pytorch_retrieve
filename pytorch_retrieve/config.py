@@ -180,7 +180,9 @@ class ComputeConfig:
         precision = get_config_attr(
             "precision", str, cfg, f"compute config", "16-mixed"
         )
-        accelerator = get_config_attr("acclerator", str, cfg, f"compute config", "cuda")
+        accelerator = get_config_attr(
+            "accelerator", str, cfg, f"compute config", "cuda"
+        )
         devices = get_config_attr("devices", list, cfg, f"compute config", None)
         strategy = get_config_attr("strategy", str, cfg, f"compute config", "ddp")
         return ComputeConfig(
