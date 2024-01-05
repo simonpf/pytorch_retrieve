@@ -7,7 +7,10 @@ encoder-decoder architecture.
 """
 from typing import Callable, Optional, Tuple, Union
 
+import torch
 from torch import nn
+
+from pytorch_retrieve.modules.utils import NoNorm
 
 
 class DownsamplingFactoryBase(nn.Module):
@@ -36,15 +39,17 @@ class DownsamplingFactoryBase(nn.Module):
         in_channels: int,
         out_channels: int,
         downsampling_factor: Union[int, Tuple[int, int]],
-    ):
+    ) -> nn.Module:
         """
         Create downsampling module.
 
         Args:
             in_channels: The number of channels in the input.
             out_channels: The number of channels in the output.
-            downsampling_factory:
+            downsampling_factor: The degree of downsampling to apply.
 
+        Return:
+            The downsampling module.
         """
         blocks = []
         if in_channels != out_channels:
@@ -57,7 +62,7 @@ class DownsamplingFactoryBase(nn.Module):
             )
         )
         if self.normalization_factory is not None:
-            blocks.append(normalization_factory(out_channels))
+            blocks.append(self.normalization_factory(out_channels))
 
         return nn.Sequential(*blocks)
 
@@ -82,3 +87,61 @@ class AvgPool2d(DownsamplingFactoryBase):
         self, normalization_factory: Optional[Callable[[int], nn.Module]] = None
     ):
         super().__init__(nn.AvgPool2d, normalization_factory=normalization_factory)
+
+
+class Space2DepthModule(nn.Module):
+    def __init__(self, downsampling_factor):
+        super().__init__()
+        self.downsampling_factor = downsampling_factor
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+            Downsample tensor by transforming spatial features to channels.
+
+        Args:
+            x: The input tensor to downsample.
+            downsampling_factor: The factor by which to decrease the spatial dimensions.
+
+        Return:
+            A spatially-downsampled tensor with the number of channels increased by
+            the square of the downsampling factor.
+        """
+        x = x.contiguous()
+        in_shape = x.shape
+        new_shape = list(in_shape)
+        new_shape[-1] //= self.downsampling_factor
+        new_shape[-2] //= self.downsampling_factor
+        new_shape.insert(-1, self.downsampling_factor)
+        new_shape.append(self.downsampling_factor)
+        x = x.reshape(new_shape)
+        out_shape = (
+            in_shape[0],
+            -1,
+            in_shape[2] // self.downsampling_factor,
+            in_shape[3] // self.downsampling_factor,
+        )
+        x = x.permute((0, 1, 3, 5, 2, 4)).reshape(out_shape)
+        return x
+
+
+class Space2Depth:
+    def __init__(
+        self, normalization_factory: Optional[Callable[[int], nn.Module]] = None
+    ):
+        """
+        Args:
+            down: The degree of downsampling to apply.
+        """
+        self.normalization_factory = normalization_factory
+
+    def __call__(self, in_channels: int, out_channels: int, downsampling_factor: int):
+        down_channels = in_channels * downsampling_factor**2
+        if down_channels == out_channels:
+            return Space2DepthModule(downsampling_factor=downsampling_factor)
+        blocks = [
+            Space2DepthModule(downsampling_factor=downsampling_factor),
+            nn.Conv2d(down_channels, out_channels, kernel_size=1),
+        ]
+        if self.normalization_factory is not None:
+            blocks.append(self.normalization_factory(out_channels))
+        return nn.Sequential(*blocks)
