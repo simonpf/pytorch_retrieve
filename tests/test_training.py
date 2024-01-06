@@ -1,11 +1,18 @@
 """
 Tests for the pytorch_retrieve.training module.
 """
+import os
+
 import pytest
 import torch
+import toml
 from typing import List
 
-from pytorch_retrieve.training import parse_training_config, run_training
+from pytorch_retrieve.training import (
+    TrainingConfig,
+    parse_training_config,
+    run_training,
+)
 from pytorch_retrieve.architectures import load_and_compile_model
 from pytorch_retrieve.lightning import LightningRetrieval
 from pytorch_retrieve.config import read_config_file
@@ -62,6 +69,27 @@ def training_config_file(tmp_path):
     with open(output_path, "w") as output:
         output.write(TRAINING_CONFIG)
     return output_path
+
+
+def test_variable_replacement(monkeypatch):
+    """
+    Ensure that environment variables in 'training_data_args' and
+    'validation_data_args' are replace correctly.
+    """
+    monkeypatch.setattr(os, "environ", {"PATH": "TEST"})
+    config_dict = toml.loads(
+        """
+        [warm_up]
+        dataset_module = "pytorch_retrieve.data.synthetic"
+        training_dataset = "Synthetic1D"
+        training_dataset_args = {"path" = "ENV::{PATH}"}
+        validation_dataset_args = {"path" = "ENV::{PATH}"}
+        n_epochs = 10
+        """
+    )
+    training_config = TrainingConfig.parse("warm_up", config_dict["warm_up"])
+    assert training_config.training_dataset_args["path"] == "TEST"
+    assert training_config.validation_dataset_args["path"] == "TEST"
 
 
 def test_get_training_dataset(training_config_file):

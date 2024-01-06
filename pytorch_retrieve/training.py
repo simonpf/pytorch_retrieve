@@ -19,7 +19,12 @@ from torch.utils.data import DataLoader
 from lightning.pytorch import callbacks
 
 from pytorch_retrieve import metrics
-from pytorch_retrieve.config import read_config_file, get_config_attr, ComputeConfig
+from pytorch_retrieve.config import (
+    read_config_file,
+    replace_environment_variables,
+    get_config_attr,
+    ComputeConfig,
+)
 from pytorch_retrieve.architectures import compile_architecture
 from pytorch_retrieve.utils import (
     read_model_config,
@@ -241,14 +246,26 @@ class TrainingConfig(TrainingConfigBase):
             A TrainingConfig object containing the settings from the dictionary.
         """
         dataset_module = get_config_attr(
-            "dataset_module", str, config_dict, f"training stage {name}"
+            "dataset_module",
+            str,
+            config_dict,
+            f"training stage {name}",
         )
         training_dataset = get_config_attr(
-            "training_dataset", str, config_dict, f"training stage {name}"
+            "training_dataset",
+            str,
+            config_dict,
+            f"training stage {name}",
+            required=True,
         )
         training_dataset_args = get_config_attr(
             "training_dataset_args", dict, config_dict, f"training stage {name}"
         )
+        if training_dataset_args is not None:
+            training_dataset_args = {
+                name: replace_environment_variables(val)
+                for name, val in training_dataset_args.items()
+            }
         validation_dataset = get_config_attr(
             "validation_dataset",
             str,
@@ -261,9 +278,14 @@ class TrainingConfig(TrainingConfigBase):
         )
         if validation_dataset_args == "":
             validation_dataset_args = None
+        if isinstance(validation_dataset_args, dict):
+            validation_dataset_args = {
+                name: replace_environment_variables(val)
+                for name, val in validation_dataset_args.items()
+            }
 
         n_epochs = get_config_attr(
-            "n_epochs", int, config_dict, f"training stage {name}"
+            "n_epochs", int, config_dict, f"training stage {name}", required=True
         )
         batch_size = get_config_attr(
             "batch_size", int, config_dict, f"training stage {name}"
