@@ -2,13 +2,55 @@
 Tests for the pytorch_retrieve.config module.
 =============================================
 """
-
+import os
 
 import yaml
 import toml
 
+from pytorch_retrieve.config import (
+    replace_environment_variables,
+    get_config_attr,
+    read_config_file,
+    InputConfig,
+    OutputConfig,
+)
 
-from pytorch_retrieve.config import read_config_file, InputConfig, OutputConfig
+
+def test_replace_environment_variables():
+    """
+    Tests replacement of environment variables in string starting with
+    "ENV::".
+    """
+    os.environ["PYTORCH_RETRIEVE"] = "TEST"
+    string = replace_environment_variables("{PYTORCH_RETRIEVE}")
+    assert string == "{PYTORCH_RETRIEVE}"
+    string = replace_environment_variables("ENV::{PYTORCH_RETRIEVE}")
+    assert string == "TEST"
+    string = replace_environment_variables(1)
+    assert string == 1
+
+
+def test_get_config_attr():
+    """
+    Test extraction of attributes from configuration dicts.
+    """
+    config = {
+        "a": "a",
+        "b": 1,
+        "c": [1, 2, 3],
+    }
+
+    a = get_config_attr("a", str, config, "test")
+    assert a == "a"
+
+    b = get_config_attr("b", int, config, "test")
+    assert b == 1
+
+    c = get_config_attr("c", list, config, "test")
+    assert isinstance(c, list)
+
+    d = get_config_attr("d", str, config, "test", "d")
+    assert d == "d"
 
 
 def test_read_config_file(tmp_path):

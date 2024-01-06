@@ -6,8 +6,9 @@ The 'pytorch_retrieve.config' module implements functionality for
  reading configuration files.
 """
 from dataclasses import dataclass, asdict
+import os
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 
 import lightning as L
 from lightning.pytorch import strategies
@@ -52,16 +53,41 @@ def read_config_file(path: Path) -> dict:
     return config
 
 
+def replace_environment_variables(attr: Any) -> Any:
+    """
+    Replaces environment variables in string if string starts with 'ENV::'.
+
+    Args:
+        attr: Any attribute extracted from a configuration file.
+
+    Return:
+        If 'attr' is a string and startswith "ENV::" then the remainder from
+        the string is extracted and formatted using current environment variables
+        as keys.
+    """
+    if isinstance(attr, str) and attr.startswith("ENV::"):
+        attr = attr[5:].format(**os.environ)
+    return attr
+
+
 def get_config_attr(name, constr, config, what, default=None, required=False):
     """
     Get attribute from config dict or raise appropriate runtime error.
 
+    This function also provides special treatment of strings. If an attribute
+    is a string and starts with 'ENV::', the remainder of the string is
+    extracted and formatted using currently set environment variables.
+    For example, 'ENV::{PATH}' will be replaced to '/home/user' if the
+    'PATH' environment variable is set to '/home/user'.
+
     Args:
         name: The name of the attribute to read from the config.
         constr: A constructor functional to convert the original attribute
-            value the expected type.
+            value to the expected type.
         config: A dictionary containing the configuration.
-        what: The name of the instance that is being configured.
+        what: The name of the instance that is being configured. Will be used
+            in the error message if the attribute isn't present or can't be
+            constructed.
         default: If default is not 'None', it will be returned if 'config' does
             not contain the key 'name' instead of raising a RuntimeError.
         required: If 'True', a RuntimeError will be raised if 'config' does not
@@ -70,6 +96,12 @@ def get_config_attr(name, constr, config, what, default=None, required=False):
     Return:
         If the key 'name' is present in 'config', returns the
         ``constr(config[name])``. Otherwise, 'default' is returned.
+
+    Raises:
+        - RuntimeError if 'required' is True but the attribute is not
+          present in config.
+        - RuntimeError if the application of 'constr' fails.
+
     """
     if required and name not in config:
         raise RuntimeError(
@@ -79,7 +111,8 @@ def get_config_attr(name, constr, config, what, default=None, required=False):
     if name not in config:
         return default
     try:
-        attr = constr(config.get(name))
+        attr = replace_environment_variables(config.get(name))
+        attr = constr(attr)
     except ValueError:
         raise RuntimeError(
             f"Error during parsing of attribute '{name}' of the config for "
