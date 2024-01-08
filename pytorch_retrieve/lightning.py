@@ -424,7 +424,7 @@ class LightningRetrieval(L.LightningModule):
                     pred_k = pred_k.expected_value()
                     for metric in scalar_metrics:
                         metric = metric.to(device=pred_k.device)
-                        metric.update(pred_k, target_)
+                        metric.update(pred_k, target_k)
 
         log_dict = {}
         for name, loss in losses.items():
