@@ -68,4 +68,4 @@ def test_compile_metnet_config():
     }
     x["lead_times"] = [np.timedelta64(15 * 60, "s"), np.timedelta64(30 * 50, "s")]
     y = metnet(x)
-    assert len(y) == 2
+    assert len(y["precip_rate"]) == 2

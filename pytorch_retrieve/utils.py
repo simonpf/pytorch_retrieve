@@ -136,7 +136,7 @@ def read_compute_config(
         compute_config = list(model_path.glob("compute.????"))
 
         if len(compute_config) == 0:
-            return ComputeConfig()
+            return {}
 
         if len(compute_config) > 1:
             logger.error(

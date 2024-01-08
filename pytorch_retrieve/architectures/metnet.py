@@ -450,7 +450,7 @@ class MetNet(nn.Module):
         if lead_times is None:
             raise RuntimeError("MetNet model requires lead times as input.")
 
-        preds = []
+        preds = {}
         for lead_time in lead_times:
             time_ind = max(int(lead_time / self.time_step - 1), 0)
             lead_time_1h = nn.functional.one_hot(torch.tensor(time_ind), self.max_steps)
@@ -467,6 +467,7 @@ class MetNet(nn.Module):
             )
 
             pred = self.spatial_aggregator(enc[-1])
-            preds.append({name: head(pred) for name, head in self.heads.items()})
+            for name, head in self.heads.items():
+                preds.setdefault(name, []).append(head(pred))
 
         return preds

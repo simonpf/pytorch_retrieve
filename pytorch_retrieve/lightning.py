@@ -146,6 +146,17 @@ class LightningRetrieval(L.LightningModule):
                     " be associated with."
                 )
             target = next(iter(target.values()))
+
+        if isinstance(pred, list):
+            if not isinstance(target, list):
+                raise RuntimeError(
+                    "Model predicts a sequence but the reference data is not."
+                )
+            loss = torch.tensor(0.0)
+            for pred_s, target_s in zip(pred, target):
+                loss += pred_s.loss(target_s)
+            return loss
+
         loss = pred.loss(target)
         return loss
 
@@ -191,14 +202,36 @@ class LightningRetrieval(L.LightningModule):
         tot_loss = 0.0
         for name in pred:
             key = name.split("::")[-1]
-            y_t = target[key]
-            mask = torch.isnan(y_t)
-            if mask.any():
-                y_t = torch.nan_to_num(y_t, 0.0)
-                y_t = MaskedTensor(y_t, mask=mask)
-            loss_k = pred[name].loss(y_t)
-            tot_loss += loss_k
-            losses[name] = loss_k.item()
+
+            pred_k = pred[key]
+            target_k = target[key]
+
+            if isinstance(pred_k, list):
+                if not isinstance(target_k, list):
+                    raise RuntimeError(
+                        "Model predicts a sequence but the reference data is not."
+                    )
+
+                losses[key] = 0.0
+                for pred_k_s, target_k_s in zip(pred_k, target_k):
+                    mask = torch.isnan(target_k_s)
+                    if mask.any():
+                        target_k_s = torch.nan_to_num(target_k_s, 0.0)
+                        target_k_s = MaskedTensor(target_k_s, mask=mask)
+
+                    loss_k_s = pred_k_s[name].loss(target_k_s)
+                    tot_loss += loss_k_s
+                    losses[name] += loss_k_s.item()
+
+            else:
+                mask = torch.isnan(target_k)
+                if mask.any():
+                    target_k = torch.nan_to_num(target_k, 0.0)
+                    target_k = MaskedTensor(target_k, mask=mask)
+
+                loss_k = pred[name].loss(target_k)
+                tot_loss += loss_k
+                losses[name] = loss_k.item()
 
         log_dict = {}
         for name, loss in losses.items():
