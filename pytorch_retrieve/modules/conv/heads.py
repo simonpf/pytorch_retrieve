@@ -45,6 +45,7 @@ class BasicConv(nn.Sequential):
                 normalization_factory=normalization_factory,
                 residual_connection=residual_connections,
             )
+            for _ in range(max(depth - 1, 0))
         ]
         head_blocks.append(nn.Conv2d(in_channels, np.prod(out_shape), kernel_size=1))
         super().__init__(*head_blocks)

@@ -1,8 +1,10 @@
 """
 Tests for preset architectures.
 """
+import numpy as np
 import toml
 import torch
+
 
 from pytorch_retrieve.architectures import compile_architecture
 
@@ -80,3 +82,32 @@ def test_resnext_s():
     x = {"x": torch.rand(1, 1, 256, 256)}
     y = model(x)
     assert y["y"].shape == (1, 1, 256, 256)
+
+
+def test_metnet_t():
+    """
+    Test the tiny MetNet architecture.
+    """
+    config_dict = toml.loads(
+        """
+        [input.x]
+        n_features = 1
+
+        [output.y]
+        kind = "Mean"
+        shape = 1
+
+        [architecture]
+        name = "MetNet"
+        preset = "metnet_t"
+        """
+    )
+
+    model = compile_architecture(config_dict)
+    x = {
+        "x": [torch.rand(1, 1, 256, 256) for i in range(4)],
+        "lead_times": [np.timedelta64(step * 30 * 60, "s") for step in range(1, 5)],
+    }
+    y = model(x)
+    assert isinstance(y["y"], list)
+    assert len(y["y"]) == 4

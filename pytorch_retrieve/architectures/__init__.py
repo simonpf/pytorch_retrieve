@@ -5,6 +5,7 @@ pytorch_retrieve.architectures
 This module defines the Architecture classes.
 """
 from pathlib import Path
+from typing import Any, Dict
 
 import torch
 from torch import nn
@@ -36,6 +37,32 @@ def compile_architecture(config_dict) -> nn.Module:
         return MetNet.from_config_dict(config_dict)
 
     raise RuntimeError(f"The architecture '{arch_name}' is currently not supported.")
+
+
+def compile_preset(
+    arch_name: str,
+    preset_name: str,
+    input_configs: Dict[str, Any],
+    output_configs: Dict[set, Any],
+) -> RetrievalModel:
+    """
+    Compile preset.
+
+    Args:
+        arch_name: The name of the architecture.
+        preset_name: The name of the preset.
+        input_configs: Configuration dicts describing the retrieval inputs.
+        output_configs: Configuration dicts describing the retrieval outputs.
+
+    Return:
+        A RetrievalModel implementing the preset.
+    """
+    config_dict = {
+        "input": input_configs,
+        "output": output_configs,
+        "architecture": {"name": arch_name, "preset": preset_name},
+    }
+    return compile_architecture(config_dict)
 
 
 def load_and_compile_model(path: Path) -> nn.Module:

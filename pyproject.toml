@@ -29,6 +29,7 @@ dependencies = [
     "numpy",
     "xarray",
     "tensorboard",
+    "axial-attention"
 ]
 dynamic = ["version"]
 
