@@ -287,6 +287,7 @@ class LightningRetrieval(L.LightningModule):
         ]
         scalar_pred = pred.expected_value()
         for metric in scalar_metrics:
+            metric = metric.to(device=scalar_pred.device)
             metric.update(scalar_pred, target)
 
         return loss
@@ -352,6 +353,7 @@ class LightningRetrieval(L.LightningModule):
                 ]
                 pred_t = pred[name].expected_value()
                 for metric in scalar_metrics:
+                    metric = metric.to(device=pred_t.device)
                     metric.update(pred_t, y_t)
 
         log_dict = {}
