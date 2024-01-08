@@ -603,7 +603,9 @@ class EncoderDecoderConfig:
                         )
 
                     config_dict = stem_config_dict["default"]
-                stem_configs[name] = StemConfig.parse(name, input_config, config_dict)
+                stem_configs[name] = StemConfig.parse(
+                    name, name, input_config, config_dict
+                )
 
         else:
             stem_configs = {

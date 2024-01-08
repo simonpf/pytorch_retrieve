@@ -19,6 +19,7 @@ from pytorch_retrieve.config import (
     read_config_file,
 )
 from pytorch_retrieve.modules import metnet
+from pytorch_retrieve.modules.input import StandardizationLayer
 from pytorch_retrieve.modules.activation import get_activation_factory
 from pytorch_retrieve.modules.conv import gru, heads
 from pytorch_retrieve.modules.normalization import get_normalization_factory
@@ -32,17 +33,20 @@ class StemConfig:
     Dataclass hodling the configuration of a MetNet stem.
     """
 
+    input_name: str
     in_channels: int
     kind: str
     center_crop: bool
+    normalize: Optional[str] = None
 
     @classmethod
-    def parse(cls, name, input_config, config_dict):
+    def parse(cls, name, input_name, input_config, config_dict):
         """
         Parse stem config.
 
         Args:
             name: The name of the section that is being parsed.
+            input_name: The name of the input corresponding to this stem.
             config_dict: The dictionary containing the configuration.
 
         Return:
@@ -55,7 +59,16 @@ class StemConfig:
         center_crop = get_config_attr(
             f"center_crop", bool, config_dict, "architecture.stem.{name}", True
         )
-        return StemConfig(in_channels=in_channels, kind=kind, center_crop=center_crop)
+        normalize = input_config.normalize
+        if normalize == "none":
+            normalize = None
+        return StemConfig(
+            input_name=input_name,
+            in_channels=in_channels,
+            kind=kind,
+            center_crop=center_crop,
+            normalize=normalize,
+        )
 
     @property
     def out_channels(self) -> int:
@@ -81,11 +94,17 @@ class StemConfig:
         """
         Compile stem to PyTorch module.
         """
-        return metnet.Stem(
-            in_channels=self.in_channels,
-            first_stage_kind=self.kind,
-            center_crop=self.center_crop,
+        blocks = []
+        if self.normalize != None:
+            blocks.append(StandardizationLayer(self.input_name, self.in_channels))
+        blocks.append(
+            metnet.Stem(
+                in_channels=self.in_channels,
+                first_stage_kind=self.kind,
+                center_crop=self.center_crop,
+            )
         )
+        return nn.Sequential(*blocks)
 
 
 @dataclass
@@ -333,7 +352,7 @@ class MetNetConfig:
         for name in input_configs:
             cfg_dict = stems.get(name, stems)
             stem_configs[name] = StemConfig.parse(
-                name if name in stems else "stem", input_configs[name], cfg_dict
+                name if name in stems else "stem", name, input_configs[name], cfg_dict
             )
 
         temporal_encoder_config = TemporalEncoderConfig.parse(
