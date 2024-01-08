@@ -1,0 +1,14 @@
+[stem]
+depth = 1
+out_channels = 64
+
+[encoder]
+channels = [64, 128, 256, 512, 512]
+stage_depths = [2, 2, 2, 2, 2]
+block_factory = "ResNeXt"
+
+
+[decoder]
+channels = [512, 256, 128, 64]
+stage_depths = [2, 2, 2, 2]
+block_factory = "ResNeXt"

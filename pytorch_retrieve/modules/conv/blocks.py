@@ -261,6 +261,7 @@ class ResNet:
         kernel_size: Optional[Union[Tuple[int, int], int]] = None,
         padding: Optional[int] = None,
         dilation: Optional[int] = None,
+        **kwargs,
     ) -> nn.Module:
         """
         Instantiate ResNet module.
@@ -354,7 +355,7 @@ class ResNeXtBlock(nn.Module, ParamCount):
             normalization_factory(out_channels // bottleneck),
             activation_factory(inplace=True),
             nn.Conv2d(
-                in_channels // bottleneck,
+                out_channels // bottleneck,
                 out_channels // bottleneck,
                 groups=cardinality,
                 kernel_size=kernel_size,
@@ -413,6 +414,7 @@ class ResNeXt:
         kernel_size: Optional[Union[Tuple[int, int], int]] = None,
         padding: Optional[int] = None,
         dilation: Optional[int] = None,
+        **kwargs,
     ) -> nn.Module:
         """
         Instantiate ResNet module.

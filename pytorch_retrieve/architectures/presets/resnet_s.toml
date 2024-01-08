@@ -1,0 +1,14 @@
+[stem]
+depth = 1
+out_channels = 32
+
+[encoder]
+channels = [32, 64, 128, 256, 512]
+stage_depths = [2, 2, 2, 2, 2]
+block_factory = "ResNet"
+
+
+[decoder]
+channels = [256, 128, 64, 32]
+stage_depths = [2, 2, 2, 2]
+block_factory = "ResNet"
