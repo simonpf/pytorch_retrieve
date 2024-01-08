@@ -488,7 +488,7 @@ class MetNet(nn.Module):
             # temporal encoder.
 
             shape = list(encs[0].shape)
-            shape[1] = lead_time_1h.numel()
+            shape[1] = self.max_steps
             lead_time_1h = torch.broadcast_to(lead_time_1h, shape)
             enc = self.temporal_encoder(
                 [torch.cat([enc, lead_time_1h], 1) for enc in encs]
