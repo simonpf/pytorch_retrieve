@@ -1,0 +1,20 @@
+time_step = 30
+forecast_range = 600
+input_size = 256
+
+[stem]
+kind = "space2depth"
+center_crop = true
+
+[temporal_encoder]
+hidden_channels = 128
+kernel_size = 3
+n_layers = 4
+
+[spatial_aggregator]
+n_channels = 128
+depth = 4
+n_heads = 4
+
+[head]
+depth = 1
