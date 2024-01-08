@@ -320,12 +320,11 @@ class MetNetConfig:
         input_size = get_config_attr(
             "input_size", int, arch_config, "architecture", required=True
         )
-        to_timedelta = lambda x: np.timedelta64(x * 60, "s")
         time_step = get_config_attr(
-            "time_step", to_timedelta, arch_config, "architecture", required=True
+            "time_step", int, arch_config, "architecture", required=True
         )
         forecast_range = get_config_attr(
-            "forecast_range", to_timedelta, arch_config, "architecture", required=True
+            "forecast_range", int, arch_config, "architecture", required=True
         )
         time_steps = int(forecast_range / time_step)
 
@@ -410,6 +409,13 @@ class MetNet(nn.Module):
         self.time_step = config.time_step
         self.forecast_range = config.forecast_range
         self.max_steps = self.forecast_range // self.time_step
+
+    @property
+    def output_names(self) -> List[str]:
+        """
+        Names of the outputs from this model.
+        """
+        return list(self.heads.keys())
 
     def encode_timestep(self, x, fstep=1):
         # Preprocess Tensor

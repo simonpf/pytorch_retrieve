@@ -86,7 +86,7 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
             pred = pred[~mask]
             target = target[~mask]
 
-        if pred.dim() > 2:
+        if pred.dim() >= 2:
             pred = pred.flatten()
             target = target.flatten()
         super().update(pred, target)

@@ -219,7 +219,7 @@ class LightningRetrieval(L.LightningModule):
                         target_k_s = torch.nan_to_num(target_k_s, 0.0)
                         target_k_s = MaskedTensor(target_k_s, mask=mask)
 
-                    loss_k_s = pred_k_s[name].loss(target_k_s)
+                    loss_k_s = pred_k_s.loss(target_k_s)
                     tot_loss += loss_k_s
                     losses[name] += loss_k_s.item()
 
@@ -246,6 +246,48 @@ class LightningRetrieval(L.LightningModule):
         self.metrics = self.current_training_config.get_metrics_dict(
             self.model.output_names
         )
+
+    def validation_step_single_sequence(
+        self, pred: List[torch.Tensor], target: Union[List[torch.Tensor], dict]
+    ) -> torch.Tensor:
+        """
+        Validation step for a sequence prediction with a single output.
+        """
+        if isinstance(target, dict):
+            if len(target) > 1:
+                raise RuntimeError(
+                    "The model prediction is a single, unnamed sequence "
+                    " but the target is a dict  with more than 1 entry. "
+                    " Therefore, it is not clear which  target element "
+                    " the predictions should be associated with."
+                )
+            target = next(iter(target.values()))
+
+        metrics = self.metrics
+        if len(metrics) > 1:
+            raise RuntimeError(
+                "Metrics for more than two outputs are defined but "
+                "the model provided only a single, unnamed output."
+            )
+            metrics = next(iter(metrics.values()))
+
+        if not isinstance(target, list):
+            raise ValueError("Prediction is a sequence but target is not.")
+
+        scalar_metrics = [
+            metric for metric in metrics if isinstance(metric, ScalarMetric)
+        ]
+
+        loss = 0.0
+        for pred_s, loss_s in zip(pred, target):
+            loss += pred_s.loss(target_)
+
+            scalar_pred = pred_s.expected_value()
+            for metric in scalar_metrics:
+                metric = metric.to(device=scalar_pred.device)
+                metric.update(scalar_pred, target_s)
+
+        return loss
 
     def validation_step_single_pred(
         self, pred: torch.Tensor, target: Union[torch.Tensor, dict]
@@ -276,7 +318,7 @@ class LightningRetrieval(L.LightningModule):
         if len(metrics) > 1:
             raise RuntimeError(
                 "Metrics for more than two outputs are defined but "
-                "the model provided only a single, non-named output."
+                "the model provided only a single, unnamed output."
             )
             metrics = next(iter(metrics.values()))
 
@@ -334,27 +376,55 @@ class LightningRetrieval(L.LightningModule):
 
         losses = {}
         tot_loss = 0.0
-        for name in pred:
+        for name, pred_k in pred.items():
             key = name.split("::")[-1]
-            y_t = target[key]
-            mask = torch.isnan(y_t)
-            if mask.any():
-                y_t = torch.nan_to_num(y_t, 0.0)
-                y_t = MaskedTensor(y_t, mask=mask)
+            target_k = target[key]
+            losses[name] = 0.0
 
-            loss_k = pred[name].loss(y_t)
-            tot_loss += loss_k
-            losses[name] = loss_k.item()
+            if isinstance(pred_k, list):
+                for pred_k_s, target_k_s in zip(pred_k, target_k):
+                    mask = torch.isnan(target_k_s)
+                    if mask.any():
+                        target_k_s = torch.nan_to_num(target_k_s, 0.0)
+                        target_k_s = MaskedTensor(target_k_s, mask=mask)
 
-            if name in metrics:
-                metrics_t = metrics[name]
-                scalar_metrics = [
-                    metric for metric in metrics_t if isinstance(metric, ScalarMetric)
-                ]
-                pred_t = pred[name].expected_value()
-                for metric in scalar_metrics:
-                    metric = metric.to(device=pred_t.device)
-                    metric.update(pred_t, y_t)
+                    loss_k_s = pred_k_s.loss(target_k_s)
+                    tot_loss += loss_k_s
+                    losses[name] += loss_k_s.item()
+
+                    if name in metrics:
+                        metrics_k = metrics[name]
+                        scalar_metrics = [
+                            metric
+                            for metric in metrics_k
+                            if isinstance(metric, ScalarMetric)
+                        ]
+                        pred_k_s = pred_k_s.expected_value()
+                        for metric in scalar_metrics:
+                            metric = metric.to(device=pred_k_s.device)
+                            metric.update(pred_k_s, target_k_s)
+
+            else:
+                mask = torch.isnan(target_k)
+                if mask.any():
+                    target_k = torch.nan_to_num(target_k, 0.0)
+                    target_k = MaskedTensor(target_k, mask=mask)
+
+                loss_k = pred_k.loss(target_k)
+                tot_loss += loss_k
+                losses[name] += loss_k.item()
+
+                if name in metrics:
+                    metrics_k = metrics[name]
+                    scalar_metrics = [
+                        metric
+                        for metric in metrics_k
+                        if isinstance(metric, ScalarMetric)
+                    ]
+                    pred_k = pred_k.expected_value()
+                    for metric in scalar_metrics:
+                        metric = metric.to(device=pred_k.device)
+                        metric.update(pred_k, target_)
 
         log_dict = {}
         for name, loss in losses.items():
