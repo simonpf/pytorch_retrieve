@@ -476,10 +476,13 @@ class MetNet(nn.Module):
             raise RuntimeError("MetNet model requires lead times as input.")
 
         preds = {}
-        for lead_time in lead_times:
-            time_ind = max(int(lead_time / self.time_step - 1), 0)
+        n_times = lead_times.shape[-1]
+        for time_ind in range(n_times):
+            time_ind = torch.floor(lead_times[:, time_ind] / self.time_step).to(
+                torch.int64
+            )
             lead_time_1h = nn.functional.one_hot(torch.tensor(time_ind), self.max_steps)
-            lead_time_1h = lead_time_1h[None, ..., None, None]
+            lead_time_1h = lead_time_1h[..., None, None]
 
             # Add 1-hot-encoded lead time to all sequence elements and apply
             # temporal encoder.
