@@ -155,6 +155,8 @@ class InputLayer(nn.Module):
 
             x_nan = torch.transpose(torch.where(x.mask, torch.nan, x.base), 1, -1)
             for ind in range(self.n_features):
+                x_nan = x_nan.to("cpu", torch.float32)
+
                 hist = self.hists.setdefault(
                     ind,
                     torch.zeros(self.n_bins, dtype=x_nan.dtype, device=x_nan.device),

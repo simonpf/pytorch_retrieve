@@ -7,22 +7,79 @@ basic statistics from datasets.
 """
 import logging
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 import click
+import lightning as L
+import torch
+from torch import nn
 
 from pytorch_retrieve.modules.input import InputLayer
-from pytorch_retrieve.config import read_config_file, InputConfig
+from pytorch_retrieve.config import read_config_file, InputConfig, ComputeConfig
 from pytorch_retrieve.training import parse_training_config, TrainingConfig
 from pytorch_retrieve.utils import read_model_config, read_training_config
 
 LOGGER = logging.getLogger(__name__)
 
 
+class EDAModule(L.LightningModule):
+    """
+    Lightning module for performing EDA on training data.
+
+    The main purpose of the lightning module is to piggy-back the distributed
+    data loading provided by pytorch to speed up the EDA.
+    """
+    def __init__(self, input_configs: Dict[str, InputConfig], model_directory: Path):
+        """
+        Args:
+            input_configs: Dictionary containing the input configurations for all
+                retrieval inputs.
+            model_directory: The directory where the retrieval artifacts will
+                stored.
+        """
+        super().__init__()
+        self.input_modules = nn.ModuleDict({
+            name: InputLayer(name, cfg.n_features, model_path=model_directory)
+            for name, cfg in input_configs.items()
+        })
+        self.params = nn.Parameter(torch.zeros(1), requires_grad=True)
+        for mod in self.input_modules.values():
+            mod.reset()
+
+    def configure_optimizers(self):
+        """
+        Dummy function required by lightning.
+        """
+        params = nn.Parameter(torch.zeros(1), requires_grad=True)
+        optimizer = torch.optim.Adam([params], lr=1e-3)
+        return optimizer
+
+    def training_step(self, batch, batch_idx):
+        """
+        This just records input data statistics for each batch.
+        """
+        inputs, outputs = batch
+
+        for name, mod in self.input_modules.items():
+            if not isinstance(inputs, dict):
+                inputs = {name: inputs}
+            mod(inputs[name])
+
+        return None
+
+    def on_train_epoch_end(self):
+        """
+        Signal the end of the epoch to all input modules.
+        """
+        for name, mod in self.input_modules.items():
+            mod.epoch_finished()
+
+
 def run_eda(
     model_directory: Path,
     input_configs: Dict[str, InputConfig],
     training_configs: Dict[str, TrainingConfig],
+    compute_config: Optional[ComputeConfig] = None
 ) -> None:
     """
     Performs EDA for given input and training configs.
@@ -36,32 +93,22 @@ def run_eda(
     """
     training_config = next(iter(training_configs.values()))
     training_loader = training_config.get_training_data_loader()
-    validation_loader = training_config.get_validation_data_loader()
 
-    input_modules = {
-        name: InputLayer(name, cfg.n_features, model_path=model_directory)
-        for name, cfg in input_configs.items()
-    }
-    for mod in input_modules.values():
-        mod.reset()
+    if compute_config is None:
+        compute_config = ComputeConfig()
 
-    # First epoch
-    for x, y in training_loader:
-        for name, mod in input_modules.items():
-            if not isinstance(x, dict):
-                x = {name: x}
-            mod(x[name])
-    for mod in input_modules.values():
-        mod.epoch_finished()
-
-    # Second epoch
-    for x, y in training_loader:
-        for name, mod in input_modules.items():
-            if not isinstance(x, dict):
-                x = {name: x}
-            mod(x[name])
-    for mod in input_modules.values():
-        mod.epoch_finished()
+    eda_module = EDAModule(input_configs, model_directory)
+    trainer = L.Trainer(
+        max_epochs=2,
+        logger=None,
+        precision=compute_config.precision,
+        accelerator=compute_config.accelerator,
+        devices=compute_config.devices,
+    )
+    trainer.fit(
+        eda_module,
+        train_dataloaders=training_loader,
+    )
 
 
 @click.option(
