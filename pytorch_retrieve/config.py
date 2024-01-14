@@ -206,7 +206,7 @@ class ComputeConfig:
     precision: str = "16-mixed"
     accelerator: str = "cuda"
     devices: Union[List[int]] = -1
-    strategy: str = "ddp"
+    strategy: str = "auto"
 
     @classmethod
     def parse(cls, cfg):
