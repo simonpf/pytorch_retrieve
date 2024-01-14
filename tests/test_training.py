@@ -141,3 +141,22 @@ def test_training(model_config_file, training_config_file, tmp_path):
     # Assert that checkpoint files are created.
     ckpts = list((tmp_path / "checkpoints").glob("*.ckpt"))
     assert len(ckpts) > 0
+
+
+def test_training_encoder_decoder(
+        encoder_decoder_model_config_file,
+        encoder_decoder_training_config_file,
+        tmp_path
+):
+    """
+    Run training on synthetic data.
+    """
+    model = load_and_compile_model(unet_model_config_file)
+    schedule = parse_training_config(read_config_file(unet_training_config_file))
+    module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+    module.current_training_config
+    run_training(tmp_path, module, None)
+
+    # Assert that checkpoint files are created.
+    ckpts = list((tmp_path / "checkpoints").glob("*.ckpt"))
+    assert len(ckpts) > 0

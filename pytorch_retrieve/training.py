@@ -15,7 +15,7 @@ import click
 import lightning as L
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, IterableDataset
 from lightning.pytorch import callbacks
 
 from pytorch_retrieve import metrics
@@ -57,12 +57,13 @@ class TrainingConfigBase:
 
     def get_training_data_loader(self):
         dataset = self.get_training_dataset()
+        shuffle = not isinstance(dataset, IterableDataset)
         worker_init_fn = None
         if hasattr(dataset, "worker_init_fn"):
             worker_init_fn = dataset.worker_init_fn
         data_loader = DataLoader(
             dataset,
-            shuffle=True,
+            shuffle=shuffle,
             worker_init_fn=worker_init_fn,
             batch_size=self.batch_size,
             num_workers=8,
@@ -97,7 +98,6 @@ class TrainingConfigBase:
             worker_init_fn = dataset.worker_init_fn
         data_loader = DataLoader(
             dataset,
-            shuffle=False,
             worker_init_fn=worker_init_fn,
             batch_size=self.batch_size,
             num_workers=8,
@@ -138,7 +138,7 @@ class TrainingConfigBase:
 
         else:
             optimizer_cls = getattr(torch.optim, self.optimizer)
-            optimizer = optimizer_cls(model.parameters(), **self.optimizer_kwargs)
+            optimizer = optimizer_cls(model.parameters(), **self.optimizer_args)
 
         scheduler = self.scheduler
         if scheduler is None:
@@ -222,7 +222,7 @@ class TrainingConfig(TrainingConfigBase):
     n_epochs: int
     batch_size: int
     optimizer: str
-    optimizer_kwargs: Optional[dict] = None
+    optimizer_args: Optional[dict] = None
     scheduler: str = None
     scheduler_args: Optional[dict] = None
     gradient_clipping: Optional[float] = None
@@ -288,14 +288,14 @@ class TrainingConfig(TrainingConfigBase):
             "n_epochs", int, config_dict, f"training stage {name}", required=True
         )
         batch_size = get_config_attr(
-            "batch_size", int, config_dict, f"training stage {name}"
+            "batch_size", int, config_dict, f"training stage {name}", 8
         )
 
         optimizer = get_config_attr(
             "optimizer", str, config_dict, f"training stage {name}"
         )
-        optimizer_kwargs = get_config_attr(
-            "optimizer_kwargs", dict, config_dict, f"training stage {name}", {}
+        optimizer_args = get_config_attr(
+            "optimizer_args", dict, config_dict, f"training stage {name}", {}
         )
 
         scheduler = get_config_attr(
@@ -342,7 +342,7 @@ class TrainingConfig(TrainingConfigBase):
             validation_dataset_args=validation_dataset_args,
             n_epochs=n_epochs,
             optimizer=optimizer,
-            optimizer_kwargs=optimizer_kwargs,
+            optimizer_args=optimizer_args,
             scheduler=scheduler,
             scheduler_args=scheduler_args,
             batch_size=batch_size,
@@ -402,6 +402,7 @@ def run_training(
             devices=compute_config.devices,
             strategy=compute_config.get_strategy(),
             callbacks=training_config.get_callbacks(module),
+            num_sanity_val_steps=0
         )
         trainer.fit(
             module,
