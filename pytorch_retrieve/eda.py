@@ -72,7 +72,7 @@ class EDAModule(L.LightningModule):
         Signal the end of the epoch to all input modules.
         """
         for name, mod in self.input_modules.items():
-            mod.epoch_finished()
+            mod.epoch_finished(self)
 
 
 def run_eda(
