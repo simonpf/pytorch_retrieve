@@ -108,9 +108,9 @@ class BodyConfig:
     @staticmethod
     def parse(config_dict: dict, exhaustive=False) -> "Body":
         hidden_channels = get_config_attr(
-            "hidden_channels", int, config_dict, "Body", None
+            "hidden_channels", int, config_dict, "Body", None, required=True
         )
-        n_layers = get_config_attr("n_layers", int, config_dict, "Body", None)
+        n_layers = get_config_attr("n_layers", int, config_dict, "Body", None, required=True)
         residual_connections = get_config_attr(
             "residual_connections", str, config_dict, "Body", "none"
         )
@@ -125,7 +125,7 @@ class BodyConfig:
             "normaliation_factory", str, config_dict, "Body", "none"
         )
         normalization_factory = get_normalization_factory(normalization_factory)
-        masked = get_config_attr("masked", bool, config_dict, "Stem", False)
+        masked = get_config_attr("masked", bool, config_dict, "Body", False)
 
         return BodyConfig(
             hidden_channels,
@@ -362,7 +362,9 @@ class MLP(ParamCount, nn.Module):
         hidden_channels = body_cfg.hidden_channels
         if isinstance(stem_cfgs, dict):
             inputs = {name: cfg.in_channels for name, cfg in stem_cfgs.items()}
-            self.stems = {name: cfg.compile() for name, cfg in stem_cfgs.items()}
+            self.stems = nn.ModuleDict({
+                name: cfg.compile() for name, cfg in stem_cfgs.items()
+            })
             if aggregator_cfg is None:
                 aggregator_cfg = AggregatorConfig()
             self.aggregator = aggregator_cfg.compile(inputs, hidden_channels)
@@ -371,10 +373,10 @@ class MLP(ParamCount, nn.Module):
 
         self.body = body_cfg.compile()
         if isinstance(output_cfgs, dict):
-            self.outputs = {
+            self.outputs = nn.ModuleDict({
                 key: output_cfg.compile(hidden_channels)
                 for key, output_cfg in output_cfgs.items()
-            }
+            })
         else:
             self.outputs = output_cfgs.compile()
 
@@ -411,7 +413,7 @@ class MLP(ParamCount, nn.Module):
         return self.config_dict
 
     def forward(self, inputs: Union[torch.Tensor, dict[str, torch.Tensor]]):
-        if isinstance(self.stems, dict):
+        if isinstance(self.stems, nn.ModuleDict):
             inputs = {
                 key: self.aggregators[key](tensor) for key, tensor in inputs.items()
             }
@@ -423,6 +425,6 @@ class MLP(ParamCount, nn.Module):
         if isinstance(outputs, tuple):
             outputs = outputs[0]
 
-        if isinstance(self.outputs, dict):
+        if isinstance(self.outputs, nn.ModuleDict):
             return {key: head(outputs) for key, head in self.outputs.items()}
         return self.outputs(outputs)
