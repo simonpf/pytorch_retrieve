@@ -332,7 +332,9 @@ class LightningRetrieval(L.LightningModule):
             metric = metric.to(device=scalar_pred.device)
             metric.update(scalar_pred, target)
 
-        other_metrics = [metric for metric in metrics if not isinstance(metric, ScalarMetric)]
+        other_metrics = [
+            metric for metric in metrics if not isinstance(metric, ScalarMetric)
+        ]
         for metric in other_metrics:
             metric = metric.to(device=scalar_pred.device)
             metric.update(pred, target)
@@ -389,18 +391,18 @@ class LightningRetrieval(L.LightningModule):
             # Determine scalar metrics for this outout
             metrics_k = metrics.get(name, [])
             scalar_metrics = [
-                metric
-                for metric in metrics_k
-                if isinstance(metric, ScalarMetric)
+                metric for metric in metrics_k if isinstance(metric, ScalarMetric)
             ]
             # Other metrics
-            other_metrics = [metric for metric in metrics_k if not isinstance(metric, ScalarMetric)]
+            other_metrics = [
+                metric for metric in metrics_k if not isinstance(metric, ScalarMetric)
+            ]
 
             if isinstance(pred_k, list):
                 for pred_k_s, target_k_s in zip(pred_k, target_k):
                     mask = torch.isnan(target_k_s)
                     if mask.any():
-                        #target_k_s = torch.nan_to_num(target_k_s, 0.0)
+                        # target_k_s = torch.nan_to_num(target_k_s, 0.0)
                         target_k_s = MaskedTensor(target_k_s, mask=mask)
 
                     loss_k_s = pred_k_s.loss(target_k_s)
@@ -417,11 +419,10 @@ class LightningRetrieval(L.LightningModule):
                     metric = metric.to(device=pred_k_s.device)
                     metric.update(pred_k, target_k)
 
-
             else:
                 mask = torch.isnan(target_k)
                 if mask.any():
-                    #target_k = torch.nan_to_num(target_k, 0.0)
+                    # target_k = torch.nan_to_num(target_k, 0.0)
                     target_k = MaskedTensor(target_k, mask=mask)
 
                 loss_k = pred_k.loss(target_k)
