@@ -110,7 +110,9 @@ class BodyConfig:
         hidden_channels = get_config_attr(
             "hidden_channels", int, config_dict, "Body", None, required=True
         )
-        n_layers = get_config_attr("n_layers", int, config_dict, "Body", None, required=True)
+        n_layers = get_config_attr(
+            "n_layers", int, config_dict, "Body", None, required=True
+        )
         residual_connections = get_config_attr(
             "residual_connections", str, config_dict, "Body", "none"
         )
@@ -362,9 +364,9 @@ class MLP(ParamCount, nn.Module):
         hidden_channels = body_cfg.hidden_channels
         if isinstance(stem_cfgs, dict):
             inputs = {name: cfg.in_channels for name, cfg in stem_cfgs.items()}
-            self.stems = nn.ModuleDict({
-                name: cfg.compile() for name, cfg in stem_cfgs.items()
-            })
+            self.stems = nn.ModuleDict(
+                {name: cfg.compile() for name, cfg in stem_cfgs.items()}
+            )
             if aggregator_cfg is None:
                 aggregator_cfg = AggregatorConfig()
             self.aggregator = aggregator_cfg.compile(inputs, hidden_channels)
@@ -373,10 +375,12 @@ class MLP(ParamCount, nn.Module):
 
         self.body = body_cfg.compile()
         if isinstance(output_cfgs, dict):
-            self.outputs = nn.ModuleDict({
-                key: output_cfg.compile(hidden_channels)
-                for key, output_cfg in output_cfgs.items()
-            })
+            self.outputs = nn.ModuleDict(
+                {
+                    key: output_cfg.compile(hidden_channels)
+                    for key, output_cfg in output_cfgs.items()
+                }
+            )
         else:
             self.outputs = output_cfgs.compile()
 
