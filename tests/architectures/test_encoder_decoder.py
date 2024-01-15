@@ -14,6 +14,8 @@ from pytorch_retrieve.architectures.encoder_decoder import (
     HeadConfig,
 )
 
+from conftest import data_loader_3d
+
 
 SINGLE_INPUT_NO_STEM_CFG = """
 [architecture]
@@ -60,7 +62,7 @@ def test_encoder_config_single_input_no_stem(single_input_no_stem_cfg):
     assert isinstance(config.stem_configs, dict)
     assert isinstance(config.head_configs, dict)
 
-    encdec = config.compile()
+    encdec = EncoderDecoder.from_config_dict(single_input_no_stem_cfg)
 
     x = torch.rand(1, 16, 128, 128)
     y = encdec(x)
@@ -141,7 +143,7 @@ def test_encoder_config_single_input(single_input_cfg):
     assert isinstance(config.stem_configs, dict)
     assert isinstance(config.head_configs, dict)
 
-    encdec = config.compile()
+    encdec = EncoderDecoder.from_config_dict(single_input_cfg)
     assert encdec.stems["x"][-1].n_params > 0
 
     x = torch.rand(1, 16, 128, 128)
@@ -203,7 +205,7 @@ def test_encoder_config_multi_input(multi_input_cfg):
     assert isinstance(config.stem_configs, dict)
     assert isinstance(config.head_configs, dict)
 
-    encdec = config.compile()
+    encdec = EncoderDecoder.from_config_dict(multi_input_cfg)
     assert encdec.stems["x_1"][-1].n_params > 0
 
     x = {
@@ -273,7 +275,7 @@ def test_encoder_config_multi_output(multi_output_cfg):
     assert isinstance(config.stem_configs, dict)
     assert isinstance(config.head_configs, dict)
 
-    encdec = config.compile()
+    encdec = EncoderDecoder.from_config_dict(multi_output_cfg)
     assert encdec.stems["x_1"][-1].n_params > 0
 
     x = {
@@ -307,7 +309,7 @@ def test_save_and_load(multi_output_cfg, tmp_path):
 
     config = EncoderDecoderConfig.parse(input_cfgs, output_cfgs, arch_config)
 
-    encdec = config.compile(multi_output_cfg)
+    encdec = EncoderDecoder.from_config_dict(multi_output_cfg)
     encdec.save("encdec.pt")
 
     loaded = load_model("encdec.pt")
@@ -315,25 +317,30 @@ def test_save_and_load(multi_output_cfg, tmp_path):
     assert encdec.n_params == loaded.n_params
 
 
-UNET_CFG = """
+PRESET_CFG = """
 [architecture]
 name = "EncoderDecoder"
-preset = "unet"
+preset = "{name}"
 
 [input.x_1]
-n_features = 16
+n_features = 4
 
-[output.precip]
-kind = "mean"
-shape = 1
-
-[output.snow]
+[output.y]
 kind = "mean"
 shape = 1
 """
 
 
-def test_unet():
-    cfg = toml.loads(UNET_CFG)
+PRESETS = ["unet", "resnet_s", "resnext_s"]
+
+
+@pytest.mark.parametrize("name", PRESETS)
+def test_preset(name):
+    """
+    Ensure that preset models work with synthetic data.
+    """
+    cfg = toml.loads(PRESET_CFG.format(name=name))
     encdec = EncoderDecoder.from_config_dict(cfg)
-    assert len(encdec.encoder.stages) == 5
+    x, y = next(iter(data_loader_3d(8, 8)))
+    pred = encdec(x)
+    assert pred.shape[:2] == (8, 1)

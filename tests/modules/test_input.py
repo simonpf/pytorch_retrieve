@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader
 
 from pytorch_retrieve.data.synthetic import Synthetic1d, Synthetic3d
 from pytorch_retrieve.modules.input import InputLayer, StandardizationLayer
+from pytorch_retrieve.architectures import load_model, load_and_compile_model
 
 
 def data_loader_1d(n_samples: int, batch_size: int) -> DataLoader:
@@ -228,3 +229,36 @@ def test_normalization_3d(tmp_path):
     stats = input_layer_2.compute_stats()
     assert (np.isclose(stats["min"], -1.0, atol=1e-2)).all()
     assert (np.isclose(stats["max"], 1.0, atol=1e-2)).all()
+
+
+def test_load_input_modules(
+        encoder_decoder_config_file,
+        encoder_decoder_training_config_file,
+        tmp_path
+):
+    """
+    Calculate input statstics. Save model with statistics and ensure that:
+        - Input data statistics are correctly loaded
+    """
+    data_loader = data_loader_3d(256, 8)
+
+    input_layer = StandardizationLayer(
+        "x", n_features=4, model_path=tmp_path, kind="standardize"
+    )
+    for x, y in data_loader:
+        input_layer(x)
+    input_layer.epoch_finished()
+    for x, y in data_loader:
+        input_layer(x)
+    input_layer.epoch_finished()
+
+    model = load_and_compile_model(encoder_decoder_config_file)
+    model.stems["x"][0] = input_layer
+
+    model.save(tmp_path / "model.pt")
+
+    model_loaded = load_model(tmp_path / "model.pt")
+
+    assert (model_loaded.stems["x"][0].p_min == model.stems["x"][0].p_min).all()
+    assert (model_loaded.stems["x"][0].p_max == model.stems["x"][0].p_max).all()
+    assert (model_loaded.stems["x"][0].p_mean == model.stems["x"][0].p_mean).all()

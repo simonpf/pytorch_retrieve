@@ -66,7 +66,7 @@ class TrainingConfigBase:
             shuffle=shuffle,
             worker_init_fn=worker_init_fn,
             batch_size=self.batch_size,
-            num_workers=8,
+            num_workers=12,
             pin_memory=True,
         )
         return data_loader
@@ -100,7 +100,7 @@ class TrainingConfigBase:
             dataset,
             worker_init_fn=worker_init_fn,
             batch_size=self.batch_size,
-            num_workers=8,
+            num_workers=12,
             pin_memory=True,
         )
         return data_loader
@@ -402,7 +402,7 @@ def run_training(
             devices=compute_config.devices,
             strategy=compute_config.get_strategy(),
             callbacks=training_config.get_callbacks(module),
-            num_sanity_val_steps=0
+            num_sanity_val_steps=0,
         )
         trainer.fit(
             module,
