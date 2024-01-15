@@ -66,12 +66,13 @@ class BasicConvBlock(nn.Module, ParamCount):
             )
 
         self.body = nn.Sequential(*blocks)
-        if self.residual_connection and in_channels != out_channels or max(stride) > 1:
-            self.projection = nn.Conv2d(
-                in_channels, out_channels, kernel_size=stride, stride=stride
-            )
-        else:
-            self.projection = nn.Identity()
+        if self.residual_connection:
+            if in_channels != out_channels or max(stride) > 1:
+                self.projection = nn.Conv2d(
+                    in_channels, out_channels, kernel_size=stride, stride=stride
+                )
+            else:
+                self.projection = nn.Identity()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
