@@ -11,5 +11,3 @@ from torch import nn
 class Mean(nn.Module):
     def forward(x):
         return MeanTensor(x)
-
-
