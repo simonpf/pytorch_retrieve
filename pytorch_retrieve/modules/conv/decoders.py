@@ -16,6 +16,45 @@ from pytorch_retrieve.modules.conv.stages import SequentialStage
 from pytorch_retrieve.modules.conv.upsampling import Bilinear
 
 
+def cat(
+    tensor_1: Union[torch.Tensor, List[torch.Tensor]],
+    tensor_2: Union[torch.Tensor, List[torch.Tensor]],
+) -> Union[torch.Tensor, List[torch.Tensor]]:
+    """
+    Generic concatenation two tensors or two lists of tensors along first axis.
+
+    Args:
+        tensor_1: A single tensor or a list of tensors.
+        tensor_2: A single tensor or a list of tensors.
+
+    Return:
+        A single tensor if 'tensor_1' and 'tensor_2' are lists. Otherwise
+        a list of tensors.
+    """
+    if isinstance(tensor_1, List):
+        return [torch.cat([t_1, t_2], 1) for t_1, t_2 in zip(tensor_1, tensor_2)]
+    return torch.cat([tensor_1, tensor_2], 1)
+
+
+def forward(
+    module: nn.Module, tensor: Union[torch.Tensor, List[torch.Tensor]]
+) -> Union[torch.Tensor, List[torch.Tensor]]:
+    """
+    Generic forward function for single tensors and lists of tensors.
+
+    Args:
+        module: The torch.nn.Module through which to propagate the provided tensors.
+        tensor: The tensor or tensors to propagate through the module.
+
+    Return:
+        A single tensor or list of tensors obtained by propagating the input
+        'tensor' through the given module.
+    """
+    if isinstance(tensor, list):
+        return [module(tnsr) for tnsr in tensor]
+    return module(tensor)
+
+
 class Decoder(nn.Module, ParamCount):
     """
     A decoder for spatial information.
@@ -160,12 +199,12 @@ class Decoder(nn.Module, ParamCount):
             for ind, (up, stage) in enumerate(zip(self.upsamplers, stages)):
                 scale /= self.upsampling_factors[ind]
                 if scale in self.skip_connections:
-                    y = stage(torch.cat([x[scale], up(y)], dim=1))
+                    y = stage(cat(x[scale], forward(up, y)))
                 else:
-                    y = stage(up(y))
+                    y = stage(forward(up, y))
         else:
             y = x
             stages = self.stages
             for up, stage in zip(self.upsamplers, stages):
-                y = stage(up(y))
+                y = stage(forward(up, y))
         return y
