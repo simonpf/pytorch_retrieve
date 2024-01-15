@@ -13,6 +13,7 @@ from torch import nn
 from ..config import read_config_file
 from .mlp import MLP
 from .encoder_decoder import EncoderDecoder
+from .recurrent_encoder_decoder import RecurrentEncoderDecoder
 from .metnet import MetNet
 from .model import RetrievalModel
 
@@ -33,6 +34,8 @@ def compile_architecture(config_dict) -> nn.Module:
         return MLP.from_config_dict(config_dict)
     elif arch_name == "EncoderDecoder":
         return EncoderDecoder.from_config_dict(config_dict)
+    elif arch_name == "RecurrentEncoderDecoder":
+        return RecurrentEncoderDecoder.from_config_dict(config_dict)
     elif arch_name == "MetNet":
         return MetNet.from_config_dict(config_dict)
 
