@@ -242,7 +242,7 @@ class LightningRetrieval(L.LightningModule):
         losses["loss"] = tot_loss
         return losses
 
-    def on_validation_epoch_start(self):
+    def on_train_start(self):
         self.metrics = self.current_training_config.get_metrics_dict(
             self.model.output_names
         )
@@ -320,7 +320,7 @@ class LightningRetrieval(L.LightningModule):
                 "Metrics for more than two outputs are defined but "
                 "the model provided only a single, unnamed output."
             )
-            metrics = next(iter(metrics.values()))
+        metrics = next(iter(metrics.values()))
 
         loss = pred.loss(target)
 
@@ -331,6 +331,11 @@ class LightningRetrieval(L.LightningModule):
         for metric in scalar_metrics:
             metric = metric.to(device=scalar_pred.device)
             metric.update(scalar_pred, target)
+
+        other_metrics = [metric for metric in metrics if not isinstance(metric, ScalarMetric)]
+        for metric in other_metrics:
+            metric = metric.to(device=scalar_pred.device)
+            metric.update(pred, target)
 
         return loss
 
@@ -381,46 +386,53 @@ class LightningRetrieval(L.LightningModule):
             target_k = target[key]
             losses[name] = 0.0
 
+            # Determine scalar metrics for this outout
+            metrics_k = metrics.get(name, [])
+            scalar_metrics = [
+                metric
+                for metric in metrics_k
+                if isinstance(metric, ScalarMetric)
+            ]
+            # Other metrics
+            other_metrics = [metric for metric in metrics_k if not isinstance(metric, ScalarMetric)]
+
             if isinstance(pred_k, list):
                 for pred_k_s, target_k_s in zip(pred_k, target_k):
                     mask = torch.isnan(target_k_s)
                     if mask.any():
-                        target_k_s = torch.nan_to_num(target_k_s, 0.0)
+                        #target_k_s = torch.nan_to_num(target_k_s, 0.0)
                         target_k_s = MaskedTensor(target_k_s, mask=mask)
 
                     loss_k_s = pred_k_s.loss(target_k_s)
                     tot_loss += loss_k_s
                     losses[name] += loss_k_s.item()
 
-                    if name in metrics:
-                        metrics_k = metrics[name]
-                        scalar_metrics = [
-                            metric
-                            for metric in metrics_k
-                            if isinstance(metric, ScalarMetric)
-                        ]
+                    if len(scalar_metrics) > 0:
                         pred_k_s = pred_k_s.expected_value()
                         for metric in scalar_metrics:
                             metric = metric.to(device=pred_k_s.device)
                             metric.update(pred_k_s, target_k_s)
 
+                for metric in other_metrics:
+                    metric = metric.to(device=pred_k_s.device)
+                    metric.update(pred_k, target_k)
+
+
             else:
                 mask = torch.isnan(target_k)
                 if mask.any():
-                    target_k = torch.nan_to_num(target_k, 0.0)
+                    #target_k = torch.nan_to_num(target_k, 0.0)
                     target_k = MaskedTensor(target_k, mask=mask)
 
                 loss_k = pred_k.loss(target_k)
                 tot_loss += loss_k
                 losses[name] += loss_k.item()
 
-                if name in metrics:
-                    metrics_k = metrics[name]
-                    scalar_metrics = [
-                        metric
-                        for metric in metrics_k
-                        if isinstance(metric, ScalarMetric)
-                    ]
+                for metric in other_metrics:
+                    metric = metric.to(device=pred_k.device)
+                    metric.update(pred_k, target_k)
+
+                if len(scalar_metrics) > 0:
                     pred_k = pred_k.expected_value()
                     for metric in scalar_metrics:
                         metric = metric.to(device=pred_k.device)
@@ -435,12 +447,8 @@ class LightningRetrieval(L.LightningModule):
     def on_validation_epoch_end(self):
         for output_name, metrics in self.metrics.items():
             for metric in metrics:
-                self.log(
-                    metric.name + f" (output_name)",
-                    metric.compute(),
-                    on_step=False,
-                    on_epoch=True,
-                )
+                metric = metric.to(self.device)
+                metric.log(self, output_name=output_name)
                 metric.reset()
 
         self.log(
@@ -460,7 +468,7 @@ class LightningRetrieval(L.LightningModule):
         # LR search provided by Lightning.
         if hasattr(self, "lr"):
             curr_config = copy.copy(curr_config)
-            curr_config.optimizer_kwargs["lr"] = self.lr
+            curr_config.optimizer_args["lr"] = self.lr
 
         optimizer, scheduler = curr_config.get_optimizer_and_scheduler(curr_name, self)
 
