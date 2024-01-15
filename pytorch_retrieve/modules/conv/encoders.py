@@ -284,8 +284,11 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
         for ind, (scale, names) in enumerate(self.stage_inputs.items()):
             if scale > self.base_scale:
                 inpts = {name: channels[ind] for name in names}
-                inpts["__enc__"] = channels[ind]
-                self.aggregators[str(scale)] = aggregator_factory(inpts, channels[ind])
+                if len(inpts) > 0:
+                    inpts["__enc__"] = channels[ind]
+                    self.aggregators[str(scale)] = aggregator_factory(
+                        inpts, channels[ind]
+                    )
             # Multiple inputs at base scale.
             elif len(names) > 1:
                 inpts = {name: channels[ind] for name in names}
@@ -318,7 +321,9 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
                 if self.aggregate_after:
                     y = stage(y)
 
-            if len(inputs) > 0:
+            if y is None and len(inputs) == 1:
+                y = stage(x[inputs[0]])
+            elif len(inputs) > 0:
                 agg_inputs = {inpt: x[inpt] for inpt in inputs}
                 if y is not None:
                     agg_inputs["__enc__"] = y

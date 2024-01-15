@@ -9,7 +9,10 @@ from typing import Callable, List, Optional, Union
 import torch
 from torch import nn
 
-def forward(module: nn.Module, tensor: Union[torch.Tensor, List[torch.Tensor]]) -> Union[torch.Tensor, List[torch.Tensor]]:
+
+def forward(
+    module: nn.Module, tensor: Union[torch.Tensor, List[torch.Tensor]]
+) -> Union[torch.Tensor, List[torch.Tensor]]:
     """
     Apply module to single tensor or list of tensors.
 
@@ -28,19 +31,21 @@ def forward(module: nn.Module, tensor: Union[torch.Tensor, List[torch.Tensor]]) 
 
 class AssimilatorBlock(nn.Module):
     def __init__(
-            self,
-            in_channels: int,
-            out_channels: int,
-            block_factory: Callable[[int, int], nn.Module],
-            **factory_kwargs
+        self,
+        in_channels: int,
+        out_channels: int,
+        block_factory: Callable[[int, int], nn.Module],
+        **factory_kwargs,
     ):
         super().__init__()
 
         self.out_channels = out_channels
         self.encoder = block_factory(in_channels, out_channels, **factory_kwargs)
         factory_kwargs["downsample"] = 1
-        self.propagator =  block_factory(out_channels, out_channels, **factory_kwargs)
-        self.assimilator = block_factory(2 * out_channels, out_channels, **factory_kwargs)
+        self.propagator = block_factory(out_channels, out_channels, **factory_kwargs)
+        self.assimilator = block_factory(
+            2 * out_channels, out_channels, **factory_kwargs
+        )
         self.attention = block_factory(2 * out_channels, out_channels, **factory_kwargs)
         self.norm = nn.BatchNorm2d(out_channels)
 
@@ -55,9 +60,7 @@ class AssimilatorBlock(nn.Module):
         shape = x.shape[:1] + (self.out_channels,) + x.shape[2:]
         return x.new_zeros(shape)
 
-
     def forward_step(self, x: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
-
         enc = self.encoder(x)
         if state is None:
             state = self.init_state(enc)
@@ -67,8 +70,9 @@ class AssimilatorBlock(nn.Module):
         att = torch.sigmoid(self.attention(encprop))
         return self.norm(att * enc + (1.0 - att) * updated)
 
-
-    def forward(self, inputs: List[torch.Tensor], state: Optional[torch.Tensor] = None) -> List[torch.Tensor]:
+    def forward(
+        self, inputs: List[torch.Tensor], state: Optional[torch.Tensor] = None
+    ) -> List[torch.Tensor]:
         """
         Forward input sequence through assimilation block.
 
@@ -85,7 +89,7 @@ class AssimilatorBlock(nn.Module):
         return y
 
 
-class Assimilator():
+class Assimilator:
     def __init__(self, block_factory: Callable[[int, int], nn.Module]):
         self.block_factory = block_factory
 
@@ -96,5 +100,5 @@ class Assimilator():
             in_channels,
             out_channels,
             downsample=downsample,
-            block_factory=self.block_factory
+            block_factory=self.block_factory,
         )
