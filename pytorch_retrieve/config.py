@@ -139,15 +139,13 @@ class InputConfig:
 
     n_features: int
     scale: int = 1
-    normalize: Optional[str] = None
+    normalize: str = "none"
 
     @classmethod
     def parse(cls, name, cfg):
         n_features = get_config_attr("n_features", int, cfg, f"input.{name}")
         scale = get_config_attr("scale", int, cfg, f"input.{name}", 1)
         normalize = get_config_attr("normalize", str, cfg, f"input.{name}", "none")
-        if normalize == "none":
-            normalize = None
         return InputConfig(n_features, scale=scale, normalize=normalize)
 
     def to_config_dict(self):

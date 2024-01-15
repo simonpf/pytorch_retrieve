@@ -195,8 +195,6 @@ class StemConfig:
             "downsampling", int, config_dict, f"architecture.stem.{name}", 1
         )
         normalize = input_config.normalize
-        if normalize == "none":
-            normalize = None
         return StemConfig(
             input_name,
             in_channels=in_channels,
@@ -216,6 +214,7 @@ class StemConfig:
         Convert configuration object to dict representation suitable for
         serialization.
         """
+        dct = asdict(self)
         return asdict(self)
 
     def compile(self) -> nn.Module:
@@ -227,7 +226,7 @@ class StemConfig:
             object.
         """
         blocks = []
-        if self.normalize != None:
+        if self.normalize != "none":
             blocks.append(StandardizationLayer(self.input_name, self.in_channels))
         blocks.append(
             stems.BasicConv(
@@ -493,7 +492,9 @@ class DecoderConfig:
         Convert configuration object to dict representation suitable for
         serialization.
         """
-        return asdict(self)
+        config = asdict(self)
+        config["channels"] = config["channels"][1:]
+        return config
 
     def compile(self):
         block_factory = get_block_factory(self.block_factory)()
@@ -574,6 +575,9 @@ class HeadConfig:
 
 @dataclass
 class EncoderDecoderConfig:
+    """
+    Dataclass reprsentation the configuration of an encoder-decoder model.
+    """
     stem_configs: Dict[str, StemConfig]
     encoder_config: EncoderConfig
     decoder_config: DecoderConfig
@@ -655,13 +659,11 @@ class EncoderDecoderConfig:
         }
         head_configs["individual"] = True
         return {
-            "architecture": {
-                "name": "EncoderDecoder",
-                "stem": stem_configs,
-                "encoder": self.encoder_config.to_config_dict(),
-                "decoder": self.decoder_config.to_config_dict(),
-                "head": head_configs,
-            }
+            "name": "EncoderDecoder",
+            "stem": stem_configs,
+            "encoder": self.encoder_config.to_config_dict(),
+            "decoder": self.decoder_config.to_config_dict(),
+            "head": head_configs,
         }
 
     @property
@@ -702,14 +704,6 @@ class EncoderDecoderConfig:
             return self.head_config["base"]
         return self.head_config
 
-    def compile(self, config_dict=None):
-        stems = {name: config.compile() for name, config in self.stem_configs.items()}
-        encoder = self.encoder_config.compile()
-        decoder = self.decoder_config.compile()
-        heads = {name: config.compile() for name, config in self.head_configs.items()}
-
-        return EncoderDecoder(stems, encoder, decoder, heads, config_dict=config_dict)
-
 
 class EncoderDecoder(RetrievalModel):
     """
@@ -725,9 +719,8 @@ class EncoderDecoder(RetrievalModel):
             config_dict: A configuration dictionary defining the configuration of
                  the encoder-decoder architecture.
         """
-
-        input_config = get_config_attr("input", dict, config_dict, "model config")
-        output_config = get_config_attr("output", dict, config_dict, "model config")
+        input_config = get_config_attr("input", dict, config_dict, "model config", required=True)
+        output_config = get_config_attr("output", dict, config_dict, "model config",required=True)
 
         arch_config = get_config_attr("architecture", dict, config_dict, "model config")
         preset = get_config_attr("preset", str, arch_config, "architecture", "none")
@@ -738,41 +731,49 @@ class EncoderDecoder(RetrievalModel):
             preset = read_config_file(preset_file)
             arch_config = update_recursive(preset, arch_config)
 
-        input_cfgs = {
+        input_config = {
             name: InputConfig.parse(name, cfg) for name, cfg in input_config.items()
         }
-        output_cfgs = {
+        output_config = {
             name: OutputConfig.parse(name, cfg) for name, cfg in output_config.items()
         }
 
-        config = EncoderDecoderConfig.parse(input_cfgs, output_cfgs, arch_config)
-        return config.compile(config_dict=config_dict)
+        config = EncoderDecoderConfig.parse(input_config, output_config, arch_config)
+        return cls(
+            input_config=input_config,
+            output_config=output_config,
+            arch_config=config
+        )
 
     def __init__(
         self,
-        stems: Dict[str, nn.Module],
-        encoder: nn.Module,
-        decoder: nn.Module,
-        heads: Dict[str, nn.Module],
-        config_dict: Optional[Dict[str, object]] = None,
+        input_config: Dict[str, InputConfig],
+        output_config: Dict[str, OutputConfig],
+        arch_config: EncoderDecoderConfig
     ):
         """
         Args:
-            stems: A dictionary mapping input names to corresponding stem
-                modules.
-            encoder: The encoder part of the model as a PyTorch module.
-            decoder: The decoder part of the model as a PyTorch module.
-            heads: A dictionary mapping output names to corresponding head
-                modules.
-            config_dict: An optional config dict describing the configuration
-                of the model.
+            input_config: A dictionary mapping input names to corresponding
+                InputConfig objects.
+            output_config: A dictionary mapping output names to corresponding
+                OutputConfig objects.
+            arch_config: A EncoderDecoder config object describing the encoder-decoder
+                architecture.
         """
-        super().__init__(config_dict=config_dict)
-        self.stems = nn.ModuleDict(stems)
-        self.encoder = encoder
-        self.decoder = decoder
-        self.heads = nn.ModuleDict(heads)
-        self.config_dict = config_dict
+
+        super().__init__(config_dict={
+            "input": {name: cfg.to_config_dict() for name, cfg in input_config.items()},
+            "output": {name: cfg.to_config_dict() for name, cfg in output_config.items()},
+            "architecture": arch_config.to_config_dict()
+        })
+        self.stems = nn.ModuleDict({
+            name: cfg.compile() for name, cfg in arch_config.stem_configs.items()
+        })
+        self.encoder = arch_config.encoder_config.compile()
+        self.decoder = arch_config.decoder_config.compile()
+        self.heads = nn.ModuleDict({
+            name: cfg.compile() for name, cfg in arch_config.head_configs.items()
+        })
 
     @property
     def output_names(self) -> List[str]:
