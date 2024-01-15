@@ -26,13 +26,15 @@ class ScalarMetric:
     Dummy class to identify metrics that evaluate scalar predictions,
     i.e., predictions that consists of a single value.
     """
-    def log(self, lightning_module: LightningModule, output_name: Optional[str] = None) -> None:
+
+    def log(
+        self, lightning_module: LightningModule, output_name: Optional[str] = None
+    ) -> None:
         value = self.compute()
         name = self.name
         if output_name is not None:
-            name +=  f" ({output_name})"
+            name += f" ({output_name})"
         lightning_module.log(self.name, value, on_step=False, on_epoch=True)
-
 
 
 class Bias(ScalarMetric, tm.Metric):
@@ -145,6 +147,7 @@ class PlotSamples(tm.Metric):
     Plots images of retrieved 2D fields for the n samples with the highest validation
     loss.
     """
+
     name = "Validation samples"
 
     def __init__(self, n_samples: int = 8):
@@ -168,14 +171,13 @@ class PlotSamples(tm.Metric):
         Reset metric.
         """
         if self.sample_indices is None:
-            permutation = np.random.permutation(len(self.indices))[:self.n_samples]
+            permutation = np.random.permutation(len(self.indices))[: self.n_samples]
             permutation = sorted(permutation)
             self.sample_indices = [self.indices[ind] for ind in permutation]
         self.batch_start = 0
         self.preds = []
         self.targets = []
         self.step += 1
-
 
     @rank_zero_only
     def update(self, pred: torch.Tensor, target: torch.Tensor):
@@ -203,21 +205,27 @@ class PlotSamples(tm.Metric):
                 self.preds.append(pred[ind : ind + 1])
         else:
             batch_indices = [
-                ind - self.batch_start for ind in self.sample_indices
+                ind - self.batch_start
+                for ind in self.sample_indices
                 if (ind >= self.batch_start) and (ind < self.batch_start + batch_size)
             ]
             for batch_ind in batch_indices:
                 if isinstance(target, list):
-                    self.preds.append([elem[batch_ind:batch_ind + 1] for elem in pred])
-                    self.targets.append([elem[batch_ind: batch_ind + 1] for elem in target])
+                    self.preds.append(
+                        [elem[batch_ind : batch_ind + 1] for elem in pred]
+                    )
+                    self.targets.append(
+                        [elem[batch_ind : batch_ind + 1] for elem in target]
+                    )
                 else:
-                    self.preds.append(pred[batch_ind:batch_ind + 1])
-                    self.targets.append(target[batch_ind: batch_ind + 1])
+                    self.preds.append(pred[batch_ind : batch_ind + 1])
+                    self.targets.append(target[batch_ind : batch_ind + 1])
         self.batch_start += batch_size
 
-
     @rank_zero_only
-    def log(self, lightning_module: LightningModule, output_name: Optional[str] = None) -> None:
+    def log(
+        self, lightning_module: LightningModule, output_name: Optional[str] = None
+    ) -> None:
         sequences = self.compute()
         if not isinstance(sequences, list):
             sequences = [sequences]
@@ -259,9 +267,8 @@ class PlotSamples(tm.Metric):
                 "metric. Not producing any plots."
             )
 
-
         if self.sample_indices is None:
-            permutation = np.random.permutation(len(self.indices))[:self.n_samples]
+            permutation = np.random.permutation(len(self.indices))[: self.n_samples]
             permutation = sorted(permutation)
             self.sample_indices = [self.indices[ind] for ind in permutation]
             self.targets = [self.targets[ind] for ind in permutation]
@@ -293,7 +300,9 @@ class PlotSamples(tm.Metric):
                 pred = pred.cpu().numpy()
                 target = target.cpu().numpy()
 
-                mappable = ScalarMappable(cmap=cmap, norm=Normalize(target_min, target_max))
+                mappable = ScalarMappable(
+                    cmap=cmap, norm=Normalize(target_min, target_max)
+                )
                 img_target = np.transpose(mappable.to_rgba(pred), [2, 0, 1])
                 img_pred = np.transpose(mappable.to_rgba(target), [2, 0, 1])
 
@@ -304,7 +313,6 @@ class PlotSamples(tm.Metric):
 
         sequences = []
         for pred, target in zip(self.preds, self.targets):
-
             images = {}
 
             target_min = np.nanmin(torch.stack(target).cpu().numpy())
@@ -330,7 +338,9 @@ class PlotSamples(tm.Metric):
                 pred_s = pred_s.cpu().numpy()
                 target_s = target_s.cpu().numpy()
 
-                mappable = ScalarMappable(cmap=cmap, norm=Normalize(target_min, target_max))
+                mappable = ScalarMappable(
+                    cmap=cmap, norm=Normalize(target_min, target_max)
+                )
                 img_pred = np.transpose(mappable.to_rgba(pred_s), [2, 0, 1])
                 img_target = np.transpose(mappable.to_rgba(target_s), [2, 0, 1])
 
