@@ -29,6 +29,7 @@ class EDAModule(L.LightningModule):
     The main purpose of the lightning module is to piggy-back the distributed
     data loading provided by pytorch to speed up the EDA.
     """
+
     def __init__(self, input_configs: Dict[str, InputConfig], model_directory: Path):
         """
         Args:
@@ -38,10 +39,12 @@ class EDAModule(L.LightningModule):
                 stored.
         """
         super().__init__()
-        self.input_modules = nn.ModuleDict({
-            name: InputLayer(name, cfg.n_features, model_path=model_directory)
-            for name, cfg in input_configs.items()
-        })
+        self.input_modules = nn.ModuleDict(
+            {
+                name: InputLayer(name, cfg.n_features, model_path=model_directory)
+                for name, cfg in input_configs.items()
+            }
+        )
         self.params = nn.Parameter(torch.zeros(1), requires_grad=True)
         for mod in self.input_modules.values():
             mod.reset()
@@ -79,7 +82,7 @@ def run_eda(
     model_directory: Path,
     input_configs: Dict[str, InputConfig],
     training_configs: Dict[str, TrainingConfig],
-    compute_config: Optional[ComputeConfig] = None
+    compute_config: Optional[ComputeConfig] = None,
 ) -> None:
     """
     Performs EDA for given input and training configs.
