@@ -388,7 +388,13 @@ class MetNet(nn.Module):
     """
 
     @classmethod
-    def from_config_dict(cls, config_dict):
+    def from_config_dict(cls, config_dict: Dict[str, Any]) -> "MetNet":
+        """
+        Create MetNet model from a model configuration dictionary.
+
+        Args:
+            config_dict: A dictionary containing the model configuration.
+        """
         input_configs = {
             name: InputConfig.parse(name, cfg)
             for name, cfg in config_dict["input"].items()
@@ -411,6 +417,13 @@ class MetNet(nn.Module):
         return MetNet(metnet_config)
 
     def __init__(self, config: MetNetConfig):
+        """
+        Create a MetNet model.
+
+        Args:
+            config: A MetNetConfig object representing the configuration
+                of the MetNet model.
+        """
         super().__init__()
         self.config = config
         stems = {
@@ -443,7 +456,6 @@ class MetNet(nn.Module):
         # Condition Time
         x = self.ct(x, fstep)
 
-        ##CNN
         x = self.image_encoder(x)
 
         # Temporal Encoder
