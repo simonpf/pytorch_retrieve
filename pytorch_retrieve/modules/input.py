@@ -13,11 +13,29 @@ import torch
 from torch import nn
 
 from pytorch_retrieve.tensors import MaskedTensor
+from lightning import LightningModule
+from lightning.pytorch.utilities import rank_zero_only
 
 import xarray as xr
 
 
 LOGGER = getLogger(__name__)
+
+
+@rank_zero_only
+def save_stats(dataset: xr.Dataset, model_path: Path, input_name: str) -> None:
+    """
+    Save statistics to disk.
+
+    Args:
+        dataset: The xarray.Dataset containing the input data statistics.
+        model_path: The model path to which to write the calculated
+            statistics.
+        input_name: The name of the input.
+    """
+    stats_dir = model_path / "stats"
+    stats_dir.mkdir(exist_ok=True, parents=True)
+    dataset.to_netcdf(stats_dir / (input_name + ".nc"))
 
 
 class InputLayer(nn.Module):
@@ -72,17 +90,17 @@ class InputLayer(nn.Module):
         self.min_vals = None
         self.max_vals = None
 
-        self.finalized = False
         self.initialized = False
 
         self.hists = {}
         self.bins = {}
 
         # Initialize torch parameters.
-        self.mean = nn.Parameter(torch.zeros(self.n_features), requires_grad=False)
-        self.std_dev = nn.Parameter(torch.tensor(self.n_features), requires_grad=False)
-        self.min = nn.Parameter(torch.zeros(self.n_features), requires_grad=False)
-        self.max = nn.Parameter(torch.tensor(self.n_features), requires_grad=False)
+        self.finalized = nn.Parameter(torch.tensor(False), requires_grad=False)
+        self.p_mean = nn.Parameter(torch.zeros(self.n_features), requires_grad=False)
+        self.p_std_dev = nn.Parameter(torch.zeros(self.n_features), requires_grad=False)
+        self.p_min = nn.Parameter(torch.zeros(self.n_features), requires_grad=False)
+        self.p_max = nn.Parameter(torch.zeros(self.n_features), requires_grad=False)
 
     def reset(self):
         """
@@ -106,7 +124,7 @@ class InputLayer(nn.Module):
              None in the EDA phase, when the input layer is not yet finalized.
              The input tensor when the layer is finalized.
         """
-        if self.finalized:
+        if self.finalized.item():
             return x
 
         if not isinstance(x, MaskedTensor):
@@ -165,9 +183,15 @@ class InputLayer(nn.Module):
 
         return None
 
-    def compute_stats(self) -> Dict[str, np.ndarray]:
+    def compute_stats(
+        self, lightning_module: Optional[LightningModule] = None
+    ) -> Dict[str, np.ndarray]:
         """
         Compute input data statistics.
+
+        Args:
+            lightning_module: An optional lightning module object to use to
+                gather data from multiple processes.
 
         Return:
             A dictionary containing the mean, standard deviation, covariance matrix
@@ -177,11 +201,18 @@ class InputLayer(nn.Module):
             raise ValueError(
                 f"The input layer '{self.name}' has not yet processed any input data."
             )
-        x = self.x.cpu().numpy()
-        xx = self.xx.cpu().numpy()
-        counts = self.counts.cpu().numpy()
-        min_vals = self.min_vals.cpu().numpy()
-        max_vals = self.max_vals.cpu().numpy()
+        if lightning_module is not None:
+            x = lightning_module.all_gather(x).sum(0).cpu().numpy()
+            xx = lightning_module.all_gather(xx).sum(0).cpu().numpy()
+            counts = lightning_module.all_gather(counts).sum(0).cpu().numpy()
+            min_vals = lightning_module.all_gather(min_vals).sum(0).cpu().numpy()
+            max_vals = lightning_module.all_gather(max_vals).sum(0).cpu().numpy()
+        else:
+            x = self.x.cpu().numpy()
+            xx = self.xx.cpu().numpy()
+            counts = self.counts.cpu().numpy()
+            min_vals = self.min_vals.cpu().numpy()
+            max_vals = self.max_vals.cpu().numpy()
 
         mean = x / counts
         cov = xx / counts - (mean[None] * mean[..., None])
@@ -197,21 +228,23 @@ class InputLayer(nn.Module):
             "max": max_vals,
         }
 
-    def epoch_finished(self) -> None:
+    def epoch_finished(
+        self, lightning_module: Optional[LightningModule] = None
+    ) -> None:
         """
         Signal processing of an epoch of data has finished.
         """
         if self.initialized:
-            self.finalized = True
+            self.finalized.set_(torch.tensor(True))
             self.finalize()
             return None
         self.initialized = True
 
-    def finalize(self) -> None:
+    def finalize(self, lightning_module: Optional[LightningModule] = None) -> None:
         """
         Finalize input layer.
         """
-        stats = self.compute_stats()
+        stats = self.compute_stats(lightning_module)
         dims = ("features", "features_")
         dataset = xr.Dataset(
             {name: (dims[: data.ndim], data) for name, data in stats.items()}
@@ -223,24 +256,26 @@ class InputLayer(nn.Module):
         dataset["bin_boundaries"] = (("features", "bin_boundaries"), boundaries)
         dataset["counts"] = (("features", "bins"), counts)
 
-        stats_dir = self.model_path / "stats"
-        stats_dir.mkdir(exist_ok=True, parents=True)
-        dataset.to_netcdf(stats_dir / (self.name + ".nc"))
+        save_stats(dataset, self.model_path, self.name)
         self._load_stats_tensors(dataset)
 
     def _load_stats_tensors(self, dataset: xr.Dataset) -> None:
         """
         Load tensors with input data statistics from dataset.
         """
-        self.mean = nn.Parameter(
+        self.p_mean = nn.Parameter(
             torch.tensor(dataset["mean"].data), requires_grad=False
         )
-        self.std_dev = nn.Parameter(
+        self.p_std_dev = nn.Parameter(
             torch.tensor(dataset["std_dev"].data), requires_grad=False
         )
-        self.min = nn.Parameter(torch.tensor(dataset["min"].data), requires_grad=False)
-        self.max = nn.Parameter(torch.tensor(dataset["max"].data), requires_grad=False)
-        self.finalized = True
+        self.p_min = nn.Parameter(
+            torch.tensor(dataset["min"].data), requires_grad=False
+        )
+        self.p_max = nn.Parameter(
+            torch.tensor(dataset["max"].data), requires_grad=False
+        )
+        self.finalized.set_(torch.tensor(True))
 
 
 class StandardizationLayer(InputLayer):
@@ -280,14 +315,14 @@ class StandardizationLayer(InputLayer):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         pad_dims = 0 if x.dim() == 2 else 2
 
-        if self.finalized:
+        if self.finalized.item():
             if self.kind == "standardize":
-                mean = self.mean.__getitem__((...,) + (None,) * pad_dims)
-                std_dev = self.std_dev.__getitem__((...,) + (None,) * pad_dims)
+                mean = self.p_mean.__getitem__((...,) + (None,) * pad_dims)
+                std_dev = self.p_std_dev.__getitem__((...,) + (None,) * pad_dims)
                 x_n = (x - mean) / std_dev
             elif self.kind == "minmax":
-                mins = self.min.__getitem__((...,) + (None,) * pad_dims)
-                maxs = self.max.__getitem__((...,) + (None,) * pad_dims)
+                mins = self.p_min.__getitem__((...,) + (None,) * pad_dims)
+                maxs = self.p_max.__getitem__((...,) + (None,) * pad_dims)
                 x_n = -1.0 + 2.0 * (x - mins) / (maxs - mins)
 
             # Replace NANs
