@@ -55,7 +55,7 @@ validation_dataset_args = {"n_samples"=128}
 n_epochs = 2
 batch_size = 8
 optimizer = "SGD"
-optimizer_kwargs = {"lr"= 1e-3}
+optimizer_args = {"lr"= 1e-3}
 metrics = ["Bias", "CorrelationCoef"]
 """
 
@@ -151,8 +151,8 @@ def test_training_encoder_decoder(
     """
     Run training on synthetic data.
     """
-    model = load_and_compile_model(unet_model_config_file)
-    schedule = parse_training_config(read_config_file(unet_training_config_file))
+    model = load_and_compile_model(encoder_decoder_model_config_file)
+    schedule = parse_training_config(read_config_file(encoder_decoder_training_config_file))
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
     module.current_training_config
     run_training(tmp_path, module, None)

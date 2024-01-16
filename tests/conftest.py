@@ -52,7 +52,7 @@ validation_dataset_args = {"n_samples"=128}
 n_epochs = 2
 batch_size = 8
 optimizer = "SGD"
-optimizer_kwargs = {"lr"= 1e-3}
+optimizer_args = {"lr"= 1e-3}
 metrics = ["Bias", "CorrelationCoef"]
 """
 
@@ -78,7 +78,7 @@ preset = "unet"
 
 [input.x]
 n_features = 4
-normalize = "minmax"
+normalize = "none"
 
 [output.y]
 shape = [1,]
@@ -86,7 +86,7 @@ shape = [1,]
 
 
 @pytest.fixture
-def encoder_decoder_config_file(tmp_path):
+def encoder_decoder_model_config_file(tmp_path):
     """
     Provides a path to a trainign config file in a temporary directory.
     """
@@ -105,7 +105,7 @@ validation_dataset_args = {"n_samples"=16}
 n_epochs = 2
 batch_size = 8
 optimizer = "SGD"
-optimizer_kwargs = {"lr"= 1e-3}
+optimizer_args = {"lr"= 1e-3}
 metrics = ["Bias", "CorrelationCoef", "PlotSamples"]
 """
 
