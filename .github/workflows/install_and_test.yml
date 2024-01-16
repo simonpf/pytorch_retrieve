@@ -27,4 +27,4 @@ jobs:
         pip install .
     - name: Run tests with pytest
       run: |
-        pytest --cov=pytorch_retrieve tests/
+        python -m pytest --cov=pytorch_retrieve tests/
