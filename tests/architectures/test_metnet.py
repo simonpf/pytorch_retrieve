@@ -66,6 +66,6 @@ def test_compile_metnet_config():
         "goes": [torch.rand(1, 16, 512, 512) for _ in range(4)],
         "mrms": [torch.rand(1, 1, 512, 512) for _ in range(4)],
     }
-    x["lead_times"] = [15, 30]
+    x["lead_times"] = torch.tensor([[15, 30]])
     y = metnet(x)
     assert len(y["precip_rate"]) == 2
