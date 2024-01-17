@@ -227,6 +227,13 @@ class PlotSamples(tm.Metric):
         self, lightning_module: LightningModule, output_name: Optional[str] = None
     ) -> None:
         sequences = self.compute()
+        if len(sequences) == 0:
+            LOGGER.warning(
+                "PlotSamples metric did not return any images for output '%s'.",
+                output_name
+            )
+            return None
+
         if not isinstance(sequences, list):
             sequences = [sequences]
 
