@@ -3,7 +3,7 @@ import torch
 from pytorch_retrieve.modules.conv.encoders import Encoder
 from pytorch_retrieve.modules.conv.decoders import Decoder
 from pytorch_retrieve.modules.conv.blocks import BasicConv
-from pytorch_retrieve.modules.conv.recurrent import Assimilator
+from pytorch_retrieve.modules.conv.recurrent import Assimilator, GRU
 
 def test_assimilation_block():
     """
@@ -56,3 +56,19 @@ def test_assimilation_encoder_decoder():
     y = decoder(y)
     assert len(y) == 4
     assert y[0].shape == (1, 8, 64, 64)
+
+def test_gru_block():
+    """
+    Ensure that assimilation block factory produces modules that produce
+    the expected output lists.
+    """
+    block_factory = BasicConv()
+    rec_factory = GRU(block_factory)
+
+    rec_block = rec_factory(8, 16, downsample=2)
+
+    x = [torch.rand(2, 8, 32, 32) for _ in range(8)]
+    y = rec_block(x)
+
+    assert len(y) == 8
+    assert y[0].shape == (2, 16, 16, 16)

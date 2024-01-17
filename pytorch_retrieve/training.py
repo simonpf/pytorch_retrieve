@@ -494,7 +494,6 @@ def cli(
     run_training(
         model_path,
         module,
-        model_path,
         compute_config=compute_config,
         checkpoint=checkpoint,
     )

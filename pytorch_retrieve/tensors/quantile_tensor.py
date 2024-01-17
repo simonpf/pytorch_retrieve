@@ -40,7 +40,6 @@ class QuantileTensor(torch.Tensor):
     def __new__(cls, tensor, tau, *args, quantile_dim=1, **kwargs):
         new_tensor = super().__new__(cls, tensor, *args, **kwargs)
 
-        print(type(tensor))
         ## Keep reference to original tensor.
         # if isinstance(tensor, QuantileTensor):
         #    new_tensor.base = tensor.base
@@ -62,8 +61,6 @@ class QuantileTensor(torch.Tensor):
         base_args = [get_base(arg) for arg in args]
         base_kwargs = {key: get_base(val) for key, val in kwargs.items()}
         result = func(*base_args, **base_kwargs)
-
-        print(func, types)
 
         if func == torch.as_tensor:
             return result
@@ -221,7 +218,7 @@ class QuantileTensor(torch.Tensor):
 
         return x_pdf, y_pdf
 
-    def expected_value(y_pred, quantiles, quantile_axis=1):
+    def expected_value(self):
         r"""
         Computes the mean of the posterior distribution defined by an array
         of predicted quantiles.
@@ -229,16 +226,13 @@ class QuantileTensor(torch.Tensor):
         Args:
             y_pred: A tensor of predicted quantiles with the quantiles located
                 along the axis given by ``quantile_axis``.
-            quantiles: The quantile fractions corresponding to the quantiles
-                located along the quantile axis.
-            quantile_axis: The axis along which the quantiles are located.
 
         Returns:
 
             Array containing the posterior means for the provided inputs.
         """
         x_cdf, y_cdf = self.cdf()
-        return torch.trapz(x_cdf, y_cdf, self.quantile_dim)
+        return torch.trapz(x_cdf, y_cdf, dim=self.quantile_dim)
 
     def probability_less_than(self, thresh):
         """

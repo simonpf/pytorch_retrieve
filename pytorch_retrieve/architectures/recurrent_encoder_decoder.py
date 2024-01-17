@@ -8,6 +8,8 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+import numpy as np
+
 import torch
 from torch import nn
 
@@ -27,10 +29,10 @@ from pytorch_retrieve.modules.conv.encoders import (
     MultiInputParallelEncoder,
 )
 from pytorch_retrieve.modules.conv.decoders import Decoder
-from pytorch_retrieve.modules.conv.recurrent import Assimilator, forward
+from pytorch_retrieve.modules.conv.recurrent import GRU, Assimilator, forward
 from pytorch_retrieve.modules.activation import get_activation_factory
 from pytorch_retrieve.modules.normalization import get_normalization_factory
-from pytorch_retrieve.modules.output import Mean
+from pytorch_retrieve.modules.output import Mean, Quantiles
 from pytorch_retrieve.architectures.model import RetrievalModel
 from pytorch_retrieve.config import InputConfig, OutputConfig, read_config_file
 from pytorch_retrieve.utils import update_recursive
@@ -382,7 +384,7 @@ class EncoderConfig:
              The encoder module described by this EncoderConfiguration object.
         """
         block_factory = get_block_factory(self.block_factory)()
-        block_factory = Assimilator(block_factory)
+        block_factory = Assimilator(block_factory, bidirectional=True)
         downsampling_factory = get_downsampling_factory(self.downsampling_factory)()
         aggregation_factory = get_aggregation_factory(self.aggregation_factory)
 
@@ -496,7 +498,7 @@ class DecoderConfig:
 
     def compile(self):
         block_factory = get_block_factory(self.block_factory)()
-        block_factory = Assimilator(block_factory)
+        block_factory = Assimilator(block_factory, bidirectional=False)
         upsampling_factory = get_upsampling_factory(self.upsampling_factory)()
         aggregation_factory = get_aggregation_factory(self.aggregation_factory)
 
@@ -563,13 +565,17 @@ class HeadConfig:
         """
         activation_factory = get_activation_factory(self.activation_factory)
         normalization_factory = get_normalization_factory(self.normalization_factory)
+        if self.shape == 1 or self.shape == (1,):
+            shape = (32,)
+        else:
+            shape = (32,) + self.shape
         head = heads.BasicConv(
             in_channels=self.in_channels,
-            out_shape=self.shape,
+            out_shape=shape,
             activation_factory=activation_factory,
             normalization_factory=normalization_factory,
         )
-        return nn.Sequential(head, Mean())
+        return nn.Sequential(head, Quantiles(tau=np.linspace(0, 1, 34)[1:-1]))
 
 
 @dataclass

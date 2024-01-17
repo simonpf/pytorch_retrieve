@@ -3,9 +3,11 @@ pytorch_retrieve.modules.output
 ===============================
 
 """
+import torch
 from torch import nn
 
-from pytorch_retrieve.tensors import MeanTensor
+from pytorch_retrieve.tensors import MeanTensor, QuantileTensor
+
 
 
 class Mean(nn.Module):
@@ -16,3 +18,11 @@ class Mean(nn.Module):
 
     def forward(self, x):
         return MeanTensor(x)
+
+class Quantiles(nn.Module):
+    def __init__(self, tau):
+        super().__init__()
+        self.tau = nn.Parameter(torch.tensor(tau), requires_grad=False)
+
+    def forward(self, x):
+        return QuantileTensor(x, tau=self.tau)

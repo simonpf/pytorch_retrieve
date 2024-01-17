@@ -25,7 +25,6 @@ class LightningRetrieval(L.LightningModule):
     The RetrievalModule implements a LightningModule for the training
     of PytorchRetrieve models.
     """
-
     def __init__(
         self,
         model: nn.Module,
@@ -145,7 +144,9 @@ class LightningRetrieval(L.LightningModule):
                     " clear which  target element the predictions should "
                     " be associated with."
                 )
-            target = next(iter(target.values()))
+            name, target = next(iter(target.items()))
+        else:
+            name = None
 
         if isinstance(pred, list):
             if not isinstance(target, list):
@@ -154,10 +155,29 @@ class LightningRetrieval(L.LightningModule):
                 )
             loss = torch.tensor(0.0)
             for pred_s, target_s in zip(pred, target):
+                mask = torch.isnan(target_s)
+                if mask.any():
+                    target_s = torch.nan_to_num(target_s, 0.0)
+                    target_s = MaskedTensor(target_s, mask=mask)
                 loss += pred_s.loss(target_s)
+
+            if name is not None:
+                self.log("Training loss", loss)
+            else:
+                self.log(f"Training loss ({name})", loss)
             return loss
 
+        mask = torch.isnan(target)
+        if mask.any():
+            target = torch.nan_to_num(target, 0.0)
+            target = MaskedTensor(target, mask=mask)
         loss = pred.loss(target)
+
+        if name is not None:
+            self.log("Training loss", loss)
+        else:
+            self.log(f"Training loss ({name})", loss)
+
         return loss
 
     def training_step(self, batch: tuple, batch_idx: int):
@@ -243,9 +263,13 @@ class LightningRetrieval(L.LightningModule):
         return losses
 
     def on_train_start(self):
-        self.metrics = self.current_training_config.get_metrics_dict(
-            self.model.output_names
-        )
+        current_config = self.current_training_config
+        if current_config is not None:
+            self.metrics = self.current_training_config.get_metrics_dict(
+                self.model.output_names
+            )
+        else:
+            self.metrics = []
 
     def validation_step_single_sequence(
         self, pred: List[torch.Tensor], target: Union[List[torch.Tensor], dict]
@@ -321,6 +345,10 @@ class LightningRetrieval(L.LightningModule):
                 "the model provided only a single, unnamed output."
             )
         metrics = next(iter(metrics.values()))
+
+        mask = torch.isnan(target)
+        if mask.any():
+            target = MaskedTensor(target, mask=mask)
 
         loss = pred.loss(target)
 
@@ -402,7 +430,6 @@ class LightningRetrieval(L.LightningModule):
                 for pred_k_s, target_k_s in zip(pred_k, target_k):
                     mask = torch.isnan(target_k_s)
                     if mask.any():
-                        # target_k_s = torch.nan_to_num(target_k_s, 0.0)
                         target_k_s = MaskedTensor(target_k_s, mask=mask)
 
                     loss_k_s = pred_k_s.loss(target_k_s)
@@ -422,7 +449,6 @@ class LightningRetrieval(L.LightningModule):
             else:
                 mask = torch.isnan(target_k)
                 if mask.any():
-                    # target_k = torch.nan_to_num(target_k, 0.0)
                     target_k = MaskedTensor(target_k, mask=mask)
 
                 loss_k = pred_k.loss(target_k)

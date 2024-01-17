@@ -266,6 +266,7 @@ class PlotSamples(tm.Metric):
                 "Could not import 'matplotlib', which is required by the PlotSamples"
                 "metric. Not producing any plots."
             )
+            return {}
 
         if self.sample_indices is None:
             permutation = np.random.permutation(len(self.indices))[: self.n_samples]
@@ -277,8 +278,12 @@ class PlotSamples(tm.Metric):
         images = {}
 
         if isinstance(self.targets[0], torch.Tensor):
-            target_min = np.nanmin(torch.stack(self.targets).cpu().numpy())
-            target_max = np.nanmax(torch.stack(self.targets).cpu().numpy())
+            target_min = np.nanmin(
+                torch.stack(self.targets).to(dtype=torch.float32).cpu().numpy()
+            )
+            target_max = np.nanmax(
+                torch.stack(self.targets).to(dtype=torch.float32).cpu().numpy()
+            )
             cmap = get_cmap("magma")
             cmap.set_bad("grey")
 
@@ -297,8 +302,8 @@ class PlotSamples(tm.Metric):
                 if target.dim() == 3:
                     target = target[0]
 
-                pred = pred.cpu().numpy()
-                target = target.cpu().numpy()
+                pred = pred.to(dtype=torch.float32).cpu().numpy()
+                target = target.to(dtype=torch.float32).cpu().numpy()
 
                 mappable = ScalarMappable(
                     cmap=cmap, norm=Normalize(target_min, target_max)
