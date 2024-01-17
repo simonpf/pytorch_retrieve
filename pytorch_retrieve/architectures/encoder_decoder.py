@@ -489,6 +489,7 @@ class DecoderConfig:
             upsampling_factors=upsampling_factors,
             skip_connections=decoder_config.skip_connections,
             block_factory=block_factory,
+            block_factory_args=block_factory_args,
             upsampling_factory=upsampling_factory,
             aggregation_factory=aggregation_factory,
             kind=kind,
