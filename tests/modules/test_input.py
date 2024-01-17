@@ -232,7 +232,7 @@ def test_normalization_3d(tmp_path):
 
 
 def test_load_input_modules(
-        encoder_decoder_config_file,
+        encoder_decoder_model_config_file,
         encoder_decoder_training_config_file,
         tmp_path
 ):
@@ -252,8 +252,9 @@ def test_load_input_modules(
         input_layer(x)
     input_layer.epoch_finished()
 
-    model = load_and_compile_model(encoder_decoder_config_file)
-    model.stems["x"][0] = input_layer
+    model = load_and_compile_model(encoder_decoder_model_config_file)
+    model.config_dict["input"]["x"]["normalize"] = "minmax"
+    model.stems["x"].insert(0, input_layer)
 
     model.save(tmp_path / "model.pt")
 
