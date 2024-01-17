@@ -56,7 +56,7 @@ def test_correlation_coef():
     assert torch.isclose(result, torch.tensor(-1.0))
 
 
-
+@pytest.mark.skipif(not HAS_MATPLOTLIB, reason="needs matplotlib")
 def test_plot_samples():
     """
     Test the worst sample metric.
