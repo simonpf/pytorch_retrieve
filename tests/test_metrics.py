@@ -1,5 +1,11 @@
 from conftest import data_loader_1d, data_loader_3d
 
+try:
+    import matplotlib
+    HAS_MATPLOTLIB = True
+except ImportError:
+    HAS_MATPLOTLIB = False
+import pytest
 import torch
 
 from pytorch_retrieve.metrics import Bias, CorrelationCoef, PlotSamples
@@ -71,6 +77,7 @@ def test_plot_samples():
     assert len(images["target"]) == 8
 
 
+@pytest.mark.skipif(not HAS_MATPLOTLIB, reason="needs matplotlib")
 def test_plot_samples_sequence():
     """
     Test the worst sample metric.
