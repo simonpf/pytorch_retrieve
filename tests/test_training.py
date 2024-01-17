@@ -105,7 +105,10 @@ def test_get_training_dataset(training_config_file):
     assert isinstance(x, torch.Tensor)
 
 
-def test_get_optimizer_and_scheduler(model_config_file, training_config_file):
+def test_get_optimizer_and_scheduler(
+        model_config_file,
+        training_config_file
+):
     """
     Test instantiating optimizer and scheduler
     """
@@ -128,7 +131,12 @@ def test_get_metrics_dict(model_config_file, training_config_file):
     assert len(metrics["y"]) == 2
 
 
-def test_training(model_config_file, training_config_file, tmp_path):
+def test_training(
+        model_config_file,
+        training_config_file,
+        tmp_path,
+        cpu_compute_config
+):
     """
     Run training on synthetic data.
     """
@@ -136,7 +144,7 @@ def test_training(model_config_file, training_config_file, tmp_path):
     schedule = parse_training_config(read_config_file(training_config_file))
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
     module.current_training_config
-    run_training(tmp_path, module, None)
+    run_training(tmp_path, module, compute_config=cpu_compute_config)
 
     # Assert that checkpoint files are created.
     ckpts = list((tmp_path / "checkpoints").glob("*.ckpt"))
@@ -146,6 +154,7 @@ def test_training(model_config_file, training_config_file, tmp_path):
 def test_training_encoder_decoder(
         encoder_decoder_model_config_file,
         encoder_decoder_training_config_file,
+        cpu_compute_config,
         tmp_path
 ):
     """
@@ -155,7 +164,7 @@ def test_training_encoder_decoder(
     schedule = parse_training_config(read_config_file(encoder_decoder_training_config_file))
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
     module.current_training_config
-    run_training(tmp_path, module, None)
+    run_training(tmp_path, module, compute_config=cpu_compute_config)
 
     # Assert that checkpoint files are created.
     ckpts = list((tmp_path / "checkpoints").glob("*.ckpt"))

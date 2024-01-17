@@ -3,6 +3,7 @@ from torch.utils.data import DataLoader
 import toml
 
 from pytorch_retrieve.architectures import compile_architecture
+from pytorch_retrieve.config import ComputeConfig
 from pytorch_retrieve.training import TrainingConfig
 from pytorch_retrieve.data.synthetic import (
     Synthetic1d,
@@ -25,6 +26,20 @@ def data_loader_3d(n_samples: int, batch_size: int) -> DataLoader:
     data = Synthetic3d(n_samples)
     return DataLoader(data, batch_size=batch_size, shuffle=True)
 
+
+CPU_COMPUTE_CONFIG = """
+accelerator="cpu"
+precision="16"
+strategy="auto"
+"""
+
+@pytest.fixture
+def cpu_compute_config():
+    """
+    A compute config object for training on the CPU.
+    """
+    compute_config = ComputeConfig.parse(toml.loads(CPU_COMPUTE_CONFIG))
+    return compute_config
 
 MODEL_CONFIG_MLP = """
 [architecture]
