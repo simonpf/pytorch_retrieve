@@ -106,7 +106,7 @@ def test_metnet_t():
     model = compile_architecture(config_dict)
     x = {
         "x": [torch.rand(1, 1, 256, 256) for i in range(4)],
-        "lead_times": [np.timedelta64(step * 30 * 60, "s") for step in range(1, 5)],
+        "lead_times": torch.tensor([np.arange(1.0, 5.0).astype(np.float32) * 30.0])
     }
     y = model(x)
     assert isinstance(y["y"], list)
