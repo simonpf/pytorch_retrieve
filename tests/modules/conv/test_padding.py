@@ -5,10 +5,20 @@ import pytest
 import torch
 
 from pytorch_retrieve.modules.conv.padding import (
+    calculate_padding,
     Zero,
     Reflect,
     Global
 )
+
+def test_calculate_padding():
+    """
+    Ensure that calculate padding for given kernel filter configuration matches
+    expected values.
+    """
+    padding = calculate_padding((3, 1))
+    assert padding == (1, 0)
+
 
 @pytest.mark.parametrize("padding_factory", [Zero, Reflect, Global])
 def test_padding(padding_factory):

@@ -9,6 +9,42 @@ import torch
 from torch import nn
 
 
+def calculate_padding(
+        kernel_size: Union[int, Tuple[int]],
+        dilation: Union[int, Tuple[int]] = 1
+) -> Tuple[int]:
+    """
+    Calculate padding for a kernel filter with given kernel size and dilation.
+
+    Args:
+        kernel_size: The filters kernel isze.
+        dilations: The dilation of the kernel.
+
+    Return:
+        Tuple specifying the padding to apply along each of the n-last dimensions,
+        where n is determined from the length of 'kernel_size' or set to 2 if
+        'kernel_size' is an integer.
+    """
+    if isinstance(kernel_size, int):
+        kernel_size = (kernel_size,) * 2
+        n_dim = 2
+    else:
+        n_dim = len(kernel_size)
+
+
+    if isinstance(dilation, int):
+        dilation = (dilation,) * n_dim
+    else:
+        assert len(dilation) == n_dim
+
+
+    padding = tuple([
+        (s_k - 1) * dil // 2 for s_k, dil in zip(kernel_size, dilation)
+    ])
+
+    return padding
+
+
 class Zero(nn.Module):
     """
     Pad input by padding zeros.
