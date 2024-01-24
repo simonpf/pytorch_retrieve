@@ -29,6 +29,8 @@ def _calculate_output_scales(base_scale, downsampling_factors):
     scl = base_scale
     scales = []
     for f_d in downsampling_factors:
+        if not isinstance(f_d, (int, float)):
+            f_d = max(f_d)
         scl = f_d * scl
         scales.append(scl)
     return scales

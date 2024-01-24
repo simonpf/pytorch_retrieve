@@ -295,16 +295,16 @@ class PlotSamples(tm.Metric):
             cmap.set_bad("grey")
 
             for pred, target in zip(self.preds, self.targets):
-                if pred.dim() not in [3, 4]:
-                    LOGGER.warning(
-                        "WorstSample metric received targets that are not 4D. These "
-                        "results are ignored."
-                    )
-                    return {}
-
                 pred = pred.expected_value()[0]
                 if pred.dim() == 3:
                     pred = pred[0]
+                if pred.dim() != 2:
+                    LOGGER.warning(
+                        "PlotSamples metric received targets whose expected value "
+                        "is not 2D and thus can't be plotted."
+                    )
+                    return {}
+
                 target = target[0]
                 if target.dim() == 3:
                     target = target[0]
@@ -333,22 +333,23 @@ class PlotSamples(tm.Metric):
             cmap.set_bad("grey")
 
             for pred_s, target_s in zip(pred, target):
-                if pred_s.dim() not in [3, 4]:
-                    LOGGER.warning(
-                        "WorstSample metric received targets that are not 4D. These "
-                        "results are ignored."
-                    )
-                    return {}
-
                 pred_s = pred_s.expected_value()[0]
                 if pred_s.dim() == 3:
                     pred_s = pred_s[0]
+                if pred_s.dim() != 2:
+                    LOGGER.warning(
+                        "PlotSamples metric received targets whose expected value "
+                        "is not 2D and thus can't be plotted."
+                    )
+                    return {}
+
                 target_s = target_s[0]
                 if target_s.dim() == 3:
                     target_s = target_s[0]
 
-                pred_s = pred_s.cpu().numpy()
-                target_s = target_s.cpu().numpy()
+
+                pred_s = pred_s.to(dtype=torch.float32).cpu().numpy()
+                target_s = target_s.to(dtype=torch.float32).cpu().numpy()
 
                 mappable = ScalarMappable(
                     cmap=cmap, norm=Normalize(target_min, target_max)

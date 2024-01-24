@@ -102,7 +102,7 @@ def get_upsampling_factory(name) -> Callable[[int], nn.Module]:
             f"The upsampling factory '{name}' is not defined. Please refer "
             " to the documentation of "
             "'pytorch_retrieve.modules.conv.upsampling' for available "
-            " block factories."
+            " upsampling factories."
         )
     return upsampling_factory
 
@@ -125,10 +125,75 @@ def get_aggregation_factory(name) -> Callable[[int], nn.Module]:
             f"The aggregation factory '{name}' is not defined. Please refer "
             " to the documentation of "
             "'pytorch_retrieve.modules.conv.aggregation' for available "
-            " block factories."
+            " aggregation factories."
         )
     return aggregation_factory
 
+
+def get_stem_factory(name) -> Callable[[int, int], nn.Module]:
+    """
+    Retrieve a stem factory by its name.
+
+    Args:
+        name: The name of the stem factory.
+
+    Return:
+        A factory object to produce a stem for an encoder-decoder architecture.
+    """
+    try:
+        stem_factory = getattr(stems, name)
+    except AttributeError:
+        raise ValueError(
+            f"The stem kind '{name}' is not defined. Please refer "
+            " to the documentation of "
+            "'pytorch_retrieve.modules.conv.stems' for available "
+            " stems."
+        )
+    return stem_factory
+
+
+def get_head_factory(name) -> Callable[[int, Tuple[int]], nn.Module]:
+    """
+    Retrieve a head factory by its name.
+
+    Args:
+        name: The name of the head factory.
+
+    Return:
+        A factory object to produce a head for an encoder-decoder architecture.
+    """
+    try:
+        head_factory = getattr(heads, name)
+    except AttributeError:
+        raise ValueError(
+            f"The head kind '{name}' is not defined. Please refer "
+            " to the documentation of "
+            "'pytorch_retrieve.modules.conv.heads' for available "
+            " stems."
+        )
+    return head_factory
+
+
+def get_output(name) -> Callable[[int, Tuple[int]], nn.Module]:
+    """
+    Retrieve a output factory by its name.
+
+    Args:
+        name: The name of the output factory.
+
+    Return:
+        A factory object to produce an output layer of a given kind.
+    """
+    try:
+        output_factory = getattr(output, name)
+    except AttributeError:
+        raise ValueError(
+            f"The output kind '{name}' is not defined. Please refer "
+            " to the documentation of "
+            "'pytorch_retrieve.modules.conv.heads' for available "
+            " stems."
+        )
+    return output_factory
 
 @dataclass
 class StemConfig:
@@ -149,10 +214,10 @@ class StemConfig:
         normalize: String indicating the kind of normalization applied to
             the inputs.
     """
-
     input_name: str
     in_channels: int
     in_scale: int
+    kind: str
     out_channels: int
     depth: int = (0,)
     downsampling: int = 1
@@ -184,6 +249,13 @@ class StemConfig:
         depth = get_config_attr(
             "depth", int, config_dict, f"architecture.stem.{name}", 0
         )
+        kind = get_config_attr(
+            "kind",
+            str,
+            config_dict,
+            f"architecture.stem.{name}",
+            default="BasicConv",
+        )
         out_channels = get_config_attr(
             "out_channels",
             int,
@@ -199,6 +271,7 @@ class StemConfig:
             input_name,
             in_channels=in_channels,
             in_scale=in_scale,
+            kind=kind,
             out_channels=out_channels,
             depth=depth,
             downsampling=downsampling,
@@ -228,8 +301,10 @@ class StemConfig:
         blocks = []
         if self.normalize != "none":
             blocks.append(StandardizationLayer(self.input_name, self.in_channels))
+
+        stem_factory = get_stem_factory(self.kind)
         blocks.append(
-            stems.BasicConv(
+            stem_factory(
                 self.in_channels,
                 self.out_channels,
                 depth=self.depth,
@@ -304,7 +379,7 @@ class EncoderConfig:
             "channels", list, config_dict, "architecture.encoder"
         )
         stage_depths = get_config_attr(
-            "stage_depths", list, config_dict, "architecture.encoder"
+            "stage_depths", list, config_dict, "architecture.encoder", required=True
         )
         default = [2] * (len(channels) - 1)
         downsampling_factors = get_config_attr(
@@ -365,6 +440,8 @@ class EncoderConfig:
         scale = self.base_scale
         scales = [scale]
         for f_d in self.downsampling_factors:
+            if isinstance(f_d, list):
+                f_d = max(f_d)
             scale = scale * f_d
             scales.append(scale)
         return scales
@@ -440,27 +517,27 @@ class DecoderConfig:
     kind: str = "standard"
 
     @classmethod
-    def parse(cls, decoder_config, config_dict):
+    def parse(cls, encoder_config, config_dict):
         """
         Parse decoder config object from configuration dictionary.
 
         Args:
-            decoder_config: The parsed decoder configuration of the
+            encoder_config: The parsed decoder configuration of the
                 architecture.
             config_dict: The 'decoder' section of the architecture configuration.
 
         Return:
-            A DecoderConfig object representing the configuration of j
+            A DecoderConfig object representing the given configuration.
         """
         kind = get_config_attr("kind", str, config_dict, "architecture.decoder", "none")
 
         channels = get_config_attr(
             "channels", list, config_dict, "architecture.decoder"
         )
-        channels.insert(0, decoder_config.out_channels)
+        channels.insert(0, encoder_config.out_channels)
 
         stage_depths = get_config_attr(
-            "stage_depths", list, config_dict, "architecture.decoder"
+            "stage_depths", list, config_dict, "architecture.decoder", required=True
         )
         default = [2] * len(stage_depths)
         upsampling_factors = get_config_attr(
@@ -487,7 +564,7 @@ class DecoderConfig:
             channels=channels,
             stage_depths=stage_depths,
             upsampling_factors=upsampling_factors,
-            skip_connections=decoder_config.skip_connections,
+            skip_connections=encoder_config.skip_connections,
             block_factory=block_factory,
             block_factory_args=block_factory_args,
             upsampling_factory=upsampling_factory,
@@ -532,16 +609,17 @@ class HeadConfig:
     Dataclass describing the head of a decoder-encoder architecture.
     """
 
+    output_config: OutputConfig
     in_channels: int
-    shape: Tuple[int]
     depth: int = 1
+    kind: str = "BasicConv"
     activation_factory: Optional[Callable[[], nn.Module]] = None
     normalization_factory: Optional[Callable[[int], nn.Module]] = None
 
     @classmethod
-    def parse(cls, decoder_config, output_config, name, config_dict):
-        in_channels = decoder_config.out_channels
+    def parse(cls, in_channels, output_config, name, config_dict):
         depth = get_config_attr("depth", int, config_dict, f"architecture.head", 1)
+        kind = get_config_attr("kind", str, config_dict, f"architecture.head", "BasicConv")
         activation_factory = get_config_attr(
             "activation_factory", str, config_dict, f"architecture.head", "ReLU"
         )
@@ -553,9 +631,10 @@ class HeadConfig:
             "BatchNorm2d",
         )
         return HeadConfig(
+            output_config=output_config,
             in_channels=in_channels,
-            shape=output_config.shape,
             depth=depth,
+            kind=kind,
             activation_factory=activation_factory,
             normalization_factory=normalization_factory,
         )
@@ -565,7 +644,9 @@ class HeadConfig:
         Convert configuration object to dict representation suitable for
         serialization.
         """
-        return asdict(self)
+        dct = asdict(self)
+        dct.pop("output_config")
+        return dct
 
     def compile(self) -> nn.Module:
         """
@@ -579,13 +660,17 @@ class HeadConfig:
         """
         activation_factory = get_activation_factory(self.activation_factory)
         normalization_factory = get_normalization_factory(self.normalization_factory)
-        head = heads.BasicConv(
+        head_factory = get_head_factory(self.kind)
+        shape = self.output_config.get_output_shape()
+        head = head_factory(
             in_channels=self.in_channels,
-            out_shape=self.shape,
+            out_shape=shape,
             activation_factory=activation_factory,
             normalization_factory=normalization_factory,
         )
-        return nn.Sequential(head, Mean())
+        output_factory = self.output_config.get_output_layer()
+
+        return nn.Sequential(head, output_factory)
 
 
 @dataclass
@@ -648,12 +733,12 @@ class EncoderDecoderConfig:
                 else:
                     config_dict = head_config_dict["base"]
                 head_configs[name] = HeadConfig.parse(
-                    decoder_config, output_config, name, config_dict
+                    decoder_config.out_channels, output_config, name, config_dict
                 )
         else:
             head_configs = {
                 name: HeadConfig.parse(
-                    decoder_config, output_config, "head", head_config_dict
+                    decoder_config.out_channels, output_config, "head", head_config_dict
                 )
                 for name, output_config in output_configs.items()
             }
@@ -835,6 +920,7 @@ class EncoderDecoder(RetrievalModel):
             A single output tensor or a dictionary mapping output names to output
             tensors.
         """
+        is_sequence = False
         if not isinstance(x, dict):
             if len(self.stems) > 1:
                 raise ValueError(
@@ -842,15 +928,34 @@ class EncoderDecoder(RetrievalModel):
                     "than one stem. This requires the input to be a dictionary "
                     " mapping input names to corresponding data tensors."
                 )
+            # Sequence inputs are stacked to support 3D convolutions.
+            if isinstance(x, list):
+                is_sequence = True
+                x = torch.stack(x, -3)
+
             name, stem = next(iter(self.stems.items()))
             encs = {name: stem(x)}
         else:
-            encs = {inpt: self.stems[inpt](x[inpt]) for inpt in x}
+            encs = {}
+            for name, tensor in x.items():
+                if isinstance(tensor, list):
+                    is_sequence = True
+                    tensor = torch.stack(tensor, -3)
+                encs[name] = self.stems[name](tensor)
 
         encs = self.encoder(encs)
         decs = self.decoder(encs)
 
+        # Return
+        if len(self.heads) == 0:
+            return decs
+
         output = {name: head(decs) for name, head in self.heads.items()}
+
+        # Convert 5D tensors back to lists of outputs.
+        for name, tensor in output.items():
+            if is_sequence:
+                output[name] = list(torch.unbind(tensor, -3))
 
         if not isinstance(x, dict):
             return next(iter(output.values()))

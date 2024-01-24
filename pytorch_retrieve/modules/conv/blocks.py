@@ -590,6 +590,7 @@ class ResNeXt2Plus1Block(nn.Module, ParamCount):
 
         if isinstance(kernel_size, int):
             kernel_size = (kernel_size,) * 3
+        kernel_size= tuple(kernel_size)
 
         if isinstance(downsample, int):
             downsample = (downsample,) * 3
@@ -598,6 +599,7 @@ class ResNeXt2Plus1Block(nn.Module, ParamCount):
 
         stride = (1, 1, 1)
         if downsample is not None and max(downsample) > 1:
+            downsample = tuple(downsample)
             stride = downsample
 
         # Short cut
@@ -632,6 +634,7 @@ class ResNeXt2Plus1Block(nn.Module, ParamCount):
                 bias=bias,
                 stride=spatial_stride,
             ),
+            activation_factory(inplace=True),
             normalization_factory(out_channels // bottleneck),
             nn.Conv3d(
                 out_channels // bottleneck,

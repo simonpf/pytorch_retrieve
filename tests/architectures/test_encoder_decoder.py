@@ -33,7 +33,7 @@ stage_depths = [2, 2, 2]
 n_features = 16
 
 [output.precip]
-kind = "mean"
+kind = "Mean"
 shape = 1
 """
 
@@ -91,7 +91,7 @@ stage_depths = [2, 2, 2]
 n_features = 16
 
 [output.precip]
-kind = "mean"
+kind = "Mean"
 shape = 1
 """
 
@@ -159,14 +159,14 @@ name = "EncoderDecoder"
 
 [architecture.stem]
 depth = 2
-out_channels = 16
+out_channels = 64
 
 [architecture.encoder]
-channels = [16, 32, 64, 128]
+channels = [64, 128, 128, 256]
 stage_depths = [2, 2, 2, 2]
 
 [architecture.decoder]
-channels = [64, 32, 16]
+channels = [128, 128, 64]
 stage_depths = [2, 2, 2]
 
 [input.x_1]
@@ -176,7 +176,7 @@ n_features = 16
 n_features = 32
 
 [output.precip]
-kind = "mean"
+kind = "Mean"
 shape = 1
 """
 
@@ -200,8 +200,8 @@ def test_encoder_config_multi_input(multi_input_cfg):
 
     config = EncoderDecoderConfig.parse(input_cfgs, output_cfgs, arch_config)
 
-    assert config.encoder_config.channels == [16, 32, 64, 128]
-    assert config.decoder_config.channels == [128, 64, 32, 16]
+    assert config.encoder_config.channels == [64, 128, 128, 256]
+    assert config.decoder_config.channels == [256, 128, 128, 64]
     assert isinstance(config.stem_configs, dict)
     assert isinstance(config.head_configs, dict)
 
@@ -225,14 +225,14 @@ name = "EncoderDecoder"
 
 [architecture.stem]
 depth = 2
-out_channels = 16
+out_channels = 64
 
 [architecture.encoder]
-channels = [16, 32, 64, 128]
+channels = [64, 128, 128, 256]
 stage_depths = [2, 2, 2, 2]
 
 [architecture.decoder]
-channels = [64, 32, 16]
+channels = [128, 128, 64]
 stage_depths = [2, 2, 2]
 
 [input.x_1]
@@ -242,11 +242,11 @@ n_features = 16
 n_features = 32
 
 [output.precip]
-kind = "mean"
+kind = "Mean"
 shape = 1
 
 [output.snow]
-kind = "mean"
+kind = "Mean"
 shape = [4, 4]
 """
 
@@ -272,6 +272,135 @@ def test_encoder_config_multi_output(multi_output_cfg):
 
     assert config.encoder_config.channels == [16, 32, 64, 128]
     assert config.decoder_config.channels == [128, 64, 32, 16]
+    assert isinstance(config.stem_configs, dict)
+    assert isinstance(config.head_configs, dict)
+
+    encdec = EncoderDecoder.from_config_dict(multi_output_cfg)
+    assert encdec.stems["x_1"][-1].n_params > 0
+
+    x = {
+        "x_1": torch.rand(1, 16, 128, 128),
+        "x_2": torch.rand(1, 32, 128, 128),
+    }
+
+    y = encdec(x)
+
+    assert "precip" in y
+    assert "snow" in y
+    assert y["snow"].shape == (1, 4, 4, 128, 128)
+    assert isinstance(y["snow"], MeanTensor)
+
+
+def test_encoder_config_multi_output(multi_output_cfg):
+    """
+    Instantiate an encoder-decoder architecture and ensure that it produces
+    the expected outputs.
+    """
+    arch_config = multi_output_cfg["architecture"]
+    input_config = multi_output_cfg["input"]
+    output_config = multi_output_cfg["output"]
+
+    input_cfgs = {
+        name: InputConfig.parse(name, cfg) for name, cfg in input_config.items()
+    }
+    output_cfgs = {
+        name: OutputConfig.parse(name, cfg) for name, cfg in output_config.items()
+    }
+
+    config = EncoderDecoderConfig.parse(input_cfgs, output_cfgs, arch_config)
+
+    assert config.encoder_config.channels == [16, 32, 64, 128]
+    assert config.decoder_config.channels == [128, 64, 32, 16]
+    assert isinstance(config.stem_configs, dict)
+    assert isinstance(config.head_configs, dict)
+
+    encdec = EncoderDecoder.from_config_dict(multi_output_cfg)
+    assert encdec.stems["x_1"][-1].n_params > 0
+
+    x = {
+        "x_1": torch.rand(1, 16, 128, 128),
+        "x_2": torch.rand(1, 32, 128, 128),
+    }
+
+    y = encdec(x)
+
+    assert "precip" in y
+    assert "snow" in y
+    assert y["snow"].shape == (1, 4, 4, 128, 128)
+    assert isinstance(y["snow"], MeanTensor)
+
+
+def test_encoder_config_3d(multi_output_cfg):
+    """
+    Instantiate an encoder-decoder architecture and ensure that it produces
+    the expected outputs.
+    """
+    arch_config = multi_output_cfg["architecture"]
+    arch_config["stem"]["kind"] = "BasicConv3d"
+    arch_config["head"] = {"kind": "BasicConv3d"}
+    arch_config["encoder"]["block_factory"] = "ResNeXt2Plus1"
+    arch_config["encoder"]["aggregation_factory"] = "Linear3d"
+    arch_config["encoder"]["downsampling_factors"] = [[1, 2, 2]] * 3
+    arch_config["decoder"]["block_factory"] = "ResNeXt2Plus1"
+    arch_config["decoder"]["upsampling_factors"] = [[1, 2, 2]] * 3
+    arch_config["decoder"]["upsampling_factory"] = "Trilinear"
+    input_config = multi_output_cfg["input"]
+    output_config = multi_output_cfg["output"]
+
+    input_cfgs = {
+        name: InputConfig.parse(name, cfg) for name, cfg in input_config.items()
+    }
+    output_cfgs = {
+        name: OutputConfig.parse(name, cfg) for name, cfg in output_config.items()
+    }
+
+    config = EncoderDecoderConfig.parse(input_cfgs, output_cfgs, arch_config)
+
+    assert config.encoder_config.channels == [64, 128, 128, 256]
+    assert config.decoder_config.channels == [256, 128, 128, 64]
+    assert isinstance(config.stem_configs, dict)
+    assert isinstance(config.head_configs, dict)
+
+    encdec = EncoderDecoder.from_config_dict(multi_output_cfg)
+    assert encdec.stems["x_1"][-1].n_params > 0
+
+    x = {
+        "x_1": [
+            torch.rand(1, 16, 128, 128),
+            torch.rand(1, 16, 128, 128),
+            torch.rand(1, 16, 128, 128),
+        ],
+        "x_2": [
+            torch.rand(1, 32, 128, 128),
+            torch.rand(1, 32, 128, 128),
+            torch.rand(1, 32, 128, 128),
+        ]
+    }
+
+    y = encdec(x)
+
+    assert "precip" in y
+    assert "snow" in y
+    assert isinstance(y["snow"], list)
+    assert y["snow"][0].shape == (1, 4, 4, 128, 128)
+
+
+def test_encoder_config_multi_output(multi_output_cfg):
+    arch_config = multi_output_cfg["architecture"]
+    input_config = multi_output_cfg["input"]
+    output_config = multi_output_cfg["output"]
+
+    input_cfgs = {
+        name: InputConfig.parse(name, cfg) for name, cfg in input_config.items()
+    }
+    output_cfgs = {
+        name: OutputConfig.parse(name, cfg) for name, cfg in output_config.items()
+    }
+
+    config = EncoderDecoderConfig.parse(input_cfgs, output_cfgs, arch_config)
+
+    assert config.encoder_config.channels == [64, 128, 128, 256]
+    assert config.decoder_config.channels == [256, 128, 128, 64]
     assert isinstance(config.stem_configs, dict)
     assert isinstance(config.head_configs, dict)
 
@@ -326,7 +455,7 @@ preset = "{name}"
 n_features = 4
 
 [output.y]
-kind = "mean"
+kind = "Mean"
 shape = 1
 """
 

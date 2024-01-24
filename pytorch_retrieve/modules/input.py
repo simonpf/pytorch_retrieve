@@ -235,7 +235,8 @@ class InputLayer(nn.Module):
         Signal processing of an epoch of data has finished.
         """
         if self.initialized:
-            self.finalized.set_(torch.tensor(True))
+            device = self.finalized.device
+            self.finalized.set_(torch.tensor(True).to(device=device))
             self.finalize()
             return None
         self.initialized = True
@@ -275,7 +276,8 @@ class InputLayer(nn.Module):
         self.p_max = nn.Parameter(
             torch.tensor(dataset["max"].data), requires_grad=False
         )
-        self.finalized.set_(torch.tensor(True))
+        device = self.finalized.device
+        self.finalized.set_(torch.tensor(True).to(device=device))
 
 
 class StandardizationLayer(InputLayer):
@@ -313,7 +315,7 @@ class StandardizationLayer(InputLayer):
         self.sentinel = sentinel
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        pad_dims = 0 if x.dim() == 2 else 2
+        pad_dims = x.dim() - 2
 
         if self.finalized.item():
             if self.kind == "standardize":

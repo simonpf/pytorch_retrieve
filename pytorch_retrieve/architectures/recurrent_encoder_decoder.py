@@ -273,6 +273,8 @@ class EncoderConfig:
     aggregation_factory: str = "linear"
     shared: bool = True
     multi_scale: bool = True
+    recurrence_factory: str = "Assimilator"
+    recurrence_factory_args: Optional[Dict[str, Any]] = None
 
     @classmethod
     def parse(
@@ -326,6 +328,12 @@ class EncoderConfig:
         multi_scale = get_config_attr(
             "multi_scale", bool, config_dict, "architecture.encoder", True
         )
+        recurrence_factory = get_config_attr(
+            "recurrence_factory", str, config_dict, "architecture.encoder", "Assimilator"
+        )
+        recurrence_factory_args = get_config_attr(
+            "recurrence_factory_args", dict, config_dict, "architecture.encoder", {}
+        )
 
         return EncoderConfig(
             kind=kind,
@@ -339,6 +347,8 @@ class EncoderConfig:
             aggregation_factory=aggregation_factory,
             shared=shared,
             multi_scale=multi_scale,
+            recurrence_factory=recurrence_factory,
+            recurrence_factory_args=recurrence_factory_args
         )
 
     @property
@@ -421,7 +431,6 @@ class DecoderConfig:
             to use to create the aggregation modules in the decoder.
         kind: String defining the kind of the decoder architecture.
     """
-
     channels: List[int]
     stage_depths: List[int]
     upsampling_factors: List[int]
@@ -430,6 +439,8 @@ class DecoderConfig:
     upsampling_factory: "bilinear"
     aggregation_factory: str = "linear"
     kind: str = "standard"
+    recurrence_factory: str = "Assimilator"
+    recurrence_factory_args: Dict[str, Any] = None
 
     @classmethod
     def parse(cls, encoder_config, config_dict):
@@ -456,21 +467,27 @@ class DecoderConfig:
         )
         default = [2] * len(stage_depths)
         upsampling_factors = get_config_attr(
-            "upsampling_factors", list, config_dict, "architecture.encoder", default
+            "upsampling_factors", list, config_dict, "architecture.decoder", default
         )
 
         block_factory = get_config_attr(
-            "block_factory", str, config_dict, "architecture.encoder", "BasicConv"
+            "block_factory", str, config_dict, "architecture.decoder", "BasicConv"
         )
         upsampling_factory = get_config_attr(
             "upsampling_factory",
             str,
             config_dict,
-            "architecture.encoder",
+            "architecture.decoder",
             "Bilinear",
         )
         aggregation_factory = get_config_attr(
-            "aggregation_factory", str, config_dict, "architecture.encoder", "Linear"
+            "aggregation_factory", str, config_dict, "architecture.decoder", "Linear"
+        )
+        recurrence_factory = get_config_attr(
+            "recurrence_factory", str, config_dict, "architecture.decoder", "Assimilator"
+        )
+        recurrence_factory_args = get_config_attr(
+            "recurrence_factory_args", dict, config_dict, "architecture.decoder", {}
         )
         return DecoderConfig(
             channels=channels,
@@ -481,6 +498,8 @@ class DecoderConfig:
             upsampling_factory=upsampling_factory,
             aggregation_factory=aggregation_factory,
             kind=kind,
+            recurrence_factory=recurrence_factory,
+            recurrence_factory_args=recurrence_factory_args
         )
 
     @property

@@ -153,7 +153,10 @@ class Decoder(nn.Module, ParamCount):
         for index, (n_blocks, out_channels) in enumerate(
             zip(stage_depths, channels[1:])
         ):
-            scale /= upsampling_factors[index]
+            f_up = upsampling_factors[index]
+            if isinstance(f_up, (list, tuple)):
+                f_up = max(f_up)
+            scale /= f_up
 
             self.upsamplers.append(
                 upsampler_factory(
@@ -197,7 +200,10 @@ class Decoder(nn.Module, ParamCount):
             stages = self.stages
 
             for ind, (up, stage) in enumerate(zip(self.upsamplers, stages)):
-                scale /= self.upsampling_factors[ind]
+                f_up = self.upsampling_factors[ind]
+                if isinstance(f_up, (list, tuple)):
+                    f_up = max(f_up)
+                scale /= f_up
                 if scale in self.skip_connections:
                     y = stage(cat(x[scale], forward(up, y)))
                 else:

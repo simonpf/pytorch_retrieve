@@ -65,6 +65,9 @@ class QuantileTensor(torch.Tensor):
         if func == torch.as_tensor:
             return result
 
+        if func == torch.Tensor.unbind or func == torch.unbind:
+            return tuple([QuantileTensor(tensor, tau=args[0].tau) for tensor in result])
+
         if isinstance(result, torch.Tensor):
             q_args = get_quantile_attrs(args)
             if q_args is None:
@@ -85,8 +88,10 @@ class QuantileTensor(torch.Tensor):
         tau = self.tau.to(self.device, self.dtype)
         # Pad dummy dimensions to make broadcasting work.
         tau = tau.__getitem__((...,) + (None,) * (self.ndim - self.quantile_dim - 1))
+
         if y_true.ndim < self.ndim:
-            y_true = y_true.unsqueeze(self.quantile_dim)
+            new_shape = y_true.shape[:1] + (1,) * (self.ndim - y_true.ndim) + y_true.shape[1:]
+            y_true = y_true.reshape(new_shape)
 
         delta = self.base - y_true
         loss = torch.where(delta > 0, tau * delta, (tau - 1.0) * delta)

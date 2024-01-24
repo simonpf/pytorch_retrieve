@@ -8,14 +8,17 @@ The 'pytorch_retrieve.config' module implements functionality for
 from dataclasses import dataclass, asdict
 import os
 from pathlib import Path
-from typing import Any, List, Optional, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import lightning as L
 from lightning.pytorch import strategies
-import torch
-
-import yaml
+import numpy as np
 import toml
+from torch import nn
+import torch
+import yaml
+
+from pytorch_retrieve.modules import output
 
 
 def read_config_file(path: Path) -> dict:
@@ -112,7 +115,8 @@ def get_config_attr(name, constr, config, what, default=None, required=False):
         return default
     try:
         attr = replace_environment_variables(config.get(name))
-        attr = constr(attr)
+        if constr is not None:
+            attr = constr(attr)
     except ValueError:
         raise RuntimeError(
             f"Error during parsing of attribute '{name}' of the config for "
@@ -164,12 +168,12 @@ class OutputConfig:
     target: str
     kind: str
     shape: List[int]
+    quantiles: Optional[Union[int, List[float]]]
 
     @classmethod
     def parse(cls, name, cfg):
         target = get_config_attr("target", str, cfg, f"output.{name}", name)
         kind = get_config_attr("kind", str, cfg, f"output.{name}")
-
         shape = cfg.get("shape", None)
         if shape is None:
             raise ValueError(
@@ -186,7 +190,68 @@ class OutputConfig:
                     f"of output {name} but got a value of type '{type(shape)}'"
                     "."
                 )
-        return OutputConfig(target, kind, shape)
+
+        quantiles = get_config_attr("quantiles", None, cfg, f"output.{name}")
+
+        return OutputConfig(
+            target=target,
+            kind=kind,
+            shape=shape,
+            quantiles=quantiles
+        )
+
+
+    def get_output_shape(self) -> Tuple[int]:
+        """
+        Determine shape of the network output.
+        """
+        kind = self.kind
+
+        shape = self.shape
+        if isinstance(shape, int):
+            if shape == 1:
+                shape = ()
+            else:
+                shape = (shape,)
+
+        if kind == "Mean":
+            return shape
+
+        if kind == "Quantiles":
+            quantiles = self.quantiles
+            if isinstance(quantiles, int):
+                return (quantiles,) + shape
+            return (len(quantiles),) + shape
+
+        raise RuntimeError(
+            f"The output kind '{kind}' is currently not supported. Refer to "
+            "the documentation of the pytorch_retrieve.modules.output module "
+            "for available outputs."
+        )
+
+
+    def get_output_layer(self) -> nn.Module:
+        """
+        Get output layer for output.
+        """
+        kind = self.kind
+        if kind == "Mean":
+            return output.Mean()
+        if kind == "Quantiles":
+            quantiles = self.quantiles
+            if isinstance(quantiles, int):
+                quantiles = np.linspace(0, 1, quantiles + 2)[1:-1]
+            elif isinstance(quantiles, list):
+                quantiles = np.array(list)
+            return output.Quantiles(tau=quantiles)
+        raise RuntimeError(
+            f"The output kind '{kind}' is currently not supported. Refer to "
+            "the documentation of the pytorch_retrieve.modules.output module "
+            "for available outputs."
+        )
+
+
+        
 
     def to_config_dict(self):
         """

@@ -56,6 +56,9 @@ class MeanTensor(torch.Tensor):
         if func == torch.as_tensor:
             return result
 
+        if func == torch.Tensor.unbind or func == torch.unbind:
+            return tuple([MeanTensor(tensor) for tensor in result])
+
         if isinstance(result, torch.Tensor):
             return MeanTensor(result)
         return result
