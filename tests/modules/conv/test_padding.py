@@ -8,7 +8,8 @@ from pytorch_retrieve.modules.conv.padding import (
     calculate_padding,
     Zero,
     Reflect,
-    Global
+    Global,
+    Zero
 )
 
 def test_calculate_padding():
@@ -40,3 +41,14 @@ def test_global_padding():
     y = padding(x)
     assert (y[0, 0, 0, :3] == torch.tensor([5.0, 6.0, 7.0])).all()
     assert (y[0, 0, 0, -3:] == torch.tensor([0.0, 1.0, 2.0])).all()
+
+
+def test_zero_padding():
+    """
+    Test that zero padding pads zeros.
+    """
+    x = torch.arange(8).repeat((1, 1, 4, 1))
+    padding = Zero((2, 3))
+    y = padding(x)
+    assert (y[0, 0, 0, :3] == torch.tensor([0.0, 0.0, 0.0])).all()
+    assert (y[0, 0, 0, -3:] == torch.tensor([0.0, 0.0, 0.0])).all()
