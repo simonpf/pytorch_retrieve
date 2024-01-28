@@ -74,6 +74,7 @@ class EncoderConfig:
     downsampling_factors: List[int]
     base_scale: int = 1
     block_factory: str = "basic"
+    block_factory_args: dict[str, Any] = None
     downsampling_factory: str = "max_pool"
     aggregation_factory: str = "linear"
     shared: bool = True
@@ -117,6 +118,9 @@ class EncoderConfig:
         block_factory = get_config_attr(
             "block_factory", str, config_dict, "architecture.encoder", "BasicConv"
         )
+        block_factory_args = get_config_attr(
+            "block_factory_args", dict, config_dict, "architecture.encoder", {}
+        )
         downsampling_factory = get_config_attr(
             "downsampling_factory",
             str,
@@ -148,6 +152,7 @@ class EncoderConfig:
             downsampling_factors=downsampling_factors,
             base_scale=base_scale,
             block_factory=block_factory,
+            block_factory_args=block_factory_args,
             downsampling_factory=downsampling_factory,
             aggregation_factory=aggregation_factory,
             shared=shared,
