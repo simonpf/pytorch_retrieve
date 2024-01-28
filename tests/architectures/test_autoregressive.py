@@ -44,6 +44,7 @@ def test_propagator_config():
 TEMPORAL_ENCODER_CONFIG = (
     """
     latent_dim = 16
+    kind = "recurrent"
     [encoder]
     channels = [16, 32, 64]
     stage_depths = [2, 2, 2]
@@ -59,7 +60,36 @@ def test_temporal_encoder_config():
     Parse temporal encoder config, compile and list of tensors through encoder.
     """
     temporal_encoder_config = toml.loads(TEMPORAL_ENCODER_CONFIG)
-    temporal_encoder_config = TemporalEncoderConfig.parse(16, temporal_encoder_config)
+    temporal_encoder_config = TemporalEncoderConfig.parse(16, 2, temporal_encoder_config)
+    temporal_encoder = temporal_encoder_config.compile()
+
+    x = [torch.rand(1, 16, 64, 64) for x in range(4)]
+    y = temporal_encoder(x)
+    assert len(y) == 4
+    assert y[0].shape == (1, 16, 64, 64)
+
+DIRECT_TEMPORAL_ENCODER_CONFIG = (
+    """
+    latent_dim = 16
+    n_inputs = 4
+    kind = "direct"
+
+    [encoder]
+    channels = [16, 32, 64]
+    stage_depths = [2, 2, 2]
+
+    [decoder]
+    channels = [32, 16]
+    stage_depths= [2, 2]
+    """
+)
+
+def test_temporal_encoder_config():
+    """
+    Parse temporal encoder config, compile and list of tensors through encoder.
+    """
+    temporal_encoder_config = toml.loads(DIRECT_TEMPORAL_ENCODER_CONFIG)
+    temporal_encoder_config = TemporalEncoderConfig.parse(16, 2, temporal_encoder_config)
     temporal_encoder = temporal_encoder_config.compile()
 
     x = [torch.rand(1, 16, 64, 64) for x in range(4)]
@@ -163,6 +193,7 @@ AUTOREGRESSIVE_CONFIG = (
     stage_depths= [2, 2]
 
     [architecture.temporal_encoder]
+    kind="recurrent"
     [architecture.temporal_encoder.encoder]
     channels = [16, 32, 64]
     stage_depths = [2, 2, 2]

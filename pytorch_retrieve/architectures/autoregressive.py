@@ -5,7 +5,7 @@ pytroch_retrieve.architectures.autoregressive
 Generic implementation of autoregressive forecast models.
 """
 from dataclasses import dataclass, asdict
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 import torch
 from torch import nn
@@ -192,12 +192,15 @@ class TemporalEncoderConfig:
     Represents the configuration of the temporal encoder of this autoregressive
     model.
     """
+    kind: str
+    n_inputs: int
     latent_dim: int
+    order: int
     encoder_config: encoder_decoder.EncoderConfig
     decoder_config: encoder_decoder.DecoderConfig
 
     @classmethod
-    def parse(cls, latent_dim, config_dict) -> "TemporalEncoderConfig":
+    def parse(cls, latent_dim: int, order: int, config_dict: Dict[str, Any]) -> "TemporalEncoderConfig":
         """
         Parse configuration dictionary into a TemporalEncoderConfig.
 
@@ -206,22 +209,31 @@ class TemporalEncoderConfig:
             config_dict: A dictionary defining the configuration of the
                 temporal encoder.
         """
+        kind = get_config_attr("kind", None, config_dict, "architecture.temporal_encoder", required=True)
+        if kind == "direct":
+            n_inputs = get_config_attr("n_inputs", None, config_dict, "architecture.temporal_encoder", required=True)
+        else:
+            n_inputs = 0
+
         stem_config = encoder_decoder.StemConfig(
             "latent", latent_dim, 1, "none", latent_dim, 0, 1, "none"
         )
-        encoder_dict = get_config_attr("encoder", None, config_dict, "architecture.propagator", required=True)
+        encoder_dict = get_config_attr("encoder", None, config_dict, "architecture.temporal_encoder", required=True)
         encoder_config = recurrent.EncoderConfig.parse(
             {"latent": stem_config}, encoder_dict
         )
 
-        decoder_dict = get_config_attr("decoder", None, config_dict, "architecture.propagator", required=True)
+        decoder_dict = get_config_attr("decoder", None, config_dict, "architecture.temporal_encoder", required=True)
         if len(decoder_dict["channels"]) > 0:
             decoder_dict["channels"][-1] = latent_dim
         decoder_config = recurrent.DecoderConfig.parse(
             encoder_config, decoder_dict
         )
         return TemporalEncoderConfig(
+            kind=kind,
+            n_inputs=n_inputs,
             latent_dim=latent_dim,
+            order=order,
             encoder_config=encoder_config,
             decoder_config=decoder_config,
         )
@@ -232,6 +244,8 @@ class TemporalEncoderConfig:
         representation.
         """
         config = {
+            "kind": self.kind,
+            "n_inputs": self.n_inputs,
             "encoder": self.encoder_config.to_config_dict(),
             "decoder": self.decoder_config.to_config_dict()
         }
@@ -240,12 +254,24 @@ class TemporalEncoderConfig:
 
     def compile(self) -> "TemporalEncoder":
         """Compile propagator."""
-        encoder = self.encoder_config.compile()
-        decoder = self.decoder_config.compile()
-        return TemporalEncoder(encoder, decoder)
+        if self.kind == "recurrent":
+            encoder = self.encoder_config.compile()
+            decoder = self.decoder_config.compile()
+            return RecurrentTemporalEncoder(encoder, decoder)
+
+        block_factory = encoder_decoder.get_block_factory(self.encoder_config.block_factory)
+        block_factory = block_factory(**self.encoder_config.block_factory_args)
+
+        return DirectTemporalEncoder(
+            block_factory,
+            self.n_inputs,
+            self.latent_dim,
+            self.order,
+        )
 
 
-class TemporalEncoder(nn.Module):
+
+class RecurrentTemporalEncoder(nn.Module):
     """
     The temporal encoder takes a sequence of latent model states and encodes
     them into a sequence of updated model states that will be fed into the
@@ -276,6 +302,28 @@ class TemporalEncoder(nn.Module):
             A list of encoded model states.
         """
         return self.decoder(self.encoder({"latent": x}))
+
+class DirectTemporalEncoder(nn.Module):
+    """
+    The direct temporal encoder merges a sequence of encoded observations by direct
+    application of a convolution block.
+    """
+    def __init__(
+            self,
+            block_factory: Callable[[int, int], nn.Module],
+            n_inputs: int,
+            latent_dim: int,
+            order: int
+    ):
+        super().__init__()
+        self.blocks = nn.ModuleList([
+            block_factory(n_inputs * latent_dim, latent_dim) for _ in range(n_inputs)
+        ])
+
+    def forward(self, x):
+        x = torch.cat(x, 1)
+        return [block(x) for block in self.blocks]
+
 
 
 @dataclass
@@ -577,7 +625,7 @@ class AutoregressiveConfig:
         encoder_cfg = EncoderConfig.parse(latent_dim, input_configs, encoder_cfg)
 
         temporal_encoder_cfg = get_config_attr("temporal_encoder", dict, arch_config, "architecture", required=True)
-        temporal_encoder_cfg = TemporalEncoderConfig.parse(latent_dim,  temporal_encoder_cfg)
+        temporal_encoder_cfg = TemporalEncoderConfig.parse(latent_dim, order,  temporal_encoder_cfg)
 
         propagator_cfg = get_config_attr("propagator", dict, arch_config, "architecture", required=True)
         propagator_cfg = PropagatorConfig.parse(order, latent_dim,  propagator_cfg)
