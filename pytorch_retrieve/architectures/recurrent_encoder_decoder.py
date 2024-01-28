@@ -206,7 +206,7 @@ class EncoderConfig:
              The encoder module described by this EncoderConfiguration object.
         """
         recurrence_factory = recurrent.get_recurrence_factory(self.recurrence_factory)
-        block_factory = get_block_factory(self.block_factory)()
+        block_factory = get_block_factory(self.block_factory)(**self.block_factory_args)
         block_factory = recurrence_factory(block_factory)
         downsampling_factory = get_downsampling_factory(self.downsampling_factory)()
         aggregation_factory = get_aggregation_factory(self.aggregation_factory)
@@ -249,7 +249,8 @@ class DecoderConfig:
     upsampling_factors: List[int]
     skip_connections: Dict[int, int]
     block_factory: "basic"
-    upsampling_factory: "bilinear"
+    block_factory_args: Optional[Dict[str, Any]] = None
+    upsampling_factory: str = "bilinear"
     aggregation_factory: str = "linear"
     kind: str = "standard"
     recurrence_factory: str = "LSTM"
@@ -286,6 +287,9 @@ class DecoderConfig:
         block_factory = get_config_attr(
             "block_factory", str, config_dict, "architecture.decoder", "BasicConv"
         )
+        block_factory_args = get_config_attr(
+            "block_factory_args", dict, config_dict, "architecture.encoder", {}
+        )
         upsampling_factory = get_config_attr(
             "upsampling_factory",
             str,
@@ -308,6 +312,7 @@ class DecoderConfig:
             upsampling_factors=upsampling_factors,
             skip_connections=encoder_config.skip_connections,
             block_factory=block_factory,
+            block_factory_args=block_factory_args,
             upsampling_factory=upsampling_factory,
             aggregation_factory=aggregation_factory,
             kind=kind,
@@ -330,7 +335,7 @@ class DecoderConfig:
 
     def compile(self):
         recurrence_factory = recurrent.get_recurrence_factory(self.recurrence_factory)
-        block_factory = get_block_factory(self.block_factory)()
+        block_factory = get_block_factory(self.block_factory)(**self.block_factory_args)
         block_factory = recurrence_factory(block_factory)
         upsampling_factory = get_upsampling_factory(self.upsampling_factory)()
         aggregation_factory = get_aggregation_factory(self.aggregation_factory)
