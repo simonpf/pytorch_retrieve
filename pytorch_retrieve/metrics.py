@@ -34,7 +34,7 @@ class ScalarMetric:
         name = self.name
         if output_name is not None:
             name += f" ({output_name})"
-        lightning_module.log(self.name, value, on_step=False, on_epoch=True)
+        lightning_module.log(self.name, value, on_step=False, on_epoch=True, sync_dist=True)
 
 
 class Bias(ScalarMetric, tm.Metric):
@@ -291,6 +291,7 @@ class PlotSamples(tm.Metric):
             target_max = np.nanmax(
                 torch.stack(self.targets).to(dtype=torch.float32).cpu().numpy()
             )
+            target_max *= 0.2
             cmap = get_cmap("magma")
             cmap.set_bad("grey")
 
@@ -329,6 +330,7 @@ class PlotSamples(tm.Metric):
 
             target_min = np.nanmin(torch.stack(target).cpu().numpy())
             target_max = np.nanmax(torch.stack(target).cpu().numpy())
+            target_max *= 0.2
             cmap = get_cmap("magma")
             cmap.set_bad("grey")
 
