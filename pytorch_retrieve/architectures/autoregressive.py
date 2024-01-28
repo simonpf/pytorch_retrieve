@@ -210,7 +210,7 @@ class TemporalEncoderConfig:
                 temporal encoder.
         """
         kind = get_config_attr("kind", None, config_dict, "architecture.temporal_encoder", required=True)
-        if kind == "direct":
+        if kind.lower() == "direct":
             n_inputs = get_config_attr("n_inputs", None, config_dict, "architecture.temporal_encoder", required=True)
         else:
             n_inputs = 0
@@ -254,7 +254,7 @@ class TemporalEncoderConfig:
 
     def compile(self) -> "TemporalEncoder":
         """Compile propagator."""
-        if self.kind == "recurrent":
+        if self.kind.lower() == "recurrent":
             encoder = self.encoder_config.compile()
             decoder = self.decoder_config.compile()
             return RecurrentTemporalEncoder(encoder, decoder)
@@ -317,7 +317,7 @@ class DirectTemporalEncoder(nn.Module):
     ):
         super().__init__()
         self.blocks = nn.ModuleList([
-            block_factory(n_inputs * latent_dim, latent_dim) for _ in range(n_inputs)
+            block_factory(n_inputs * latent_dim, latent_dim) for _ in range(order)
         ])
 
     def forward(self, x):
