@@ -36,212 +36,17 @@ from pytorch_retrieve.modules.output import Mean, Quantiles
 from pytorch_retrieve.architectures.model import RetrievalModel
 from pytorch_retrieve.config import InputConfig, OutputConfig, read_config_file
 from pytorch_retrieve.utils import update_recursive
-
-
-def get_block_factory(name: str) -> Callable[[int, int], nn.Module]:
-    """
-    Retrieve a block factory by its name.
-
-    Args:
-        name: The name of the block factory.
-
-    Return:
-        A factory object to produce convolution block to be used within an
-        encoder-decoder architecture.
-    """
-    try:
-        block_factory = getattr(blocks, name)
-    except AttributeError:
-        raise ValueError(
-            f"The block factory '{name}' is not defined. Please refer "
-            " to the documentation of 'pytorch_retrieve.modules.conv.block' for "
-            "available block factories."
-        )
-    return block_factory
-
-
-def get_downsampling_factory(name) -> Callable[[int], nn.Module]:
-    """
-    Retrieve a downsampling factory by its name.
-
-    Args:
-        name: The name of the downsampling factory.
-
-    Return:
-        A factory object to produce downsampling block to be used within an
-        encoder-decoder architecture.
-    """
-    try:
-        downsampling_factory = getattr(downsampling, name)
-    except AttributeError:
-        raise ValueError(
-            f"The downsampling factory '{name}' is not defined. Please refer "
-            " to the documentation of "
-            "'pytorch_retrieve.modules.conv.downsampling' for available "
-            " block factories."
-        )
-    return downsampling_factory
-
-
-def get_upsampling_factory(name) -> Callable[[int], nn.Module]:
-    """
-    Retrieve an upsampling factory by its name.
-
-    Args:
-        name: The name of the upsampling factory.
-
-    Return:
-        A factory object to produce upsampling block to be used within an
-        encoder-decoder architecture.
-    """
-    try:
-        upsampling_factory = getattr(upsampling, name)
-    except AttributeError:
-        raise ValueError(
-            f"The upsampling factory '{name}' is not defined. Please refer "
-            " to the documentation of "
-            "'pytorch_retrieve.modules.conv.upsampling' for available "
-            " block factories."
-        )
-    return upsampling_factory
-
-
-def get_aggregation_factory(name) -> Callable[[int], nn.Module]:
-    """
-    Retrieve a aggregation factory by its name.
-
-    Args:
-        name: The name of the aggregation factory.
-
-    Return:
-        A factory object to produce aggregation block to be used within an
-        encoder-decoder architecture.
-    """
-    try:
-        aggregation_factory = getattr(aggregation, name)
-    except AttributeError:
-        raise ValueError(
-            f"The aggregation factory '{name}' is not defined. Please refer "
-            " to the documentation of "
-            "'pytorch_retrieve.modules.conv.aggregation' for available "
-            " block factories."
-        )
-    return aggregation_factory
-
-
-@dataclass
-class StemConfig:
-    """
-    Configuration of a stem.
-
-    All inputs are fed into a stem prior to being fed into the body of
-    the encoder-decoder model. This class holds configuration attributes
-    a single stem.
-
-    Attributes:
-        input_name: The name of the input corresponding to this stem.
-        in_channels: The number of channels/features in the input corresponding
-            to this stem.
-        out_channels: The number of channels in the output from the stem.
-        depth: The depth of the stem.
-        downsampling: The degree of downsampling applied in the stem.
-        normalize: String indicating the kind of normalization applied to
-            the inputs.
-    """
-
-    input_name: str
-    in_channels: int
-    in_scale: int
-    out_channels: int
-    depth: int = (0,)
-    downsampling: int = 1
-    normalize: Optional[str] = None
-
-    @classmethod
-    def parse(
-        cls,
-        name: str,
-        input_name: str,
-        input_config: InputConfig,
-        config_dict: Dict[str, Any],
-    ) -> "StemConfig":
-        """
-        Parse stem configuration from configuration dict.
-
-        Args:
-            name: The name of the section of the architecture configuration.
-            input_name: The name of the input corresponding to this stem.
-            input_config: The input configuration of the input corresponding to
-                this stem.
-            config_dict: Dictionary hodling the raw configuration of this stem.
-
-        Return:
-            A StemConfig object holding the parsed configuration of this stem.
-        """
-        in_channels = input_config.n_features
-        in_scale = input_config.scale
-        depth = get_config_attr(
-            "depth", int, config_dict, f"architecture.stem.{name}", 0
-        )
-        out_channels = get_config_attr(
-            "out_channels",
-            int,
-            config_dict,
-            f"architecture.stem.{name}",
-            default=in_channels,
-        )
-        downsampling = get_config_attr(
-            "downsampling", int, config_dict, f"architecture.stem.{name}", 1
-        )
-        normalize = input_config.normalize
-        return StemConfig(
-            input_name,
-            in_channels=in_channels,
-            in_scale=in_scale,
-            out_channels=out_channels,
-            depth=depth,
-            downsampling=downsampling,
-            normalize=normalize,
-        )
-
-    @property
-    def out_scale(self):
-        return self.in_scale * self.downsampling
-
-    def to_config_dict(self) -> Dict[str, object]:
-        """
-        Convert configuration object to dict representation suitable for
-        serialization.
-        """
-        dct = asdict(self)
-        return asdict(self)
-
-    def compile(self) -> nn.Module:
-        """
-        Compile stem into Pytorch module.
-
-        Return:
-            A ``torch.nn`` Module implementing the stem described by the
-            object.
-        """
-        blocks = []
-        if self.normalize != "none":
-            blocks.append(StandardizationLayer(self.input_name, self.in_channels))
-        blocks.append(
-            stems.BasicConv(
-                self.in_channels,
-                self.out_channels,
-                depth=self.depth,
-                downsampling=self.downsampling,
-            )
-        )
-        return nn.Sequential(*blocks)
+from pytorch_retrieve.modules.conv import recurrent
+from .encoder_decoder import (
+    StemConfig, HeadConfig, get_block_factory, get_aggregation_factory,
+    get_downsampling_factory, get_upsampling_factory
+)
 
 
 @dataclass
 class EncoderConfig:
     """
-    Configuration for an encoder.
+    Configuration for a recurrent encoder.
 
     Attributes:
         kind: The kind of encoder architecture.
@@ -367,6 +172,8 @@ class EncoderConfig:
         scale = self.base_scale
         scales = [scale]
         for f_d in self.downsampling_factors:
+            if not isinstance(f_d, int):
+                f_d = max(f_d)
             scale = scale * f_d
             scales.append(scale)
         return scales
@@ -393,8 +200,9 @@ class EncoderConfig:
         Return:
              The encoder module described by this EncoderConfiguration object.
         """
+        recurrence_factory = recurrent.get_recurrence_factory(self.recurrence_factory)
         block_factory = get_block_factory(self.block_factory)()
-        block_factory = Assimilator(block_factory, bidirectional=True)
+        block_factory = recurrence_factory(block_factory)
         downsampling_factory = get_downsampling_factory(self.downsampling_factory)()
         aggregation_factory = get_aggregation_factory(self.aggregation_factory)
 
@@ -439,7 +247,7 @@ class DecoderConfig:
     upsampling_factory: "bilinear"
     aggregation_factory: str = "linear"
     kind: str = "standard"
-    recurrence_factory: str = "Assimilator"
+    recurrence_factory: str = "LSTM"
     recurrence_factory_args: Dict[str, Any] = None
 
     @classmethod
@@ -516,8 +324,9 @@ class DecoderConfig:
         return config
 
     def compile(self):
+        recurrence_factory = recurrent.get_recurrence_factory(self.recurrence_factory)
         block_factory = get_block_factory(self.block_factory)()
-        block_factory = Assimilator(block_factory, bidirectional=False)
+        block_factory = recurrence_factory(block_factory)
         upsampling_factory = get_upsampling_factory(self.upsampling_factory)()
         aggregation_factory = get_aggregation_factory(self.aggregation_factory)
 
@@ -529,72 +338,6 @@ class DecoderConfig:
             skip_connections=self.skip_connections,
             upsampler_factory=upsampling_factory,
         )
-
-
-@dataclass
-class HeadConfig:
-    """
-    Dataclass describing the head of a decoder-encoder architecture.
-    """
-
-    in_channels: int
-    shape: Tuple[int]
-    depth: int = 1
-    activation_factory: Optional[Callable[[], nn.Module]] = None
-    normalization_factory: Optional[Callable[[int], nn.Module]] = None
-
-    @classmethod
-    def parse(cls, decoder_config, output_config, name, config_dict):
-        in_channels = decoder_config.out_channels
-        depth = get_config_attr("depth", int, config_dict, f"architecture.head", 1)
-        activation_factory = get_config_attr(
-            "activation_factory", str, config_dict, f"architecture.head", "ReLU"
-        )
-        normalization_factory = get_config_attr(
-            "normalization_factory",
-            str,
-            config_dict,
-            f"architecture.head",
-            "BatchNorm2d",
-        )
-        return HeadConfig(
-            in_channels=in_channels,
-            shape=output_config.shape,
-            depth=depth,
-            activation_factory=activation_factory,
-            normalization_factory=normalization_factory,
-        )
-
-    def to_config_dict(self) -> Dict[str, object]:
-        """
-        Convert configuration object to dict representation suitable for
-        serialization.
-        """
-        return asdict(self)
-
-    def compile(self) -> nn.Module:
-        """
-        Compile head.
-
-        Args:
-            in_channels: The number of channels in the encoded head input.
-
-        Return:
-
-        """
-        activation_factory = get_activation_factory(self.activation_factory)
-        normalization_factory = get_normalization_factory(self.normalization_factory)
-        if self.shape == 1 or self.shape == (1,):
-            shape = (32,)
-        else:
-            shape = (32,) + self.shape
-        head = heads.BasicConv(
-            in_channels=self.in_channels,
-            out_shape=shape,
-            activation_factory=activation_factory,
-            normalization_factory=normalization_factory,
-        )
-        return nn.Sequential(head, Quantiles(tau=np.linspace(0, 1, 34)[1:-1]))
 
 
 @dataclass
@@ -657,12 +400,12 @@ class EncoderDecoderConfig:
                 else:
                     config_dict = head_config_dict["base"]
                 head_configs[name] = HeadConfig.parse(
-                    decoder_config, output_config, name, config_dict
+                    decoder_config.out_channels, output_config, name, config_dict
                 )
         else:
             head_configs = {
                 name: HeadConfig.parse(
-                    decoder_config, output_config, "head", head_config_dict
+                    decoder_config.out_channels, output_config, "head", head_config_dict
                 )
                 for name, output_config in output_configs.items()
             }

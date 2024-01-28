@@ -57,6 +57,22 @@ def test_assimilation_encoder_decoder():
     assert len(y) == 4
     assert y[0].shape == (1, 8, 64, 64)
 
+def test_lstm_block():
+    """
+    Ensure that assimilation block factory produces modules that produce
+    the expected output lists.
+    """
+    block_factory = BasicConv()
+    rec_factory = GRU(block_factory)
+
+    rec_block = rec_factory(8, 16, downsample=2)
+
+    x = [torch.rand(2, 8, 32, 32) for _ in range(8)]
+    y = rec_block(x)
+
+    assert len(y) == 8
+    assert y[0].shape == (2, 16, 16, 16)
+
 def test_gru_block():
     """
     Ensure that assimilation block factory produces modules that produce

@@ -58,3 +58,10 @@ class RetrievalModel(ParamCount, nn.Module):
         state = self.state_dict()
         model_config = self.config_dict
         torch.save({"state_dict": state, "model_config": model_config}, path)
+
+    def to_config_dict(self) -> Dict[str, object]:
+        """
+        Return configuration used to construct the model.
+
+        """
+        return self.config_dict
