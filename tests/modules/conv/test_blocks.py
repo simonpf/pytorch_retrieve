@@ -27,6 +27,11 @@ def test_basic_conv():
     y = module(x)
     assert y.shape == (1, 32, 32, 16)
 
+    factory = BasicConv(anti_aliasing=True)
+    module = factory(16, 32, downsample=(1, 2))
+    y = module(x)
+    assert y.shape == (1, 32, 32, 16)
+
 
 def test_basic_conv3d():
     """
@@ -43,6 +48,10 @@ def test_basic_conv3d():
     y = module(x)
     assert y.shape == (1, 32, 16, 16, 32)
 
+    factory = BasicConv3d(anti_aliasing=True)
+    module = factory(16, 32, downsample=(2, 2, 1))
+    y = module(x)
+    assert y.shape == (1, 32, 16, 16, 32)
 
 def test_resnet():
     """
@@ -59,6 +68,9 @@ def test_resnet():
     y = module(x)
     assert y.shape == (1, 32, 32, 16)
 
+    module = factory(16, 32, downsample=(1, 2), anti_aliasing=True)
+    y = module(x)
+    assert y.shape == (1, 32, 32, 16)
 
 def test_resnext():
     """
@@ -75,8 +87,12 @@ def test_resnext():
     y = module(x)
     assert y.shape == (1, 64, 32, 16)
 
+    module = factory(64, 64, downsample=(1, 2), anti_aliasing=True)
+    y = module(x)
+    assert y.shape == (1, 64, 32, 16)
 
-def test_resnext():
+
+def test_resnext2plus1():
     """
     Tests for the ResNeXt2Plus1 factory.
     """
