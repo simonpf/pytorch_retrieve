@@ -4,7 +4,7 @@ pytorch_retrieve.modules.conv.padding
 
 Defines padding factories for creating specific padding layers.
 """
-from typing import Tuple, Union
+from typing import Callable, Tuple, Union
 import torch
 from torch import nn
 
@@ -102,7 +102,15 @@ class Reflect(nn.Module):
 
         full_pad = []
         for n_elems in pad:
-            full_pad += [n_elems, n_elems]
+            if isinstance(n_elems, (tuple, list)):
+                full_pad += [n_elems[0], n_elems[1]]
+            elif isinstance(n_elems, int):
+                full_pad += [n_elems, n_elems]
+            else:
+                raise ValueError(
+                    "Expected elements of pad tuple to be tuples of integers or integers. "
+                    "Got %s.", type(n_elems)
+                )
 
         full_pad = tuple(full_pad[::-1])
         self.pad = full_pad
@@ -142,7 +150,15 @@ class Global(nn.Module):
 
         full_pad = []
         for n_elems in pad:
-            full_pad += [n_elems, n_elems]
+            if isinstance(n_elems, (tuple, list)):
+                full_pad += [n_elems[0], n_elems[1]]
+            elif isinstance(n_elems, int):
+                full_pad += [n_elems, n_elems]
+            else:
+                raise ValueError(
+                    "Expected elements of pad tuple to be tuples of integers or integers. "
+                    "Got %s.", type(n_elems)
+                )
 
         full_pad = tuple(full_pad[::-1])
         self.pad = full_pad
@@ -160,3 +176,61 @@ class Global(nn.Module):
         """
         x_1 = nn.functional.pad(x, self.pad[:2] + (0, 0), "circular")
         return nn.functional.pad(x_1, (0, 0) + self.pad[2:], "reflect")
+
+
+def get_padding_factory(name: str) -> Callable[[Union[int, Tuple[int]]], nn.Module]:
+    """
+    Retrieve a padding factory by its name.
+    """
+    if name in globals():
+        return globals()[name]
+
+    raise RuntimeError(
+        f"The padding factory {name} does not match any of the "
+        " supported normalization factories. For a list of the "
+        " available padding factories refer to the documentation "
+        " of the 'pytorch_retrieve.moduls.conv.padding' module."
+    )
+
+
+class Crop(nn.Module):
+    """
+    Crops a image or volumn tensor by removing a given number of pixels along its last dimensions.
+    This layer reverses the effect of padding applied to a layer.
+    """
+    def __init__(self, crop: Union[int, Tuple[Union[int, Tuple[int]]]]):
+        """
+        Instantiates a crop layer.
+
+        Args:
+            crop: N-tuple defining the number of pixels to remove at each end of the last
+                dimensions of the tensor.
+        """
+        super().__init__()
+        if isinstance(crop, int):
+            crop = (crop,) * 2
+
+        slices = []
+        for n_elems in crop:
+            if isinstance(n_elems, (tuple, list)):
+                slices += [slice(n_elems[0], -n_elems[1])]
+            elif isinstance(n_elems, int):
+                slices += [slice(n_elems, -n_elems)]
+            else:
+                raise RuntimeError(
+                    "Expected elements of provided crop to be integers or pairs of integers."
+                )
+        self.slices = tuple(slices)
+
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Crop tensor.
+
+        Args:
+            x: The input tensor.
+
+        Return:
+            The tensor x with the given crop removed from it.
+        """
+        return x.__getitem__((...,) + self.slices)

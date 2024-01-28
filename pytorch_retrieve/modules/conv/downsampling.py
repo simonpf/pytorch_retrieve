@@ -34,25 +34,28 @@ class BlurPool(nn.Module):
         self.in_channels = in_channels
         self.stride = stride
         if len(filter_size) == 2:
-            x = torch.tensor(np.array(np.poly1d((0.5, 0.5)) ** filter_size[1]))
+            x = torch.tensor(np.array(np.poly1d((0.5, 0.5)) ** (filter_size[1] - 1)))
             x = x.to(dtype=torch.float32)
-            y = torch.tensor(np.array(np.poly1d((0.5, 0.5)) ** filter_size[0]))
+            y = torch.tensor(np.array(np.poly1d((0.5, 0.5)) ** (filter_size[0] - 1)))
             y = y.to(dtype=torch.float32)
             k = y[:, None] * x[None, :]
             self.filter = nn.Parameter(
                 k.repeat((in_channels, 1, 1, 1)),
                 requires_grad=False
             )
-        elif len(filter_size) == 2:
-            x = (np.poly1d((0.5, 0.5)) ** filter_size[2]).astype(np.float32)
-            x = torch.tensor(x)
-            y = (np.poly1d((0.5, 0.5)) ** filter_size[1]).astype(np.float32)
-            y = torch.tensor(y)
-            z = (np.poly1d((0.5, 0.5)) ** filter_size[0]).astype(np.float32)
-            z = torch.tensor(y)
+        elif len(filter_size) == 3:
+            x = torch.tensor(np.array(np.poly1d((0.5, 0.5)) ** (filter_size[2] - 1)))
+            x = x.to(dtype=torch.float32)
+            y = torch.tensor(np.array(np.poly1d((0.5, 0.5)) ** (filter_size[1] - 1)))
+            y = y.to(dtype=torch.float32)
+            z = torch.tensor(np.array(np.poly1d((0.5, 0.5)) ** (filter_size[0] - 1)))
+            z = z.to(dtype=torch.float32)
             k = (z[:, None, None] * y[None, :, None] * x[None, None, :]
             )
-            self.filter = nn.Parameter(k.repeat(in_channels, 1, 1, 1), requires_grad=False)
+            self.filter = nn.Parameter(
+                k.repeat(in_channels, 1, 1, 1, 1),
+                requires_grad=False
+            )
         else:
             raise ValueError("Filter size must be a tuple of length 2 or 3.")
 

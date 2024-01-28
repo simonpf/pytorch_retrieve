@@ -11,7 +11,8 @@ import torch
 from torch import nn
 
 from pytorch_retrieve.modules.utils import ParamCount
-from .padding import calculate_padding
+from .padding import calculate_padding, Reflect, get_padding_factory
+from .downsampling import BlurPool
 
 
 class BasicConvBlock(nn.Module, ParamCount):
@@ -28,8 +29,10 @@ class BasicConvBlock(nn.Module, ParamCount):
         padding: int,
         activation_factory: Callable[[], nn.Module] = nn.ReLU,
         normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm2d,
+        padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
         residual_connection: bool = False,
         downsample: Optional[int] = None,
+        anti_aliasing: bool = True,
     ):
         super().__init__()
 
@@ -48,13 +51,13 @@ class BasicConvBlock(nn.Module, ParamCount):
             bias = True
 
         blocks = [
+            padding_factory(padding),
             nn.Conv2d(
                 in_channels,
                 out_channels,
                 kernel_size,
                 bias=bias,
-                stride=stride,
-                padding=padding,
+                stride=stride if not anti_aliasing else 1,
             )
         ]
         if normalization_factory is not None:
@@ -65,6 +68,14 @@ class BasicConvBlock(nn.Module, ParamCount):
             blocks.append(
                 activation_factory(),
             )
+
+        if max(stride) > 1 and anti_aliasing:
+            pad = tuple([1 if strd > 1 else 0 for strd in stride])
+            filter_size = tuple([3 if strd > 1 else 1 for strd in stride])
+            blocks += [
+                padding_factory(pad),
+                BlurPool(out_channels, stride, filter_size)
+            ]
 
         self.body = nn.Sequential(*blocks)
         if self.residual_connection:
@@ -96,7 +107,9 @@ class BasicConv:
         padding: Optional[int] = None,
         activation_factory: Callable[[], nn.Module] = nn.ReLU,
         normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm2d,
+        padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
         residual_connection: bool = False,
+        anti_aliasing: bool = False
     ):
         """
         Args:
@@ -106,8 +119,7 @@ class BasicConv:
                 activation functions.
             normalization_factory: Factory to use for the instantition of the
                 normalization layers in the convolution block.
-
-
+            anti_aliasing: Whether to use anti-aliased downsampling.
         """
         self.kernel_size = kernel_size
         if padding is None:
@@ -116,6 +128,11 @@ class BasicConv:
         self.activation_factory = activation_factory
         self.normalization_factory = normalization_factory
         self.residual_connection = residual_connection
+        if isinstance(padding_factory, str):
+            padding_factory = get_padding_factory(padding_factory)
+        self.padding_factory = padding_factory
+        self.anti_aliasing = anti_aliasing
+
 
     def __call__(
         self, in_channels: int, out_channels: int, downsample: int = 1, **kwargs
@@ -128,6 +145,8 @@ class BasicConv:
             downsample=downsample,
             activation_factory=self.activation_factory,
             normalization_factory=self.normalization_factory,
+            padding_factory=self.padding_factory,
+            anti_aliasing=self.anti_aliasing
         )
 
 
@@ -144,8 +163,10 @@ class BasicConv3dBlock(nn.Module, ParamCount):
         padding: int,
         activation_factory: Callable[[], nn.Module] = nn.ReLU,
         normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm3d,
+        padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
         residual_connection: bool = False,
         downsample: Optional[int] = None,
+        anti_aliasing: bool = False
     ):
         super().__init__()
 
@@ -161,13 +182,13 @@ class BasicConv3dBlock(nn.Module, ParamCount):
         bias = normalization_factory is None
 
         blocks = [
+            padding_factory(padding),
             nn.Conv3d(
                 in_channels,
                 out_channels,
                 kernel_size,
                 bias=bias,
-                stride=stride,
-                padding=padding,
+                stride=stride if not anti_aliasing else 1,
             )
         ]
         if normalization_factory is not None:
@@ -178,6 +199,13 @@ class BasicConv3dBlock(nn.Module, ParamCount):
             blocks.append(
                 activation_factory(),
             )
+        if anti_aliasing:
+            pad = tuple([1 if strd > 1 else 0 for strd in stride])
+            filter_size = tuple([3 if strd > 1 else 1 for strd in stride])
+            blocks += [
+                padding_factory(pad),
+                BlurPool(out_channels, stride, filter_size)
+            ]
 
         self.body = nn.Sequential(*blocks)
         if self.residual_connection:
@@ -209,7 +237,9 @@ class BasicConv3d:
         padding: Optional[int] = None,
         activation_factory: Callable[[], nn.Module] = nn.ReLU,
         normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm3d,
+        padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
         residual_connection: bool = False,
+        anti_aliasing: bool = False,
     ):
         """
         Args:
@@ -228,6 +258,10 @@ class BasicConv3d:
         self.activation_factory = activation_factory
         self.normalization_factory = normalization_factory
         self.residual_connection = residual_connection
+        if isinstance(padding_factory, str):
+            padding_factory = get_padding_factory(padding_factory)
+        self.padding_factory = padding_factory
+        self.anti_aliasing = anti_aliasing
 
     def __call__(
         self, in_channels: int, out_channels: int, downsample: int = 1, **kwargs
@@ -240,6 +274,8 @@ class BasicConv3d:
             downsample=downsample,
             activation_factory=self.activation_factory,
             normalization_factory=self.normalization_factory,
+            padding_factory=self.padding_factory,
+            anti_aliasing=self.anti_aliasing
         )
 
 
@@ -257,8 +293,10 @@ class ResNetBlock(nn.Module, ParamCount):
         dilation: int = 1,
         activation_factory: Callable[[], nn.Module] = nn.ReLU,
         normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm2d,
+        padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
         downsample: Optional[int] = None,
         bottleneck: int = 4,
+        anti_aliasing: bool = False
     ):
         super().__init__()
 
@@ -301,18 +339,26 @@ class ResNetBlock(nn.Module, ParamCount):
             in_channels = out_channels // bottleneck
 
         blocks += [
+            padding_factory(padding),
             nn.Conv2d(
                 in_channels,
                 out_channels // bottleneck,
                 kernel_size=kernel_size,
                 dilation=dilation,
-                padding=padding,
                 bias=bias,
-                stride=stride,
+                stride=stride if not anti_aliasing else 1,
             ),
             normalization_factory(out_channels // bottleneck),
             activation_factory(inplace=True),
         ]
+
+        if anti_aliasing:
+            pad = tuple([1 if strd > 1 else 0 for strd in stride])
+            filter_size = tuple([3 if strd > 1 else 1 for strd in stride])
+            blocks.append(
+                padding_factory(pad),
+                BlurPool(out_channels // bottleneck, stride, filter_size)
+            )
 
         if bottleneck > 1:
             blocks += [
@@ -324,12 +370,12 @@ class ResNetBlock(nn.Module, ParamCount):
             ]
         else:
             blocks += [
+                padding_factory(padding),
                 nn.Conv2d(
                     out_channels,
                     out_channels,
                     kernel_size=kernel_size,
                     dilation=dilation,
-                    padding=padding,
                 ),
                 normalization_factory(out_channels),
                 activation_factory(inplace=True),
@@ -357,7 +403,9 @@ class ResNet:
         dilation: int = 1,
         activation_factory: Callable[[], nn.Module] = nn.ReLU,
         normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm2d,
+        padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
         bottleneck: int = 4,
+            anti_aliasing: bool = False,
     ):
         if isinstance(kernel_size, int):
             kernel_size = (kernel_size,) * 2
@@ -365,7 +413,11 @@ class ResNet:
         self.kernel_size = kernel_size
         self.activation_factory = activation_factory
         self.normalization_factory = normalization_factory
+        if isinstance(padding_factory, str):
+            padding_factory = get_padding_factory(padding_factory)
+        self.padding_factory = padding_factory
         self.bottleneck = bottleneck
+        self.anti_aliasing = anti_aliasing
 
     def __call__(
         self,
@@ -409,6 +461,7 @@ class ResNet:
             downsample=downsample,
             activation_factory=self.activation_factory,
             normalization_factory=self.normalization_factory,
+            padding_factory=self.padding_factory,
             bottleneck=self.bottleneck,
         )
 
@@ -430,6 +483,8 @@ class ResNeXtBlock(nn.Module, ParamCount):
         bottleneck: int = 2,
         activation_factory: Callable[[], nn.Module] = nn.ReLU,
         normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm2d,
+        padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
+        anti_aliasing: bool = False
     ):
         super().__init__()
 
@@ -468,18 +523,29 @@ class ResNeXtBlock(nn.Module, ParamCount):
             ),
             normalization_factory(out_channels // bottleneck),
             activation_factory(inplace=True),
+            padding_factory(padding),
             nn.Conv2d(
                 out_channels // bottleneck,
                 out_channels // bottleneck,
                 groups=cardinality,
                 kernel_size=kernel_size,
                 dilation=dilation,
-                padding=padding,
                 bias=bias,
-                stride=stride,
+                stride=stride if not anti_aliasing else 1,
             ),
             normalization_factory(out_channels // bottleneck),
             activation_factory(inplace=True),
+        ]
+
+        if anti_aliasing:
+            pad = tuple([1 if strd > 1 else 0 for strd in stride])
+            filter_size = tuple([3 if strd > 1 else 1 for strd in stride])
+            blocks.append(
+                padding_factory(pad),
+                BlurPool(out_channels // bottleneck, stride, filter_size)
+            )
+
+        blocks += [
             nn.Conv2d(
                 out_channels // bottleneck, out_channels, kernel_size=1, bias=bias
             ),
@@ -508,8 +574,10 @@ class ResNeXt:
         dilation: int = 1,
         activation_factory: Callable[[], nn.Module] = nn.ReLU,
         normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm2d,
+        padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
         bottleneck: int = 2,
         cardinality: int = 32,
+        anti_aliasing: bool = False
     ):
         if isinstance(kernel_size, int):
             kernel_size = (kernel_size,) * 2
@@ -517,8 +585,12 @@ class ResNeXt:
         self.kernel_size = kernel_size
         self.activation_factory = activation_factory
         self.normalization_factory = normalization_factory
+        if isinstance(padding_factory, str):
+            padding_factory = get_padding_factory(padding_factory)
+        self.padding_factory = padding_factory
         self.bottleneck = bottleneck
         self.cardinality = cardinality
+        self.anti_aliasing = anti_aliasing
 
     def __call__(
         self,
@@ -564,6 +636,8 @@ class ResNeXt:
             bottleneck=self.bottleneck,
             activation_factory=self.activation_factory,
             normalization_factory=self.normalization_factory,
+            padding_factory=self.padding_factory,
+            anti_aliasing=self.anti_aliasing
         )
 
 
@@ -585,6 +659,7 @@ class ResNeXt2Plus1Block(nn.Module, ParamCount):
         bottleneck: int = 2,
         activation_factory: Callable[[], nn.Module] = nn.ReLU,
         normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm2d,
+        padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
     ):
         super().__init__()
 
@@ -624,25 +699,25 @@ class ResNeXt2Plus1Block(nn.Module, ParamCount):
             ),
             normalization_factory(out_channels // bottleneck),
             activation_factory(inplace=True),
+            padding_factory(spatial_padding),
             nn.Conv3d(
                 out_channels // bottleneck,
                 out_channels // bottleneck,
                 groups=cardinality,
                 kernel_size=spatial_kernel,
                 dilation=dilation,
-                padding=spatial_padding,
                 bias=bias,
                 stride=spatial_stride,
             ),
             activation_factory(inplace=True),
             normalization_factory(out_channels // bottleneck),
+            padding_factory(temporal_padding),
             nn.Conv3d(
                 out_channels // bottleneck,
                 out_channels // bottleneck,
                 groups=cardinality,
                 kernel_size=temporal_kernel,
                 dilation=dilation,
-                padding=temporal_padding,
                 bias=bias,
                 stride=temporal_stride,
             ),
@@ -674,6 +749,7 @@ class ResNeXt2Plus1:
         kernel_size: Optional[Union[Tuple[int, int], int]] = (3, 3, 3),
         activation_factory: Callable[[], nn.Module] = nn.ReLU,
         normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm3d,
+        padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
         bottleneck: int = 2,
         cardinality: int = 32,
     ):
@@ -682,6 +758,9 @@ class ResNeXt2Plus1:
         self.kernel_size = kernel_size
         self.activation_factory = activation_factory
         self.normalization_factory = normalization_factory
+        if isinstance(padding_factory, str):
+            padding_factory = get_padding_factory(padding_factory)
+        self.padding_factory = padding_factory
         self.bottleneck = bottleneck
         self.cardinality = cardinality
 
@@ -723,4 +802,5 @@ class ResNeXt2Plus1:
             bottleneck=self.bottleneck,
             activation_factory=self.activation_factory,
             normalization_factory=self.normalization_factory,
+            padding_factory=self.padding_factory
         )
