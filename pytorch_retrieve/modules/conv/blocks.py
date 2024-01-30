@@ -12,6 +12,8 @@ from torch import nn
 
 from pytorch_retrieve.modules.utils import ParamCount
 from .padding import calculate_padding, Reflect, get_padding_factory
+from ..normalization import get_normalization_factory
+from ..activation import get_activation_factory
 from .downsampling import BlurPool
 
 
@@ -125,7 +127,11 @@ class BasicConv:
         if padding is None:
             padding = self.kernel_size // 2
         self.padding = padding
+        if isinstance(activation_factory, str):
+            activation_factory = get_activation_factory(activation_factory)
         self.activation_factory = activation_factory
+        if isinstance(normalization_factory, str):
+            normalization_factory = get_normalization_factory(normalization_factory)
         self.normalization_factory = normalization_factory
         self.residual_connection = residual_connection
         if isinstance(padding_factory, str):
@@ -255,7 +261,11 @@ class BasicConv3d:
         padding = calculate_padding(kernel_size)
         self.kernel_size = kernel_size
         self.padding = padding
+        if isinstance(activation_factory, str):
+            activation_factory = get_activation_factory(activation_factory)
         self.activation_factory = activation_factory
+        if isinstance(normalization_factory, str):
+            normalization_factory = get_normalization_factory(normalization_factory)
         self.normalization_factory = normalization_factory
         self.residual_connection = residual_connection
         if isinstance(padding_factory, str):
@@ -411,7 +421,11 @@ class ResNet:
             kernel_size = (kernel_size,) * 2
         self.dilation = dilation
         self.kernel_size = kernel_size
+        if isinstance(activation_factory, str):
+            activation_factory = get_activation_factory(activation_factory)
         self.activation_factory = activation_factory
+        if isinstance(normalization_factory, str):
+            normalization_factory = get_normalization_factory(normalization_factory)
         self.normalization_factory = normalization_factory
         if isinstance(padding_factory, str):
             padding_factory = get_padding_factory(padding_factory)
@@ -583,7 +597,11 @@ class ResNeXt:
             kernel_size = (kernel_size,) * 2
         self.dilation = dilation
         self.kernel_size = kernel_size
+        if isinstance(activation_factory, str):
+            activation_factory = get_activation_factory(activation_factory)
         self.activation_factory = activation_factory
+        if isinstance(normalization_factory, str):
+            normalization_factory = get_normalization_factory(normalization_factory)
         self.normalization_factory = normalization_factory
         if isinstance(padding_factory, str):
             padding_factory = get_padding_factory(padding_factory)
@@ -757,6 +775,8 @@ class ResNeXt2Plus1:
             kernel_size = (kernel_size,) * 3
         self.kernel_size = kernel_size
         self.activation_factory = activation_factory
+        if isinstance(normalization_factory, str):
+            normalization_factory = get_normalization_factory(normalization_factory)
         self.normalization_factory = normalization_factory
         if isinstance(padding_factory, str):
             padding_factory = get_padding_factory(padding_factory)
