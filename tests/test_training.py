@@ -31,6 +31,7 @@ normalization_factory = "LayerNorm"
 in_channels = 1
 
 [output.y]
+kind = "Mean"
 shape = [1,]
 """
 
@@ -85,6 +86,7 @@ def test_variable_replacement(monkeypatch):
         training_dataset_args = {"path" = "ENV::{PATH}"}
         validation_dataset_args = {"path" = "ENV::{PATH}"}
         n_epochs = 10
+        batch_size = 8
         """
     )
     training_config = TrainingConfig.parse("warm_up", config_dict["warm_up"])
@@ -162,6 +164,32 @@ def test_training_encoder_decoder(
     """
     model = load_and_compile_model(encoder_decoder_model_config_file)
     schedule = parse_training_config(read_config_file(encoder_decoder_training_config_file))
+    module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+    module.current_training_config
+    run_training(tmp_path, module, compute_config=cpu_compute_config)
+
+    # Assert that checkpoint files are created.
+    ckpts = list((tmp_path / "checkpoints").glob("*.ckpt"))
+    assert len(ckpts) > 0
+
+
+
+def test_load_weights(
+        model_config_file,
+        training_config_file,
+        tmp_path,
+        cpu_compute_config
+):
+    """
+    Run training on synthetic data.
+    """
+    model = load_and_compile_model(model_config_file)
+    schedule = parse_training_config(read_config_file(training_config_file))
+    module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+    module.current_training_config
+    run_training(tmp_path, module, compute_config=cpu_compute_config)
+
+    schedule["warm_up"].load_weights = str(tmp_path / "retrieval_model.pt")
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
     module.current_training_config
     run_training(tmp_path, module, compute_config=cpu_compute_config)

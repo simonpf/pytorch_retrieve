@@ -34,6 +34,9 @@ from pytorch_retrieve.utils import (
 from pytorch_retrieve.lightning import LightningRetrieval
 
 
+LOGGER = logging.getLogger(__name__)
+
+
 class TrainingConfigBase:
     """
     Base functionality for training configuration objects.
@@ -66,7 +69,7 @@ class TrainingConfigBase:
             shuffle=shuffle,
             worker_init_fn=worker_init_fn,
             batch_size=self.batch_size,
-            num_workers=12,
+            num_workers=8,
             pin_memory=True,
         )
         return data_loader
@@ -100,7 +103,7 @@ class TrainingConfigBase:
             dataset,
             worker_init_fn=worker_init_fn,
             batch_size=self.batch_size,
-            num_workers=12,
+            num_workers=8,
             pin_memory=True,
         )
         return data_loader
@@ -225,13 +228,15 @@ class TrainingConfig(TrainingConfigBase):
     optimizer_args: Optional[dict] = None
     scheduler: str = None
     scheduler_args: Optional[dict] = None
-    gradient_clipping: Optional[float] = None
     minimum_lr: Optional[float] = None
     reuse_optimizer: bool = False
     stepwise_scheduling: bool = False
     metrics: Optional[Dict[str, List["Metric"]]] = None
 
     log_every_n_steps: Optional[int] = None
+    gradient_clip_val: Optional[float] = None
+    accumulate_grad_batches: int = 1
+    load_weights: Optional[str] = None
 
     @classmethod
     def parse(cls, name, config_dict: Dict[str, object]):
@@ -288,7 +293,7 @@ class TrainingConfig(TrainingConfigBase):
             "n_epochs", int, config_dict, f"training stage {name}", required=True
         )
         batch_size = get_config_attr(
-            "batch_size", int, config_dict, f"training stage {name}", 8
+            "batch_size", int, config_dict, f"training stage {name}", 8, required=True
         )
 
         optimizer = get_config_attr(
@@ -306,11 +311,6 @@ class TrainingConfig(TrainingConfigBase):
         scheduler_args = get_config_attr(
             "scheduler_args", dict, config_dict, f"training stage {name}", {}
         )
-        gradient_clipping = get_config_attr(
-            "gradient_clipping", float, config_dict, f"training stage {name}", -1.0
-        )
-        if gradient_clipping < 0:
-            gradient_clipping = None
 
         minimum_lr = get_config_attr(
             "minimum_lr", float, config_dict, f"training stage {name}", -1.0
@@ -334,6 +334,16 @@ class TrainingConfig(TrainingConfigBase):
             else:
                 log_every_n_steps = 50
 
+        gradient_clip_val = get_config_attr(
+            "gradient_clip_val", float, config_dict, f"training stage {name}", None
+        )
+        accumulate_grad_batches = get_config_attr(
+            "accumulate_grad_batches", int, config_dict, f"training stage {name}", 1
+        )
+        load_weights = get_config_attr(
+            "load_weights", str, config_dict, f"training stage {name}", None
+        )
+
         return TrainingConfig(
             training_dataset=training_dataset,
             dataset_module=dataset_module,
@@ -346,12 +356,14 @@ class TrainingConfig(TrainingConfigBase):
             scheduler=scheduler,
             scheduler_args=scheduler_args,
             batch_size=batch_size,
-            gradient_clipping=gradient_clipping,
             minimum_lr=minimum_lr,
             reuse_optimizer=reuse_optimizer,
             stepwise_scheduling=stepwise_scheduling,
             metrics=metrics,
             log_every_n_steps=log_every_n_steps,
+            gradient_clip_val=gradient_clip_val,
+            accumulate_grad_batches=accumulate_grad_batches,
+            load_weights=load_weights
         )
 
 
@@ -387,6 +399,18 @@ def run_training(
     while not module.training_finished:
         training_config = module.current_training_config
 
+        # Try to load weights, if 'load_weight' argument is set.
+        if training_config.load_weights is not None:
+            weight_path = Path(training_config.load_weights)
+            if weight_path.exists():
+                data = torch.load(weight_path)
+                module.model.load_state_dict(data["state_dict"])
+            else:
+                LOGGER.error(
+                    "Path provided as 'load_weights' argument does not point "
+                    "to an existing file."
+                )
+
         ckpt_path = model_dir / "checkpoints"
         ckpt_path.mkdir(exist_ok=True)
 
@@ -402,7 +426,9 @@ def run_training(
             devices=compute_config.devices,
             strategy=compute_config.get_strategy(),
             callbacks=training_config.get_callbacks(module),
+            accumulate_grad_batches=training_config.accumulate_grad_batches,
             num_sanity_val_steps=0,
+            gradient_clip_val=training_config.gradient_clip_val,
         )
         trainer.fit(
             module,

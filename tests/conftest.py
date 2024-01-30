@@ -96,6 +96,7 @@ n_features = 4
 normalize = "none"
 
 [output.y]
+kind = "Mean"
 shape = [1,]
 """
 
