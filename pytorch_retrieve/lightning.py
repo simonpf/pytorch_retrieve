@@ -296,19 +296,20 @@ class LightningRetrieval(L.LightningModule):
 
         if np.isnan(tot_loss.item()):
 
-            if self.pred_prev is not None:
-                for tensors, name in zip(
-                        [inputs, target, pred, self.inputs_prev, self.target_prev, self.pred_prev],
-                        ["inputs", "target", "pred", "input_prev", "target_prev", "pred_prev"]
-                ):
-                    if not isinstance(tensors, dict):
-                        tensors = {"x": tensors}
+            pass
+            #if self.pred_prev is not None:
+            #    for tensors, name in zip(
+            #            [inputs, target, pred, self.inputs_prev, self.target_prev, self.pred_prev],
+            #            ["inputs", "target", "pred", "input_prev", "target_prev", "pred_prev"]
+            #    ):
+            #        if not isinstance(tensors, dict):
+            #            tensors = {"x": tensors}
 
-                    for key, tensor in tensors.items():
-                        if isinstance(tensor, list):
-                            tensor = torch.stack(tensor, -3)
-                        tensor = tensor.detach().to(dtype=torch.float32, device="cpu").numpy()
-                        np.save(f"{name}_{key}.npy", tensor)
+            #        for key, tensor in tensors.items():
+            #            if isinstance(tensor, list):
+            #                tensor = torch.stack(tensor, -3)
+            #            tensor = tensor.detach().to(dtype=torch.float32, device="cpu").numpy()
+            #            np.save(f"{name}_{key}.npy", tensor)
 
         self.inputs_prev = inputs
         self.target_prev = target
