@@ -243,6 +243,7 @@ class LightningRetrieval(L.LightningModule):
                     if mask.any():
                         target_k_s = torch.nan_to_num(target_k_s, 0.0)
                         target_k_s = MaskedTensor(target_k_s, mask=mask)
+
                     n_samples = (~mask).sum()
                     if n_samples == 0:
                         continue
@@ -251,7 +252,9 @@ class LightningRetrieval(L.LightningModule):
                     loss_k_s = pred_k_s.loss(target_k_s)
                     tot_loss += n_samples * loss_k_s
                     losses[name] += loss_k_s.item()
-                tot_loss /= tot_samples
+
+                if tot_samples > 0:
+                    tot_loss /= tot_samples
 
             else:
                 mask = torch.isnan(target_k)
@@ -477,7 +480,9 @@ class LightningRetrieval(L.LightningModule):
                         for metric in scalar_metrics:
                             metric = metric.to(device=pred_k_s.device)
                             metric.update(pred_k_s, target_k_s)
-                tot_loss /= tot_samples
+
+                if tot_samples > 0:
+                    tot_loss /= tot_samples
 
                 for metric in other_metrics:
                     metric = metric.to(device=pred_k_s.device)
