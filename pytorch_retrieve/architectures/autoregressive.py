@@ -19,6 +19,7 @@ from pytorch_retrieve.config import (
     OutputConfig
 )
 from pytorch_retrieve.modules.conv import decoders
+from pytorch_retrieve.modules.normalization import LayerNormFirst
 
 
 
@@ -261,7 +262,6 @@ class TemporalEncoderConfig:
 
         block_factory = encoder_decoder.get_block_factory(self.encoder_config.block_factory)
         block_factory = block_factory(**self.encoder_config.block_factory_args)
-
         return DirectTemporalEncoder(
             block_factory,
             self.n_inputs,
@@ -702,9 +702,7 @@ class Autoregressive(RetrievalModel):
         }
         arch_config = get_config_attr("architecture", dict, config_dict, "model config")
         config = AutoregressiveConfig.parse(input_config, output_config, arch_config)
-
-        return Autoregressive(
-            input_config=input_config,
+        return Autoregressive(input_config=input_config,
             output_config=output_config,
             arch_config=config
         )
