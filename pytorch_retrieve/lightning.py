@@ -236,17 +236,22 @@ class LightningRetrieval(L.LightningModule):
                     raise RuntimeError(
                         "Model predicts a sequence but the reference data is not."
                     )
-
+                tot_samples = 0
                 losses[key] = 0.0
                 for pred_k_s, target_k_s in zip(pred_k, target_k):
                     mask = torch.isnan(target_k_s)
                     if mask.any():
                         target_k_s = torch.nan_to_num(target_k_s, 0.0)
                         target_k_s = MaskedTensor(target_k_s, mask=mask)
+                    n_samples = (~mask).sum()
+                    if n_samples == 0:
+                        continue
+                    tot_samples += n_samples
 
                     loss_k_s = pred_k_s.loss(target_k_s)
-                    tot_loss += loss_k_s
+                    tot_loss += n_samples * loss_k_s
                     losses[name] += loss_k_s.item()
+                tot_loss /= tot_samples
 
             else:
                 mask = torch.isnan(target_k)
@@ -452,13 +457,19 @@ class LightningRetrieval(L.LightningModule):
             ]
 
             if isinstance(pred_k, list):
+                tot_samples = 0
                 for pred_k_s, target_k_s in zip(pred_k, target_k):
                     mask = torch.isnan(target_k_s)
                     if mask.any():
                         target_k_s = MaskedTensor(target_k_s, mask=mask)
+                    n_samples = (~mask).sum()
+                    if n_samples == 0:
+                        print("Skipping output")
+                        continue
+                    tot_samples += n_samples
 
                     loss_k_s = pred_k_s.loss(target_k_s)
-                    tot_loss += loss_k_s
+                    tot_loss += loss_k_s * n_samples
                     losses[name] += loss_k_s.item()
 
                     if len(scalar_metrics) > 0:
@@ -466,6 +477,7 @@ class LightningRetrieval(L.LightningModule):
                         for metric in scalar_metrics:
                             metric = metric.to(device=pred_k_s.device)
                             metric.update(pred_k_s, target_k_s)
+                tot_loss /= tot_samples
 
                 for metric in other_metrics:
                     metric = metric.to(device=pred_k_s.device)
