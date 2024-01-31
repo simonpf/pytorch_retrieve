@@ -224,7 +224,21 @@ class LightningRetrieval(L.LightningModule):
             )
 
         losses = {}
-        tot_loss = 0.0
+
+        if isinstance(inputs, dict):
+            inpt = next(iter(inputs.values()))
+            if isinstance(inpt, list):
+                inpt = inpt[0]
+            device = inpt.device
+            dtype = inpt.dtype
+        else:
+            inpt = inpts
+            if isinstance(inpt, list):
+                inpt = inpt[0]
+            device = inputs.device
+            dtype = inputs.dtype
+
+        tot_loss = torch.tensor(0.0, requires_grad=True, device=device, dtype=dtype)
         for name in pred:
             key = name.split("::")[-1]
 
@@ -250,11 +264,11 @@ class LightningRetrieval(L.LightningModule):
                     tot_samples += n_samples
 
                     loss_k_s = pred_k_s.loss(target_k_s)
-                    tot_loss += n_samples * loss_k_s
+                    tot_loss = tot_loss + n_samples * loss_k_s
                     losses[name] += loss_k_s.item()
 
                 if tot_samples > 0:
-                    tot_loss /= tot_samples
+                    tot_loss = tot_loss / tot_samples
 
             else:
                 mask = torch.isnan(target_k)
@@ -472,7 +486,7 @@ class LightningRetrieval(L.LightningModule):
                     tot_samples += n_samples
 
                     loss_k_s = pred_k_s.loss(target_k_s)
-                    tot_loss += loss_k_s * n_samples
+                    tot_loss = tot_loss + loss_k_s * n_samples
                     losses[name] += loss_k_s.item()
 
                     if len(scalar_metrics) > 0:
@@ -482,7 +496,7 @@ class LightningRetrieval(L.LightningModule):
                             metric.update(pred_k_s, target_k_s)
 
                 if tot_samples > 0:
-                    tot_loss /= tot_samples
+                    tot_loss =  tot_loss / tot_samples
 
                 for metric in other_metrics:
                     metric = metric.to(device=pred_k_s.device)
