@@ -6,6 +6,7 @@ import copy
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Union
 
+import numpy as np
 import torch
 from torch.optim import Optimizer, SGD
 from torch.optim.lr_scheduler import LRScheduler
@@ -63,6 +64,10 @@ class LightningRetrieval(L.LightningModule):
         if logger is None:
             logger = loggers.TensorBoardLogger
         self.logger_class = logger
+
+        self.inputs_prev = None
+        self.pred_prev = None
+        self.target_prev = None
 
     @property
     def training_finished(self):
@@ -260,6 +265,26 @@ class LightningRetrieval(L.LightningModule):
         self.log("Training loss", tot_loss)
 
         losses["loss"] = tot_loss
+
+        if np.isnan(tot_loss.item()):
+
+            if self.pred_prev is not None:
+                for tensors, name in zip(
+                        [inputs, target, pred, self.inputs_prev, self.target_prev, self.pred_prev],
+                        ["inputs", "target", "pred", "input_prev", "target_prev", "pred_prev"]
+                ):
+                    if not isinstance(tensors, dict):
+                        tensors = {"x": tensors}
+
+                    for key, tensor in tensors.items():
+                        if isinstance(tensor, list):
+                            tensor = torch.stack(tensor, -3)
+                        tensor = tensor.detach().to(dtype=torch.float32, device="cpu").numpy()
+                        np.save(f"{name}_{key}.npy", tensor)
+
+        self.inputs_prev = inputs
+        self.target_prev = target
+        self.pred_prev = pred
         return losses
 
     def on_train_start(self):
