@@ -3,6 +3,7 @@ pytorch_retrieve.lightning
 
 """
 import copy
+import logging
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Union
 
@@ -19,6 +20,9 @@ from pytorch_retrieve.tensors.masked_tensor import MaskedTensor
 from pytorch_retrieve.metrics import ScalarMetric
 
 RetrievalInput = Union[torch.Tensor, list, dict]
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class LightningRetrieval(L.LightningModule):
@@ -259,10 +263,12 @@ class LightningRetrieval(L.LightningModule):
                         target_k_s = MaskedTensor(target_k_s, mask=mask)
 
                     n_samples = (~mask).sum()
-                    if n_samples == 0:
-                        continue
-                    tot_samples += n_samples
 
+                    if n_samples == 0:
+                        pred_k_s = 0.0 * pred_k_s
+                        target_k_s = 0.0 * target_k_s
+
+                    tot_samples += n_samples
                     loss_k_s = pred_k_s.loss(target_k_s)
                     tot_loss = tot_loss + n_samples * loss_k_s
                     losses[name] += loss_k_s.item()
@@ -481,8 +487,8 @@ class LightningRetrieval(L.LightningModule):
                         target_k_s = MaskedTensor(target_k_s, mask=mask)
                     n_samples = (~mask).sum()
                     if n_samples == 0:
-                        print("Skipping output")
-                        continue
+                        pred_k_s = 0.0 * pred_k_s
+                        target_k_s = 0.0 * target_k_s
                     tot_samples += n_samples
 
                     loss_k_s = pred_k_s.loss(target_k_s)

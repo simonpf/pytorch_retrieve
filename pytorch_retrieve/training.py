@@ -69,7 +69,7 @@ class TrainingConfigBase:
             shuffle=shuffle,
             worker_init_fn=worker_init_fn,
             batch_size=self.batch_size,
-            num_workers=8,
+            num_workers=self.n_data_loader_workers,
             pin_memory=True,
         )
         return data_loader
@@ -237,6 +237,7 @@ class TrainingConfig(TrainingConfigBase):
     gradient_clip_val: Optional[float] = None
     accumulate_grad_batches: int = 1
     load_weights: Optional[str] = None
+    n_data_loader_workers: int = 12
 
     @classmethod
     def parse(cls, name, config_dict: Dict[str, object]):
@@ -343,6 +344,9 @@ class TrainingConfig(TrainingConfigBase):
         load_weights = get_config_attr(
             "load_weights", str, config_dict, f"training stage {name}", None
         )
+        n_data_loader_workers = get_config_attr(
+            "n_data_loader_workers", int, config_dict, f"training stage {name}", 12
+        )
 
         return TrainingConfig(
             training_dataset=training_dataset,
@@ -363,7 +367,8 @@ class TrainingConfig(TrainingConfigBase):
             log_every_n_steps=log_every_n_steps,
             gradient_clip_val=gradient_clip_val,
             accumulate_grad_batches=accumulate_grad_batches,
-            load_weights=load_weights
+            load_weights=load_weights,
+            n_data_loader_workers=n_data_loader_workers
         )
 
 
