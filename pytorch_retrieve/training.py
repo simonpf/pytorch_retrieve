@@ -394,7 +394,13 @@ def run_training(
         compute_config = ComputeConfig()
 
     if checkpoint is not None:
-        module = LightningRetrieval.load_from_checkpoint(checkpoint)
+        module = LightningRetrieval.load_from_checkpoint(
+            checkpoint,
+            model=module.model,
+            training_schedule=module.training_schedule,
+            model_dir = module.model_dir,
+            logger=module.logger_class
+        )
 
     while not module.training_finished:
         training_config = module.current_training_config
@@ -434,6 +440,7 @@ def run_training(
             module,
             train_dataloaders=training_loader,
             val_dataloaders=validation_loader,
+            ckpt_path=checkpoint
         )
         module.save_model(model_dir)
 
