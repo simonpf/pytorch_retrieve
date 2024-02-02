@@ -96,11 +96,11 @@ class InputLayer(nn.Module):
         self.bins = {}
 
         # Initialize torch parameters.
-        self.finalized = nn.Parameter(torch.tensor(False), requires_grad=False)
-        self.p_mean = nn.Parameter(torch.zeros(self.n_features), requires_grad=False)
-        self.p_std_dev = nn.Parameter(torch.zeros(self.n_features), requires_grad=False)
-        self.p_min = nn.Parameter(torch.zeros(self.n_features), requires_grad=False)
-        self.p_max = nn.Parameter(torch.zeros(self.n_features), requires_grad=False)
+        self.finalized = nn.Parameter(torch.tensor(0.0, dtype=torch.float32), requires_grad=False)
+        self.p_mean = nn.Parameter(torch.zeros(self.n_features, dtype=torch.float32), requires_grad=False)
+        self.p_std_dev = nn.Parameter(torch.zeros(self.n_features, dtype=torch.float32), requires_grad=False)
+        self.p_min = nn.Parameter(torch.zeros(self.n_features, dtype=torch.float32), requires_grad=False)
+        self.p_max = nn.Parameter(torch.zeros(self.n_features, dtype=torch.float32), requires_grad=False)
 
     def reset(self):
         """
@@ -236,7 +236,7 @@ class InputLayer(nn.Module):
         """
         if self.initialized:
             device = self.finalized.device
-            self.finalized.set_(torch.tensor(True).to(device=device))
+            self.finalized.set_(torch.tensor(1.0).to(device=device))
             self.finalize()
             return None
         self.initialized = True
@@ -265,19 +265,19 @@ class InputLayer(nn.Module):
         Load tensors with input data statistics from dataset.
         """
         self.p_mean = nn.Parameter(
-            torch.tensor(dataset["mean"].data), requires_grad=False
+            torch.tensor(dataset["mean"].data.astype("float32")), requires_grad=False
         )
         self.p_std_dev = nn.Parameter(
-            torch.tensor(dataset["std_dev"].data), requires_grad=False
+            torch.tensor(dataset["std_dev"].data.astype("float32")), requires_grad=False
         )
         self.p_min = nn.Parameter(
-            torch.tensor(dataset["min"].data), requires_grad=False
+            torch.tensor(dataset["min"].data.astype("float32")), requires_grad=False
         )
         self.p_max = nn.Parameter(
-            torch.tensor(dataset["max"].data), requires_grad=False
+            torch.tensor(dataset["max"].data.astype("float32")), requires_grad=False
         )
         device = self.finalized.device
-        self.finalized.set_(torch.tensor(True).to(device=device))
+        self.finalized.set_(torch.tensor(1.0, dtype=torch.float32).to(device=device))
 
 
 class StandardizationLayer(InputLayer):
@@ -317,7 +317,7 @@ class StandardizationLayer(InputLayer):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         pad_dims = x.dim() - 2
 
-        if self.finalized.item():
+        if self.finalized.item() > 0.0:
             if self.kind == "standardize":
                 mean = self.p_mean.__getitem__((...,) + (None,) * pad_dims)
                 std_dev = self.p_std_dev.__getitem__((...,) + (None,) * pad_dims)

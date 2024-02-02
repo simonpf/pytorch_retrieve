@@ -22,7 +22,7 @@ class Mean(nn.Module):
 class Quantiles(nn.Module):
     def __init__(self, tau):
         super().__init__()
-        self.tau = nn.Parameter(torch.tensor(tau), requires_grad=False)
+        self.tau = nn.Parameter(torch.tensor(tau, dtype=torch.float32), requires_grad=False)
 
     def forward(self, x):
         return QuantileTensor(x, tau=self.tau)
