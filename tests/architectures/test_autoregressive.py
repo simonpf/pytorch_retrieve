@@ -75,7 +75,7 @@ DIRECT_TEMPORAL_ENCODER_CONFIG = (
     kind = "direct"
 
     [encoder]
-    channels = [16, 32, 64]
+    channels = [64, 32, 16]
     stage_depths = [2, 2, 2]
 
     [decoder]
@@ -94,7 +94,7 @@ def test_temporal_encoder_config():
 
     x = [torch.rand(1, 16, 64, 64) for x in range(4)]
     y = temporal_encoder(x)
-    assert len(y) == 4
+    assert len(y) == 2
     assert y[0].shape == (1, 16, 64, 64)
 
 INPUT_CONFIG = (

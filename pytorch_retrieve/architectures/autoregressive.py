@@ -265,7 +265,7 @@ class TemporalEncoderConfig:
         return DirectTemporalEncoder(
             block_factory,
             self.n_inputs,
-            self.latent_dim,
+            self.encoder_config.channels,
             self.order,
         )
 
@@ -312,13 +312,22 @@ class DirectTemporalEncoder(nn.Module):
             self,
             block_factory: Callable[[int, int], nn.Module],
             n_inputs: int,
-            latent_dim: int,
+            channels: List[int],
             order: int
     ):
         super().__init__()
-        self.blocks = nn.ModuleList([
-            block_factory(n_inputs * latent_dim, latent_dim) for _ in range(order)
-        ])
+        encs = []
+        for _ in range(order):
+            blocks = []
+            ch_in = channels[0]
+            for ch_out in channels[1:]:
+                blocks.append(
+                    block_factory(ch_in, ch_out)
+                )
+                ch_in = ch_out
+            encs.append(nn.Sequential(*blocks))
+
+        self.blocks = nn.ModuleList(encs)
 
     def forward(self, x):
         x = torch.cat(x, 1)
