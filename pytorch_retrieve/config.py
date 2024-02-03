@@ -313,4 +313,10 @@ class ComputeConfig:
     def get_strategy(self):
         if self.strategy == "ddp":
             return strategies.DDPStrategy(find_unused_parameters=True)
+        elif self.strategy == "fsdp":
+            import pytorch_retrieve
+            return strategies.FSDPStrategy(
+                sharding_strategy="SHARD_GRAD_OP",
+                activation_checkpointing_policy=pytorch_retrieve.modules.conv.blocks.ALL
+            )
         return self.strategy

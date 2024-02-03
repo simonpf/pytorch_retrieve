@@ -824,3 +824,8 @@ class ResNeXt2Plus1:
             normalization_factory=self.normalization_factory,
             padding_factory=self.padding_factory
         )
+
+ALL = set([
+    cls for cls in globals().values()
+    if isinstance(cls, type) and issubclass(cls, nn.Module)
+])
