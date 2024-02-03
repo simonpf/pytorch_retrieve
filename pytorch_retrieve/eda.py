@@ -17,7 +17,11 @@ from torch import nn
 from pytorch_retrieve.modules.input import InputLayer
 from pytorch_retrieve.config import read_config_file, InputConfig, ComputeConfig
 from pytorch_retrieve.training import parse_training_config, TrainingConfig
-from pytorch_retrieve.utils import read_model_config, read_training_config
+from pytorch_retrieve.utils import (
+    read_model_config,
+    read_training_config,
+    read_compute_config
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -93,6 +97,8 @@ def run_eda(
             configurations.
         training_configs: A dictionary mapping training stage names to corresponding
             training configs.
+        compute_config: A ComputeConfig object defining the configuration of the
+            compute environment to perform the EDA on.
     """
     training_config = next(iter(training_configs.values()))
     training_loader = training_config.get_training_data_loader()
@@ -137,10 +143,19 @@ def run_eda(
         " directory."
     ),
 )
+@click.option(
+    "--compute_config",
+    default=None,
+    help=(
+        "Path to the compute config file defining the compute environment for "
+        " the training."
+    ),
+)
 def cli(
     model_path: Path,
     model_config: Path,
     training_config: Path,
+    compute_config: Optional[Path],
 ) -> int:
     """
     Performs EDA on training and validation data.
@@ -168,10 +183,14 @@ def cli(
     if training_config is None:
         return 1
 
+    compute_config = read_compute_config(LOGGER, model_path, compute_config)
+    if isinstance(compute_config, dict):
+        compute_config = ComputeConfig.parse(compute_config)
+
     input_configs = {
         name: InputConfig.parse(name, cfg)
         for name, cfg in model_config["input"].items()
     }
 
     training_schedule = parse_training_config(training_config)
-    run_eda(model_path, input_configs, training_schedule)
+    run_eda(model_path, input_configs, training_schedule, compute_config=compute_config)
