@@ -448,6 +448,7 @@ def run_training(
             ckpt_path=checkpoint
         )
         module.save_model(model_dir)
+        checkpoint = None
 
 
 @click.option(
