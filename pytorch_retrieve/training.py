@@ -447,6 +447,7 @@ def run_training(
             val_dataloaders=validation_loader,
             ckpt_path=checkpoint
         )
+        module = module.to(torch.device("cpu"))
         module.save_model(model_dir)
         checkpoint = None
 
