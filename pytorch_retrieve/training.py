@@ -16,6 +16,7 @@ import lightning as L
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, IterableDataset
+from torch.optim.lr_scheduler import SequentialLR
 from lightning.pytorch import callbacks
 
 from pytorch_retrieve import metrics
@@ -147,6 +148,28 @@ class TrainingConfigBase:
         if scheduler is None:
             return optimizer, None
 
+        if isinstance(scheduler, list):
+            milestones = self.milestones
+            if milestones is None:
+                raise RuntimeError(
+                    "If a list of schedulers is provided, 'milestones' must be "
+                    "provided as well."
+                )
+            schedulers = scheduler
+            scheds = []
+            for scheduler, args in zip(schedulers, self.scheduler_args):
+                scheduler = getattr(torch.optim.lr_scheduler, scheduler)
+                scheduler_args = self.scheduler_args
+                if scheduler_args is None:
+                    scheduler_args = {}
+                scheds.append(scheduler(
+                    optimizer=optimizer,
+                    **args,
+                ))
+            scheduler = SequentialLR(optimizer, schedulers=scheds, milestones=self.milestones)
+            scheduler.stepwise = self.stepwise_scheduling
+            return optimizer, scheduler
+
         scheduler = getattr(torch.optim.lr_scheduler, scheduler)
         scheduler_args = self.scheduler_args
         if scheduler_args is None:
@@ -228,6 +251,7 @@ class TrainingConfig(TrainingConfigBase):
     optimizer_args: Optional[dict] = None
     scheduler: str = None
     scheduler_args: Optional[dict] = None
+    milestones: Optional[List[int]] = None
     minimum_lr: Optional[float] = None
     reuse_optimizer: bool = False
     stepwise_scheduling: bool = False
@@ -305,12 +329,13 @@ class TrainingConfig(TrainingConfigBase):
         )
 
         scheduler = get_config_attr(
-            "scheduler", str, config_dict, f"training stage {name}", "none"
+            "scheduler", None, config_dict, f"training stage {name}", None
         )
-        if scheduler == "none":
-            scheduler = None
         scheduler_args = get_config_attr(
-            "scheduler_args", dict, config_dict, f"training stage {name}", {}
+            "scheduler_args", None, config_dict, f"training stage {name}", {}
+        )
+        milestones = get_config_attr(
+            "milestones", list, config_dict, f"training stage {name}", None
         )
 
         minimum_lr = get_config_attr(
@@ -359,6 +384,7 @@ class TrainingConfig(TrainingConfigBase):
             optimizer_args=optimizer_args,
             scheduler=scheduler,
             scheduler_args=scheduler_args,
+            milestones=milestones,
             batch_size=batch_size,
             minimum_lr=minimum_lr,
             reuse_optimizer=reuse_optimizer,
