@@ -259,6 +259,7 @@ class TrainingConfig(TrainingConfigBase):
 
     log_every_n_steps: Optional[int] = None
     gradient_clip_val: Optional[float] = None
+    gradient_clip_algorithm: Optional[str] = None
     accumulate_grad_batches: int = 1
     load_weights: Optional[str] = None
     n_data_loader_workers: int = 12
@@ -363,6 +364,9 @@ class TrainingConfig(TrainingConfigBase):
         gradient_clip_val = get_config_attr(
             "gradient_clip_val", float, config_dict, f"training stage {name}", None
         )
+        gradient_clip_algorithm = get_config_attr(
+            "gradient_clip_algorithm", str, config_dict, f"training stage {name}", None
+        )
         accumulate_grad_batches = get_config_attr(
             "accumulate_grad_batches", int, config_dict, f"training stage {name}", 1
         )
@@ -392,6 +396,7 @@ class TrainingConfig(TrainingConfigBase):
             metrics=metrics,
             log_every_n_steps=log_every_n_steps,
             gradient_clip_val=gradient_clip_val,
+            gradient_clip_algorithm=gradient_clip_algorithm,
             accumulate_grad_batches=accumulate_grad_batches,
             load_weights=load_weights,
             n_data_loader_workers=n_data_loader_workers
@@ -466,6 +471,7 @@ def run_training(
             accumulate_grad_batches=training_config.accumulate_grad_batches,
             num_sanity_val_steps=0,
             gradient_clip_val=training_config.gradient_clip_val,
+            gradient_clip_algorithm=training_config.gradient_clip_algorithm
         )
         trainer.fit(
             module,
