@@ -316,7 +316,7 @@ class MLP(ParamCount, nn.Module):
 
         stem_cfgs = {}
         for key, inpt_cfg in inpt_cfgs.items():
-            in_channels = get_config_attr("in_channels", int, inpt_cfg, f"input.{key}")
+            in_channels = get_config_attr("n_features", int, inpt_cfg, f"input.{key}", required=True)
             if "stem" in inpt_cfg:
                 stem_cfg = StemConfig.parse(in_channels, inpt_cfg["stem"])
             else:
