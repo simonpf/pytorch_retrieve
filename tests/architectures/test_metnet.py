@@ -31,7 +31,8 @@ kind = "avgpool"
 
 [architecture.temporal_encoder]
 hidden_channels = 128
-n_layers = 4
+n_inputs = 4
+n_layers = 2
 
 [architecture.spatial_aggregator]
 depth = 4
