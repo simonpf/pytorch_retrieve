@@ -100,13 +100,8 @@ class LightningRetrieval(L.LightningModule):
             if name is None:
                 name = "retrieval_model"
             path = path / (name + ".pt")
-        torch.save(
-            {
-                "state_dict": self.model.state_dict(),
-                "model_config": self.model.to_config_dict(),
-            },
-            path,
-        )
+        self.model.save(path)
+
 
     @stage.setter
     def stage(self, stage: int) -> None:
@@ -236,7 +231,7 @@ class LightningRetrieval(L.LightningModule):
             device = inpt.device
             dtype = inpt.dtype
         else:
-            inpt = inpts
+            inpt = inputs
             if isinstance(inpt, list):
                 inpt = inpt[0]
             device = inputs.device
@@ -283,7 +278,7 @@ class LightningRetrieval(L.LightningModule):
                     target_k = MaskedTensor(target_k, mask=mask)
 
                 loss_k = pred[name].loss(target_k)
-                tot_loss += loss_k
+                tot_loss = tot_loss + loss_k
                 losses[name] = loss_k.item()
 
         log_dict = {}
@@ -602,6 +597,8 @@ class LightningRetrieval(L.LightningModule):
         Hook used to store 'stage' attribute in checkpoint.
         """
         checkpoint["stage"] = self.stage
+        if hasattr(self.model, "config_dict"):
+            checkpoint["model_config"] = self.model.config_dict
 
     def on_load_checkpoint(self, checkpoint) -> None:
         """
