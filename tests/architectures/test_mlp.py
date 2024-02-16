@@ -46,7 +46,7 @@ activation_factory = "GELU"
 normalization_factory = "LayerNorm"
 
 [input.x]
-in_channels = 1
+n_features = 1
 
 [output.y]
 shape = [1,]
@@ -119,7 +119,7 @@ activation_factory = "GELU"
 normalization_factory = "LayerNorm"
 
 [input.x]
-in_channels = 1
+n_features = 1
 
 [output.y]
 shape = [1,]
