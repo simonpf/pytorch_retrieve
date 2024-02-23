@@ -15,7 +15,13 @@ import torch
 from torch import nn
 
 from pytorch_retrieve.modules.input import InputLayer
-from pytorch_retrieve.config import read_config_file, InputConfig, ComputeConfig
+from pytorch_retrieve.modules.stats import save_stats
+from pytorch_retrieve.config import (
+    read_config_file,
+    InputConfig,
+    OutputConfig,
+    ComputeConfig
+)
 from pytorch_retrieve.training import parse_training_config, TrainingConfig
 from pytorch_retrieve.utils import (
     read_model_config,
@@ -34,23 +40,42 @@ class EDAModule(L.LightningModule):
     data loading provided by pytorch to speed up the EDA.
     """
 
-    def __init__(self, input_configs: Dict[str, InputConfig], model_directory: Path):
+    def __init__(
+            self,
+            input_configs: Dict[str, InputConfig],
+            output_configs: Dict[str, OutputConfig],
+            stats_path: Path
+    ):
         """
         Args:
             input_configs: Dictionary containing the input configurations for all
                 retrieval inputs.
-            model_directory: The directory where the retrieval artifacts will
+            output_configs: Dictionary containing the output configurations for all
+                retrieval outputs.
+            stats_path: The directory where the retrieval artifacts will
                 stored.
         """
         super().__init__()
+        stats_path = Path(stats_path)
+        self.stats_path = stats_path
+
         self.input_modules = nn.ModuleDict(
             {
-                name: InputLayer(name, cfg.n_features, model_path=model_directory)
+                name: InputLayer(name, cfg.n_features)
                 for name, cfg in input_configs.items()
             }
         )
+        self.output_modules = nn.ModuleDict(
+            {
+                name: cfg.get_output_layer()
+                for name, cfg in output_configs.items()
+            }
+        )
         self.params = nn.Parameter(torch.zeros(1), requires_grad=True)
+
         for mod in self.input_modules.values():
+            mod.reset()
+        for mod in self.output_modules.values():
             mod.reset()
 
     def configure_optimizers(self):
@@ -70,7 +95,12 @@ class EDAModule(L.LightningModule):
         for name, mod in self.input_modules.items():
             if not isinstance(inputs, dict):
                 inputs = {name: inputs}
-            mod(inputs[name])
+            mod.track_stats(inputs[name])
+
+        for name, mod in self.output_modules.items():
+            if not isinstance(outputs, dict):
+                outputs = {name: outputs}
+            mod.track_stats(outputs[name])
 
         return None
 
@@ -79,12 +109,27 @@ class EDAModule(L.LightningModule):
         Signal the end of the epoch to all input modules.
         """
         for name, mod in self.input_modules.items():
-            mod.epoch_finished(self)
+            mod.epoch_finished()
+        for name, mod in self.output_modules.items():
+            mod.epoch_finished()
+
+    def on_fit_end(self):
+        """
+        Save statistics after two passes through the data.
+        """
+        for name, mod in self.input_modules.items():
+            stats = mod.compute_stats(self)
+            save_stats(stats, self.stats_path / "input", name)
+        for name, mod in self.output_modules.items():
+            stats = mod.compute_stats(self)
+            save_stats(stats, self.stats_path / "output", name)
+
 
 
 def run_eda(
-    model_directory: Path,
+    stats_path: Path,
     input_configs: Dict[str, InputConfig],
+    output_configs: Dict[str, OutputConfig],
     training_configs: Dict[str, TrainingConfig],
     compute_config: Optional[ComputeConfig] = None,
 ) -> None:
@@ -92,9 +137,11 @@ def run_eda(
     Performs EDA for given input and training configs.
 
     Args:
-        model_directory: The directory in which to store the computed statistics.
+        stats_path: The directory to which to write the calculated statistics.
         input_configs: A dictionary mapping input names to corresponding input
             configurations.
+        output_configs: A dictionary mapping retrieval output names to corresponding
+            config objects.
         training_configs: A dictionary mapping training stage names to corresponding
             training configs.
         compute_config: A ComputeConfig object defining the configuration of the
@@ -106,7 +153,7 @@ def run_eda(
     if compute_config is None:
         compute_config = ComputeConfig()
 
-    eda_module = EDAModule(input_configs, model_directory)
+    eda_module = EDAModule(input_configs, output_configs, stats_path)
     trainer = L.Trainer(
         max_epochs=2,
         logger=None,
@@ -191,6 +238,16 @@ def cli(
         name: InputConfig.parse(name, cfg)
         for name, cfg in model_config["input"].items()
     }
+    input_configs = {
+        name: OutputConfig.parse(name, cfg)
+        for name, cfg in model_config["output"].items()
+    }
 
     training_schedule = parse_training_config(training_config)
-    run_eda(model_path, input_configs, training_schedule, compute_config=compute_config)
+    run_eda(
+        model_path,
+        input_configs,
+        output_configs,
+        training_schedule,
+        compute_config=compute_config
+    )
