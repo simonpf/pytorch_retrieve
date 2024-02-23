@@ -11,6 +11,7 @@ import torch
 from torch import nn
 
 from pytorch_retrieve.modules.conv import blocks
+from .padding import calculate_padding, Reflect, get_padding_factory
 
 
 class BasicConv(nn.Sequential):
@@ -30,23 +31,25 @@ class BasicConv(nn.Sequential):
         normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm2d,
         residual_connections: bool = True,
     ):
+        super().__init__()
         if isinstance(out_shape, int):
             out_shape = (out_shape,)
 
-        super().__init__()
-        padding = kernel_size // 2
-        head_blocks = [
-            blocks.BasicConvBlock(
-                in_channels,
-                in_channels,
-                kernel_size=kernel_size,
-                padding=padding,
-                activation_factory=activation_factory,
-                normalization_factory=normalization_factory,
-                residual_connection=residual_connections,
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size,) * 2
+
+        head_blocks = []
+        for _ in range(max(depth - 1, 0)):
+            head_blocks.append(
+                blocks.BasicConvBlock(
+                    in_channels,
+                    in_channels,
+                    kernel_size=kernel_size,
+                    activation_factory=activation_factory,
+                    normalization_factory=normalization_factory,
+                    residual_connection=residual_connections,
+                )
             )
-            for _ in range(max(depth - 1, 0))
-        ]
         head_blocks.append(nn.Conv2d(in_channels, np.prod(out_shape), kernel_size=1))
         super().__init__(*head_blocks)
         self.out_shape = tuple(out_shape)
@@ -71,28 +74,29 @@ class BasicConv3d(nn.Sequential):
         in_channels: int,
         out_shape: Union[List[int], Tuple[int], int],
         depth: int = 1,
-        kernel_size: int = 1,
+        kernel_size: Union[Tuple[int], int] = (1, 1, 1),
         activation_factory: Callable[[], nn.Module] = nn.ReLU,
         normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm3d,
         residual_connections: bool = True,
     ):
+        super().__init__()
         if isinstance(out_shape, int):
             out_shape = (out_shape,)
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size,) * 3
 
-        super().__init__()
-        padding = kernel_size // 2
-        head_blocks = [
-            blocks.BasicConv3dBlock(
-                in_channels,
-                in_channels,
-                kernel_size=kernel_size,
-                padding=padding,
-                activation_factory=activation_factory,
-                normalization_factory=normalization_factory,
-                residual_connection=residual_connections,
+        head_blocks = []
+        for _ in range(max(depth - 1, 0)):
+            head_blocks.append(
+                blocks.BasicConv3dBlock(
+                    in_channels,
+                    in_channels,
+                    kernel_size=kernel_size,
+                    activation_factory=activation_factory,
+                    normalization_factory=normalization_factory,
+                    residual_connection=residual_connections,
+                )
             )
-            for _ in range(max(depth - 1, 0))
-        ]
         head_blocks.append(nn.Conv3d(in_channels, np.prod(out_shape), kernel_size=1))
         super().__init__(*head_blocks)
         self.out_shape = tuple(out_shape)

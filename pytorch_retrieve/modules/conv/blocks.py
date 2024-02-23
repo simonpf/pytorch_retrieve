@@ -7,6 +7,7 @@ CNN architectures.
 """
 from typing import Callable, Optional, Tuple, Union
 
+import numpy as np
 import torch
 from torch import nn
 
@@ -28,7 +29,7 @@ class BasicConvBlock(nn.Module, ParamCount):
         in_channels: int,
         out_channels: int,
         kernel_size: int,
-        padding: int,
+        padding: Optional[Union[Tuple[int], int]] = None,
         activation_factory: Callable[[], nn.Module] = nn.ReLU,
         normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm2d,
         padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
@@ -52,8 +53,20 @@ class BasicConvBlock(nn.Module, ParamCount):
         else:
             bias = True
 
-        blocks = [
-            padding_factory(padding),
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size,) * 2
+
+        if padding is None:
+            padding = calculate_padding(kernel_size)
+
+        if isinstance(padding, int):
+            padding = (padding,) * 2
+
+        blocks = []
+        if max(padding) > 0:
+            block.append(padding_factory(padding))
+
+        blocks.append(
             nn.Conv2d(
                 in_channels,
                 out_channels,
@@ -61,11 +74,13 @@ class BasicConvBlock(nn.Module, ParamCount):
                 bias=bias,
                 stride=stride if not anti_aliasing else 1,
             )
-        ]
+        )
+
         if normalization_factory is not None:
             blocks.append(
                 normalization_factory(out_channels),
             )
+
         if activation_factory is not None:
             blocks.append(
                 activation_factory(),
@@ -166,7 +181,7 @@ class BasicConv3dBlock(nn.Module, ParamCount):
         in_channels: int,
         out_channels: int,
         kernel_size: int,
-        padding: int,
+        padding: Optional[Union[Tuple[int], int]] = None,
         activation_factory: Callable[[], nn.Module] = nn.ReLU,
         normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm3d,
         padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
@@ -187,8 +202,24 @@ class BasicConv3dBlock(nn.Module, ParamCount):
 
         bias = normalization_factory is None
 
-        blocks = [
-            padding_factory(padding),
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size,) * 3
+
+        if padding is None:
+            padding = calculate_padding(kernel_size)
+
+        if isinstance(padding, int):
+            padding = (padding,) * 3
+        if padding is None:
+            padding = calculate_padding(kernel_size)
+
+
+
+        blocks = []
+        if max(padding) > 0:
+            blocks.append(padding_factory(padding))
+
+        blocks.append(
             nn.Conv3d(
                 in_channels,
                 out_channels,
@@ -196,7 +227,8 @@ class BasicConv3dBlock(nn.Module, ParamCount):
                 bias=bias,
                 stride=stride if not anti_aliasing else 1,
             )
-        ]
+        )
+
         if normalization_factory is not None:
             blocks.append(
                 normalization_factory(out_channels),

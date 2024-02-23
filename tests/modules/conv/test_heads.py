@@ -45,6 +45,7 @@ def test_basic_conv3d():
 
     head = BasicConv3d(
         in_channels=16,
+        kernel_size=3,
         out_shape=(4),
         depth=2,
     )
