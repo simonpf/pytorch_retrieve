@@ -33,7 +33,7 @@ def run_training(model: nn.Module) -> None:
     with TemporaryDirectory() as tmp:
         mod = LightningRetrieval(model, model_dir=Path(tmp))
         data_loader = data_loader_1d(256, 32)
-        trainer = L.Trainer(max_epochs=1)
+        trainer = L.Trainer(max_epochs=1, accelerator="cpu")
         trainer.fit(mod, train_dataloaders=data_loader)
 
 
@@ -52,7 +52,7 @@ def test_mlp_no_residuals():
     assert mlp.n_params == n_params
     y_pred = mlp(x)
     assert y_pred.shape == (x.shape[:1] + (16,))
-    model = nn.Sequential(mlp, Mean())
+    model = nn.Sequential(mlp, Mean("y", 1))
     run_training(model)
 
 
@@ -71,7 +71,7 @@ def test_mlp_simple_residuals():
     assert mlp.n_params == n_params
     y_pred = mlp(x)
     assert y_pred.shape == (x.shape[:1] + (16,))
-    model = nn.Sequential(mlp, Mean())
+    model = nn.Sequential(mlp, Mean("y", 1))
     run_training(model)
 
 
@@ -90,5 +90,5 @@ def test_mlp_hyper_residuals():
     assert mlp.n_params == n_params
     y_pred = mlp(x)
     assert y_pred.shape == (x.shape[:1] + (16,))
-    model = nn.Sequential(mlp, Mean())
+    model = nn.Sequential(mlp, Mean("y", 1))
     run_training(model)

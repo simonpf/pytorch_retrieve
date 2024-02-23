@@ -64,7 +64,7 @@ class BasicConvBlock(nn.Module, ParamCount):
 
         blocks = []
         if max(padding) > 0:
-            block.append(padding_factory(padding))
+            blocks.append(padding_factory(padding))
 
         blocks.append(
             nn.Conv2d(

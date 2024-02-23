@@ -6,6 +6,7 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
+from pytorch_retrieve.modules.stats import save_stats
 from pytorch_retrieve.data.synthetic import Synthetic1d, Synthetic3d
 from pytorch_retrieve.modules.input import InputLayer, StandardizationLayer
 from pytorch_retrieve.architectures import load_model, load_and_compile_model
@@ -26,12 +27,12 @@ def test_input_1d(tmp_path):
     """
     data_loader = data_loader_1d(2048, 64)
 
-    input_layer = InputLayer("x", n_features=1, model_path=tmp_path)
+    input_layer = InputLayer("x", n_features=1, stats_path=tmp_path / "stats")
     for x, y in data_loader:
         input_layer(x)
     stats_1 = input_layer.compute_stats()
 
-    input_layer = InputLayer("x", n_features=1, model_path=tmp_path)
+    input_layer = InputLayer("x", n_features=1, stats_path=tmp_path / "stats")
     for x, y in data_loader:
         mask = torch.rand(*x.shape) < 0.5
         x[mask] = torch.nan
@@ -48,7 +49,7 @@ def test_hist_1d(tmp_path):
     """
     data_loader = data_loader_1d(2048, 64)
 
-    input_layer = InputLayer("x", n_features=1, model_path=tmp_path)
+    input_layer = InputLayer("x", n_features=1, stats_path=tmp_path / "stats")
     for x, y in data_loader:
         input_layer(x)
     stats_1 = input_layer.compute_stats()
@@ -67,7 +68,7 @@ def test_finalization(tmp_path):
     """
     data_loader = data_loader_1d(2048, 64)
 
-    input_layer_1 = InputLayer("x", n_features=1, model_path=tmp_path)
+    input_layer_1 = InputLayer("x", n_features=1, stats_path=tmp_path / "stats")
     for x, y in data_loader:
         input_layer_1(x)
     input_layer_1.epoch_finished()
@@ -76,9 +77,11 @@ def test_finalization(tmp_path):
         input_layer_1(x)
     input_layer_1.epoch_finished()
 
+    stats = input_layer_1.compute_stats()
+    save_stats(stats, tmp_path / "stats", "x")
     assert (tmp_path / "stats" / "x.nc").exists()
 
-    input_layer_2 = InputLayer("x", n_features=1, model_path=tmp_path)
+    input_layer_2 = InputLayer("x", n_features=1, stats_path=tmp_path / "stats")
     assert input_layer_2.finalized
 
 
@@ -94,7 +97,7 @@ def test_normalization_1d(tmp_path):
     data_loader = data_loader_1d(2048, 64)
 
     input_layer_1 = StandardizationLayer(
-        "x", n_features=1, model_path=tmp_path, kind="standardize"
+        "x", n_features=1, stats_path=tmp_path / "stats", kind="standardize"
     )
     for x, y in data_loader:
         input_layer_1(x)
@@ -104,7 +107,7 @@ def test_normalization_1d(tmp_path):
     input_layer_1.epoch_finished()
 
     # Standardization
-    input_layer_2 = StandardizationLayer("x", n_features=1, model_path=None)
+    input_layer_2 = StandardizationLayer("x", n_features=1, stats_path=None)
     for x, y in data_loader:
         x = input_layer_1(x)
         input_layer_2(x)
@@ -115,7 +118,7 @@ def test_normalization_1d(tmp_path):
     assert (np.isclose(stats["std_dev"], 1.0, atol=1e-2)).all()
 
     # Min-max normalization
-    input_layer_2 = StandardizationLayer("x", n_features=1, model_path=None)
+    input_layer_2 = StandardizationLayer("x", n_features=1, stats_path=None)
     input_layer_1.kind = "minmax"
     for x, y in data_loader:
         x = input_layer_1(x)
@@ -149,12 +152,12 @@ def test_input_3d(tmp_path):
     """
     data_loader = data_loader_3d(256, 4)
 
-    input_layer = InputLayer("x", n_features=4, model_path=tmp_path)
+    input_layer = InputLayer("x", n_features=4, stats_path=tmp_path)
     for x, y in data_loader:
         input_layer(x)
     stats_1 = input_layer.compute_stats()
 
-    input_layer = InputLayer("x", n_features=4, model_path=tmp_path)
+    input_layer = InputLayer("x", n_features=4, stats_path=tmp_path)
     for x, y in data_loader:
         mask = torch.rand(*x.shape) < 0.5
         x[mask] = torch.nan
@@ -174,7 +177,7 @@ def test_hist_3d(tmp_path):
     """
     data_loader = data_loader_3d(256, 4)
 
-    input_layer = InputLayer("x", n_features=4, model_path=tmp_path)
+    input_layer = InputLayer("x", n_features=4, stats_path=tmp_path)
     for x, y in data_loader:
         input_layer(x)
     input_layer.epoch_finished()
@@ -198,7 +201,7 @@ def test_normalization_3d(tmp_path):
     data_loader = data_loader_3d(256, 8)
 
     input_layer_1 = StandardizationLayer(
-        "x", n_features=4, model_path=tmp_path, kind="standardize"
+        "x", n_features=4, stats_path=tmp_path, kind="standardize"
     )
     for x, y in data_loader:
         input_layer_1(x)
@@ -208,7 +211,7 @@ def test_normalization_3d(tmp_path):
     input_layer_1.epoch_finished()
 
     # Standardization
-    input_layer_2 = StandardizationLayer("x", n_features=4, model_path=None)
+    input_layer_2 = StandardizationLayer("x", n_features=4, stats_path=None)
     for x, y in data_loader:
         x = input_layer_1(x)
         input_layer_2(x)
@@ -219,7 +222,7 @@ def test_normalization_3d(tmp_path):
     assert (np.isclose(stats["std_dev"], 1.0, atol=1e-2)).all()
 
     # Min-max normalization
-    input_layer_2 = StandardizationLayer("x", n_features=4, model_path=None)
+    input_layer_2 = StandardizationLayer("x", n_features=4, stats_path=None)
     input_layer_1.kind = "minmax"
     for x, y in data_loader:
         x = input_layer_1(x)
@@ -243,7 +246,7 @@ def test_load_input_modules(
     data_loader = data_loader_3d(256, 8)
 
     input_layer = StandardizationLayer(
-        "x", n_features=4, model_path=tmp_path, kind="standardize"
+        "x", n_features=4, stats_path=tmp_path, kind="standardize"
     )
     for x, y in data_loader:
         input_layer(x)

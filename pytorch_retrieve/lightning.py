@@ -33,8 +33,8 @@ class LightningRetrieval(L.LightningModule):
     def __init__(
         self,
         model: nn.Module,
-        name: Optional[str] = None,
         training_schedule: Dict[str, "TrainingConfig"] = None,
+        name: Optional[str] = None,
         model_dir: Optional[Path] = None,
         logger: Optional[Callable[[Path, str], L.pytorch.loggers.Logger]] = None,
     ):
@@ -51,6 +51,8 @@ class LightningRetrieval(L.LightningModule):
 
         if name is None:
             name = "retrieval_model"
+            if hasattr(model, "config_dict"):
+                name = model.config_dict.get("name", "retrieval_model")
         self.name = name
 
         self.training_schedule = training_schedule

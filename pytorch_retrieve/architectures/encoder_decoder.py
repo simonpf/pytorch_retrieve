@@ -668,9 +668,8 @@ class HeadConfig:
             activation_factory=activation_factory,
             normalization_factory=normalization_factory,
         )
-        output_factory = self.output_config.get_output_layer()
-
-        return nn.Sequential(head, output_factory)
+        output_layer = self.output_config.get_output_layer()
+        return nn.Sequential(head, output_layer)
 
 
 @dataclass

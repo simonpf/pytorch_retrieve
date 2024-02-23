@@ -15,14 +15,16 @@ import torch
 from torch import nn
 from torch.optim import AdamW
 
-from pytorch_retrieve.config import get_config_attr
+from pytorch_retrieve.config import get_config_attr, InputConfig, OutputConfig
 from pytorch_retrieve.modules.activation import get_activation_factory
 from pytorch_retrieve.modules.normalization import get_normalization_factory
+from pytorch_retrieve.modules.input import StandardizationLayer
 from pytorch_retrieve.modules import mlp
 from pytorch_retrieve.modules.utils import ParamCount
 from pytorch_retrieve.modules.stems import MLPStem
 from pytorch_retrieve.modules.aggregation import MLPAggregator
 from pytorch_retrieve.modules import output
+from pytorch_retrieve.architectures.model import RetrievalModel
 
 
 @dataclass
@@ -30,7 +32,7 @@ class StemConfig:
     """
     Configuration attributes of the stems of an MLP architecture.
     """
-
+    input_name: str
     in_channels: int
     hidden_channels: int
     n_layers: int
@@ -38,9 +40,28 @@ class StemConfig:
     activation_factory: Callable[[], nn.Module] = nn.ReLU
     normalization_factory: Optional[Callable[[int], nn.Module]] = None
     masked: bool = False
+    normalize: Optional[str] = None
 
-    @staticmethod
-    def parse(in_channels: int, config_dict: dict, exhaustive=False) -> "StemConfig":
+
+    @classmethod
+    def parse(
+            cls,
+            name: str,
+            input_name: str,
+            input_config: InputConfig,
+            config_dict: dict,
+            exhaustive=False
+    ) -> "StemConfig":
+        """
+        Parse configuration of MLP stem.
+
+        Args:
+            name: Name of the stem.
+            input_name: Name of the input variable.
+            input_config: The configuration of the input corresponding to this stem.
+            config_dict: The configuration dictionary specifying the configuration of this stem.
+        """
+        in_channels = input_config.n_features
         hidden_channels = get_config_attr(
             "hidden_channels",
             int,
@@ -64,23 +85,40 @@ class StemConfig:
         )
         normalization_factory = get_normalization_factory(normalization_factory)
         masked = get_config_attr("masked", bool, config_dict, "Stem", False)
+        normalize = input_config.normalize
 
         return StemConfig(
-            in_channels,
-            hidden_channels,
-            n_layers,
+            input_name,
+            in_channels=in_channels,
+            hidden_channels=hidden_channels,
+            n_layers=n_layers,
             residual_connections=residual_connections,
             activation_factory=activation_factory,
             normalization_factory=normalization_factory,
             masked=masked,
+            normalize=normalize
         )
 
-    def compile(self, out_channels):
+    def compile(self, out_channels) -> nn.Module:
+        """
+        Compile stem into a network module.
+
+        Args:
+             out_channels: The number of channels in the stem output.
+
+        Return:
+             A torch.nn.Module implementing the stem specified by the configuration object.
+        """
+        blocks = []
+        if self.normalize != "none":
+            blocks.append(StandardizationLayer(self.input_name, self.in_channels))
+
         if self.hidden_channels < 0:
             hidden_channels = out_channels
         else:
             hidden_channels = self.hidden_channels
-        return MLPStem(
+
+        blocks.append(MLPStem(
             self.in_channels,
             out_channels,
             self.n_layers,
@@ -89,7 +127,9 @@ class StemConfig:
             activation_factory=self.activation_factory,
             normalization_factory=self.normalization_factory,
             masked=self.masked,
-        )
+        ))
+        return nn.Sequential(*blocks)
+
 
 
 @dataclass
@@ -218,23 +258,21 @@ class AggregatorConfig:
 
 
 @dataclass
-class OutputConfig:
+class HeadConfig:
     """
     Dataclass for representing attributes of model heads.
     """
 
-    out_channels: int
+    output_config: OutputConfig
+    in_channels: int
     n_layers: int
-    shape: Tuple[int]
     residual_connections: Optional[str] = None
     activation_factory: Callable[[], nn.Module] = nn.ReLU
     normalization_factory: Optional[Callable[[int], nn.Module]] = None
     masked: bool = False
 
-    @staticmethod
-    def parse(config_dict: dict, exhaustive=False) -> "StemConfig":
-        shape = get_config_attr("shape", list, config_dict, "Output", None)
-        out_channels = np.prod(shape)
+    @classmethod
+    def parse(cls, in_channels, output_config, name, config_dict) -> "StemConfig":
 
         n_layers = get_config_attr("n_layers", int, config_dict, "Stem", 1)
         residual_connections = get_config_attr(
@@ -253,94 +291,138 @@ class OutputConfig:
         normalization_factory = get_normalization_factory(normalization_factory)
         masked = get_config_attr("masked", bool, config_dict, "Stem", False)
 
-        return OutputConfig(
-            out_channels,
-            n_layers,
-            shape,
+        return HeadConfig(
+            output_config=output_config,
+            in_channels=in_channels,
+            n_layers=n_layers,
             residual_connections=residual_connections,
             activation_factory=activation_factory,
             normalization_factory=normalization_factory,
             masked=masked,
         )
 
-    def compile(self, hidden_channels: int) -> nn.Module:
+    def compile(self) -> nn.Module:
         """
         Compile output config into MLP head.
 
         The MLP head takes the output from the MLP body and transforms it
         into an output.
         """
+        output_shape = self.output_config.get_output_shape()
+        out_channels = np.prod(output_shape)
         head = mlp.MLP(
-            hidden_channels,
-            self.out_channels,
+            self.in_channels,
+            out_channels,
             self.n_layers,
-            hidden_channels=hidden_channels,
+            hidden_channels=self.in_channels,
             residual_connections=self.residual_connections,
             activation_factory=self.activation_factory,
             normalization_factory=self.normalization_factory,
             masked=self.masked,
-            output_shape=tuple(self.shape),
+            output_shape=output_shape,
             internal=False,
         )
-        return nn.Sequential(head, output.Mean())
+        output_layer = self.output_config.get_output_layer()
+        return nn.Sequential(head, output_layer)
 
 
-class MLP(ParamCount, nn.Module):
+class MLP(RetrievalModel):
     @classmethod
-    def from_config_dict(cls, config):
+    def from_config_dict(cls, config_dict):
         """
         Compile MLP architecture from configuration dictionary.
 
         Args:
-            config: A configuration dictionary containing an 'architecture'
+            config_dict: A configuration dictionary containing an 'architecture'
                  as well as 'input' and 'output' tables.
 
         Return:
             The compiled MLP architecture.
         """
-        if not "architecture" in config:
+        if not "architecture" in config_dict:
             raise RuntimeError(
                 "Model configuration needs to have an 'architecture' table "
                 "at the top level."
             )
-        arch_cfg = config["architecture"]
+        arch_config = config_dict["architecture"]
 
-        body_cfg = get_config_attr("body", dict, arch_cfg, "architecture")
-        body_cfg = BodyConfig.parse(body_cfg)
-        hidden_channels = body_cfg.hidden_channels
-        inpt_cfgs = config["input"]
+        input_configs = get_config_attr(
+            "input", dict, config_dict, "model config", required=True
+        )
+        input_configs = {
+            name: InputConfig.parse(name, config) for name, config in input_configs.items()
+        }
+        output_configs = get_config_attr(
+            "output", dict, config_dict, "model config", required=True
+        )
+        output_configs = {
+            name: OutputConfig.parse(name, config) for name, config in output_configs.items()
+        }
+
+        body_config = get_config_attr("body", dict, arch_config, "architecture", required=True)
+        body_config = BodyConfig.parse(body_config)
+        hidden_channels = body_config.hidden_channels
 
         stems = None
         aggregator = None
         in_channels = None
 
-        stem_cfgs = {}
-        for key, inpt_cfg in inpt_cfgs.items():
-            in_channels = get_config_attr("n_features", int, inpt_cfg, f"input.{key}", required=True)
-            if "stem" in inpt_cfg:
-                stem_cfg = StemConfig.parse(in_channels, inpt_cfg["stem"])
-            else:
-                stem_cfg_dct = arch_cfg.get("stem", {})
-                stem_cfg = StemConfig.parse(in_channels, stem_cfg_dct)
-            stem_cfgs[key] = stem_cfg
-        if len(stem_cfgs) == 1:
-            stem_cfgs = next(iter(stem_cfgs.values()))
+        stem_config_dict = arch_config.get("stem", {})
+        individual_stems = stem_config_dict.get("individual", False)
+        if individual_stems:
+            stem_configs = {}
+            for name, input_config in input_configs.items():
+                if name in stem_config_dict:
+                    config_dict = stem_config_dict[name]
+                else:
+                    if not "default" in stem_config_dict:
+                        raise ValueError(
+                            "Expected a stem config for every input or a "
+                            "'default' stem config because the 'individual' "
+                            " attribute in 'architecture.stem' is set. However, "
+                            " none of these were found."
+                        )
 
-        agg_cfg = arch_cfg.get("aggregator", {})
-        aggregator_cfg = AggregatorConfig.parse(agg_cfg)
+                    config_dict = stem_config_dict["default"]
+                    stem_configs[name] = StemConfig.parse(
+                        name, name, input_config, config_dict
+                    )
+        else:
+            stem_configs = {
+                name: StemConfig.parse("stem", name, input_config, stem_config_dict)
+                for name, input_config in input_configs.items()
+            }
 
-        outputs = config["output"]
-        output_cfgs = {}
-        for key in outputs:
-            output_cfgs[key] = OutputConfig.parse(outputs[key])
 
-        return cls(stem_cfgs, body_cfg, output_cfgs, aggregator_cfg, config_dict=config)
+        head_config_dict = arch_config.get("head", {})
+        if "base" in head_config_dict:
+            head_configs = {}
+            for name, output_config in output_configs.items():
+                if name in head_config_dict:
+                    config_dict = head_config_dict[name]
+                else:
+                    config_dict = head_config_dict["base"]
+                head_configs[name] = HeadConfig.parse(
+                    hidden_channels, output_config, name, config_dict
+                )
+        else:
+            head_configs = {
+                name: HeadConfig.parse(
+                    hidden_channels, output_config, "head", head_config_dict
+                )
+                for name, output_config in output_configs.items()
+            }
+
+        agg_config = arch_config.get("aggregator", {})
+        aggregator_config = AggregatorConfig.parse(agg_config)
+
+        return cls(stem_configs, body_config, head_configs, aggregator_config, config_dict=config_dict)
 
     def __init__(
         self,
         stem_cfgs: Union[StemConfig, dict[str, StemConfig]],
         body_cfg: BodyConfig,
-        output_cfgs: Union[OutputConfig, dict[str, OutputConfig]],
+        head_cfgs: Union[HeadConfig, dict[str, HeadConfig]],
         aggregator_cfg: Optional[dict[str, AggregatorConfig]],
         config_dict: Optional[dict[str, object]] = None,
     ):
@@ -358,27 +440,27 @@ class MLP(ParamCount, nn.Module):
             aggregator_cfg: An AggregatorConfig object specifying the
                 configuration of the aggregation module.
         """
-        super().__init__()
+        super().__init__(config_dict=config_dict)
 
         self.aggregator = None
         hidden_channels = body_cfg.hidden_channels
         if isinstance(stem_cfgs, dict):
             inputs = {name: cfg.in_channels for name, cfg in stem_cfgs.items()}
             self.stems = nn.ModuleDict(
-                {name: cfg.compile() for name, cfg in stem_cfgs.items()}
+                {name: cfg.compile(hidden_channels) for name, cfg in stem_cfgs.items()}
             )
             if aggregator_cfg is None:
                 aggregator_cfg = AggregatorConfig()
             self.aggregator = aggregator_cfg.compile(inputs, hidden_channels)
         else:
-            self.stems = stem_cfgs.compile(hidden_channels)
+            self.stems = stem_cfgs.compile()
 
         self.body = body_cfg.compile()
-        if isinstance(output_cfgs, dict):
+        if isinstance(head_cfgs, dict):
             self.outputs = nn.ModuleDict(
                 {
-                    key: output_cfg.compile(hidden_channels)
-                    for key, output_cfg in output_cfgs.items()
+                    key: output_cfg.compile()
+                    for key, output_cfg in head_cfgs.items()
                 }
             )
         else:
@@ -417,13 +499,21 @@ class MLP(ParamCount, nn.Module):
         return self.config_dict
 
     def forward(self, inputs: Union[torch.Tensor, dict[str, torch.Tensor]]):
-        if isinstance(self.stems, nn.ModuleDict):
+
+        if not isinstance(input, dict):
+            if len(self.stems) > 1:
+                raise ValueError(
+                    "The input is a single tensor but the architecture has more "
+                    "than one stem. This requires the input to be a dictionary "
+                    " mapping input names to corresponding data tensors."
+                )
+            name, stem = next(iter(self.stems.items()))
+            inputs = stem(inputs)
+        else:
             inputs = {
-                key: self.aggregators[key](tensor) for key, tensor in inputs.items()
+                key: self.stems[key](tensor) for key, tensor in inputs.items()
             }
             inputs = self.aggregator(inputs)
-        else:
-            inputs = self.stems(inputs)
 
         outputs = self.body(inputs)
         if isinstance(outputs, tuple):

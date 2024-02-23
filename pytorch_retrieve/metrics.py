@@ -34,7 +34,16 @@ class ScalarMetric:
         name = self.name
         if output_name is not None:
             name += f" ({output_name})"
-        lightning_module.log(self.name, value, on_step=False, on_epoch=True, sync_dist=True)
+
+        sync_dist = lightning_module.device != torch.device("cpu")
+
+        lightning_module.log(
+            self.name,
+            value,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=sync_dist
+        )
 
 
 class Bias(ScalarMetric, tm.Metric):

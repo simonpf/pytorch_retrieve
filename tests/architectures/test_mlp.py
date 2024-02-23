@@ -31,7 +31,7 @@ def run_training(model: nn.Module, data_loader: DataLoader) -> None:
     """
     with TemporaryDirectory() as tmp:
         mod = LightningRetrieval(model, model_dir=Path(tmp))
-        trainer = L.Trainer(max_epochs=1)
+        trainer = L.Trainer(max_epochs=1, accelerator="cpu")
         trainer.fit(mod, train_dataloaders=data_loader)
 
 
@@ -50,6 +50,7 @@ n_features = 1
 
 [output.y]
 shape = [1,]
+kind = "Mean"
 """
 
 
@@ -126,6 +127,7 @@ shape = [1,]
 
 [output.-y]
 shape = [1,]
+kind = "Mean"
 """
 
 

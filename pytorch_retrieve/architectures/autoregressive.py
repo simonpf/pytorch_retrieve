@@ -303,6 +303,7 @@ class RecurrentTemporalEncoder(nn.Module):
         """
         return self.decoder(self.encoder({"latent": x}))
 
+
 class DirectTemporalEncoder(nn.Module):
     """
     The direct temporal encoder merges a sequence of encoded observations by direct

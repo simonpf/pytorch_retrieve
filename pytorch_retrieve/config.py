@@ -168,12 +168,12 @@ class OutputConfig:
     target: str
     kind: str
     shape: List[int]
-    quantiles: Optional[Union[int, List[float]]]
+    quantiles: Optional[Union[int, List[float]]] = None
 
     @classmethod
     def parse(cls, name, cfg):
         target = get_config_attr("target", str, cfg, f"output.{name}", name)
-        kind = get_config_attr("kind", str, cfg, f"output.{name}")
+        kind = get_config_attr("kind", str, cfg, f"output.{name}", required=True)
         shape = cfg.get("shape", None)
         if shape is None:
             raise ValueError(
@@ -236,7 +236,7 @@ class OutputConfig:
         """
         kind = self.kind
         if kind == "Mean":
-            return output.Mean()
+            return output.Mean(self.target, self.shape)
         if kind == "Quantiles":
             quantiles = self.quantiles
             if isinstance(quantiles, int):
@@ -249,9 +249,6 @@ class OutputConfig:
             "the documentation of the pytorch_retrieve.modules.output module "
             "for available outputs."
         )
-
-
-        
 
     def to_config_dict(self):
         """
@@ -302,7 +299,7 @@ class ComputeConfig:
             if self.accelerator == "cuda":
                 devices = list(range(torch.cuda.device_count()))
             else:
-                devices = torch.cpu.device_count()
+                devices = 1
         self.devices = devices
 
         if strategy is None:

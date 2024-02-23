@@ -31,6 +31,7 @@ from pytorch_retrieve.utils import (
     read_model_config,
     read_training_config,
     read_compute_config,
+    find_most_recent_checkpoint
 )
 from pytorch_retrieve.lightning import LightningRetrieval
 
@@ -193,14 +194,15 @@ class TrainingConfigBase:
             A list of callbacks for the current stage of the training.
 
         """
-        cbs = [
-            callbacks.ModelCheckpoint(
-                dirpath=module.model_dir / "checkpoints",
-                filename=module.name,
-                save_top_k=0,
-                save_last=True,
-            ),
-        ]
+        checkpoint_cb = callbacks.ModelCheckpoint(
+            dirpath=module.model_dir / "checkpoints",
+            filename=module.name,
+            save_top_k=0,
+            save_last=True,
+        )
+        checkpoint_cb.CHECKPOINT_NAME_LAST = module.name
+
+        cbs = [checkpoint_cb]
         if self.minimum_lr is not None:
             cbs.append(callbacks.EarlyStopping(monitor="Learning rate", strict=True))
         return cbs
@@ -323,10 +325,10 @@ class TrainingConfig(TrainingConfigBase):
         )
 
         optimizer = get_config_attr(
-            "optimizer", str, config_dict, f"training stage {name}"
+            "optimizer", str, config_dict, f"training stage {name}", "AdamW"
         )
         optimizer_args = get_config_attr(
-            "optimizer_args", dict, config_dict, f"training stage {name}", {}
+            "optimizer_args", dict, config_dict, f"training stage {name}", {"lr": 1e-3}
         )
 
         scheduler = get_config_attr(
@@ -519,6 +521,7 @@ def run_training(
     "--resume",
     "-r",
     "resume",
+    is_flag=True,
     default=False,
     help=("If set, training will continue from a checkpoint file if available."),
 )
@@ -551,7 +554,7 @@ def cli(
 
     training_schedule = parse_training_config(training_config)
 
-    module = LightningRetrieval(retrieval_model, "retrieval_module", training_schedule)
+    module = LightningRetrieval(retrieval_model, training_schedule=training_schedule)
 
     compute_config = read_compute_config(LOGGER, model_path, compute_config)
     if isinstance(compute_config, dict):
@@ -559,6 +562,7 @@ def cli(
 
     checkpoint = None
     if resume:
+        print("Module name:", module.name)
         checkpoint = find_most_recent_checkpoint(
             model_path / "checkpoints", module.name
         )

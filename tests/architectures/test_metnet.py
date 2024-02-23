@@ -17,7 +17,7 @@ n_features = 16
 n_features = 1
 
 [output.precip_rate]
-kind = "mean"
+kind = "Mean"
 shape = 1
 
 [architecture]
