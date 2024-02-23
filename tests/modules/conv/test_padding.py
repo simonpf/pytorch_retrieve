@@ -36,7 +36,7 @@ def test_global_padding():
     Ensure that global padding is periodic along last dimension.
     """
     padding_factory = get_padding_factory("Global")
-    x = torch.arange(8).repeat((1, 1, 4, 1))
+    x = torch.arange(8).repeat((1, 1, 4, 1)).to(torch.float32)
     padding = padding_factory((2, 3))
     y = padding(x)
     assert (y[0, 0, 0, :3] == torch.tensor([5.0, 6.0, 7.0])).all()
@@ -49,7 +49,7 @@ def test_zero_padding():
     """
     padding_factory = get_padding_factory("Zero")
     padding = padding_factory((1, 3))
-    x = torch.arange(8).repeat((1, 1, 4, 1))
+    x = torch.arange(8).repeat((1, 1, 4, 1)).to(torch.float32)
     y = padding(x)
     assert (y[0, 0, 0, :3] == torch.tensor([0.0, 0.0, 0.0])).all()
     assert (y[0, 0, 0, -3:] == torch.tensor([0.0, 0.0, 0.0])).all()
@@ -61,7 +61,7 @@ def test_crop_padding():
 
     """
     crop = Crop(((1, 3), (2, 4)))
-    x = torch.arange(8).repeat((1, 1, 16, 1))
+    x = torch.arange(8).repeat((1, 1, 16, 1)).to(torch.float32)
     y = crop(x)
     assert y.shape == (1, 1, 12, 2)
     assert (y[0, 0, 0] == torch.tensor([2, 3])).all()
