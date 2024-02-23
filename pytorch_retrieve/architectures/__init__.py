@@ -16,10 +16,17 @@ from .encoder_decoder import EncoderDecoder
 from .recurrent_encoder_decoder import RecurrentEncoderDecoder
 from .metnet import MetNet
 from .autoregressive import Autoregressive
+from .direct_forecast import DirectForecast
 from .model import RetrievalModel
 
 
 def compile_architecture(config_dict) -> nn.Module:
+    """
+    Compile retrieval model from configuration dict.
+
+    Args:
+        config_dict: A dictionary containing the configuration of the model to compile.
+    """
     arch = config_dict.get("architecture", None)
     if arch is None:
         raise RuntimeError("The model configuration lacks a 'architecture' section.")
@@ -31,18 +38,26 @@ def compile_architecture(config_dict) -> nn.Module:
             "to instantiate."
         )
 
+    model = None
     if arch_name == "MLP":
-        return MLP.from_config_dict(config_dict)
+        model = MLP.from_config_dict(config_dict)
     elif arch_name == "EncoderDecoder":
-        return EncoderDecoder.from_config_dict(config_dict)
+        model = EncoderDecoder.from_config_dict(config_dict)
     elif arch_name == "RecurrentEncoderDecoder":
-        return RecurrentEncoderDecoder.from_config_dict(config_dict)
+        model = RecurrentEncoderDecoder.from_config_dict(config_dict)
     elif arch_name == "Autoregressive":
-        return Autoregressive.from_config_dict(config_dict)
+        model = Autoregressive.from_config_dict(config_dict)
+    elif arch_name == "DirectForecast":
+        model = DirectForecast.from_config_dict(config_dict)
     elif arch_name == "MetNet":
-        return MetNet.from_config_dict(config_dict)
+        model = MetNet.from_config_dict(config_dict)
+    else:
+        raise RuntimeError(f"The architecture '{arch_name}' is currently not supported.")
 
-    raise RuntimeError(f"The architecture '{arch_name}' is currently not supported.")
+    if "name" in config_dict:
+        model.config_dict["name"] = config_dict["name"]
+
+    return model
 
 
 def compile_preset(
