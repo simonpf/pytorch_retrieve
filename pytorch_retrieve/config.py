@@ -243,7 +243,7 @@ class OutputConfig:
                 quantiles = np.linspace(0, 1, quantiles + 2)[1:-1]
             elif isinstance(quantiles, list):
                 quantiles = np.array(list)
-            return output.Quantiles(tau=quantiles)
+            return output.Quantiles(self.target, self.shape, tau=quantiles)
         raise RuntimeError(
             f"The output kind '{kind}' is currently not supported. Refer to "
             "the documentation of the pytorch_retrieve.modules.output module "
