@@ -173,6 +173,15 @@ def run_eda(
     help="The model directory. Defaults to the current working directory",
 )
 @click.option(
+    "--stats_path",
+    default=None,
+    help=(
+        "Directory to which to write the resulting statistics files. If not "
+        "set, they will be written to directory named 'stats' in the model "
+        "path. "
+    )
+)
+@click.option(
     "--model_config",
     default=None,
     help=(
@@ -200,6 +209,7 @@ def run_eda(
 )
 def cli(
     model_path: Path,
+    stats_path: Path,
     model_config: Path,
     training_config: Path,
     compute_config: Optional[Path],
@@ -221,6 +231,11 @@ def cli(
     """
     if model_path is None:
         model_path = Path(".")
+    else:
+        model_path = Path(model_path)
+
+    if stats_path is None:
+        stats_path = model_path / "stats"
 
     model_config = read_model_config(LOGGER, model_path, model_config)
     if model_config is None:
@@ -238,14 +253,14 @@ def cli(
         name: InputConfig.parse(name, cfg)
         for name, cfg in model_config["input"].items()
     }
-    input_configs = {
+    output_configs = {
         name: OutputConfig.parse(name, cfg)
         for name, cfg in model_config["output"].items()
     }
 
     training_schedule = parse_training_config(training_config)
     run_eda(
-        model_path,
+        stats_path,
         input_configs,
         output_configs,
         training_schedule,

@@ -91,6 +91,9 @@ class StatsTracker:
             mask = torch.isnan(x)
             x = MaskedTensor(x, mask=mask)
 
+        if x.ndim in [1, 3]:
+            x = x.unsqueeze(1)
+
         # 1st epoch: record basic statistics
         if not self.initialized:
             x = torch.transpose(x, 1, -1)
