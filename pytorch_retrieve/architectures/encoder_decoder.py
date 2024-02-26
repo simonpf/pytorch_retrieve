@@ -72,6 +72,8 @@ def get_downsampling_factory(name) -> Callable[[int], nn.Module]:
         A factory object to produce downsampling block to be used within an
         encoder-decoder architecture.
     """
+    if name is None or name.lower() == "none":
+        return lambda: None
     try:
         downsampling_factory = getattr(downsampling, name)
     except AttributeError:
@@ -346,10 +348,10 @@ class EncoderConfig:
     stage_depths: List[int]
     downsampling_factors: List[int]
     base_scale: int = 1
-    block_factory: str = "basic"
-    block_factory_args: dict[str, Any] = None
-    downsampling_factory: str = "max_pool"
-    aggregation_factory: str = "linear"
+    block_factory: Union[str, List[str]] = "BasicConv"
+    block_factory_args: Union[Dict[str, Any], List[Dict[str, Any]]] = None
+    downsampling_factory: Optional[str] = None
+    aggregation_factory: str = "Linear"
     shared: bool = True
     multi_scale: bool = True
 
@@ -376,7 +378,7 @@ class EncoderConfig:
 
         kind = get_config_attr("kind", str, config_dict, "architecture.encoder", "none")
         channels = get_config_attr(
-            "channels", list, config_dict, "architecture.encoder"
+            "channels", list, config_dict, "architecture.encoder", required=True
         )
         stage_depths = get_config_attr(
             "stage_depths", list, config_dict, "architecture.encoder", required=True
@@ -387,17 +389,21 @@ class EncoderConfig:
         )
 
         block_factory = get_config_attr(
-            "block_factory", str, config_dict, "architecture.encoder", "BasicConv"
+            "block_factory", None, config_dict, "architecture.encoder", "BasicConv"
         )
         block_factory_args = get_config_attr(
-            "block_factory_args", dict, config_dict, "architecture.encoder", {}
+            "block_factory_args", None, config_dict, "architecture.encoder", {}
         )
+        if isinstance(block_factory, list):
+            if not isinstance(block_factory_args, list):
+                block_factory_args = [block_factory_args] * len(block_factory)
+
         downsampling_factory = get_config_attr(
             "downsampling_factory",
             str,
             config_dict,
             "architecture.encoder",
-            "MaxPool2d",
+            "none",
         )
         aggregation_factory = get_config_attr(
             "aggregation_factory", str, config_dict, "architecture.encoder", "Linear"
@@ -468,7 +474,13 @@ class EncoderConfig:
         Return:
              The encoder module described by this EncoderConfiguration object.
         """
-        block_factory = get_block_factory(self.block_factory)(**self.block_factory_args)
+        if isinstance(self.block_factory, list):
+            block_factory = [
+                get_block_factory(b_fac)(**b_fac_args)
+                for b_fac, b_fac_args in zip(self.block_factory, self.block_factory_args)
+            ]
+        else:
+            block_factory = get_block_factory(self.block_factory)(**self.block_factory_args)
         downsampling_factory = get_downsampling_factory(self.downsampling_factory)()
         aggregation_factory = get_aggregation_factory(self.aggregation_factory)
 
@@ -510,8 +522,8 @@ class DecoderConfig:
     stage_depths: List[int]
     upsampling_factors: List[int]
     skip_connections: Dict[int, int]
-    block_factory: str = "basic"
-    block_factory_args: Dict[str, Any] = None
+    block_factory: Union[str, List[str]] = "basic"
+    block_factory_args: Union[Dict[str, Any], List[Dict[str, Any]]] = None
     upsampling_factory: str = "bilinear"
     aggregation_factory: str = "linear"
     kind: str = "standard"
@@ -545,11 +557,21 @@ class DecoderConfig:
         )
 
         block_factory = get_config_attr(
-            "block_factory", str, config_dict, "architecture.decoder", "BasicConv"
+            "block_factory", None, config_dict, "architecture.decoder", "BasicConv"
         )
         block_factory_args = get_config_attr(
-            "block_factory_args", dict, config_dict, "architecture.decoder", {}
+            "block_factory_args", None, config_dict, "architecture.decoder", {}
         )
+        if isinstance(block_factory, list):
+            if not isinstance(block_factory_args, list):
+                block_factory_args = [block_factory_args] * len(block_factory)
+            else:
+                if len(block_factory) != len(channels) - 1 or len(block_factory_args) != len(channels) - 1:
+                    raise RuntimeError(
+                        "If 'block_factory' and 'block_factory_args' are provided as lists, they must "
+                        "have the same length as the number of stages in the decoder."
+                    )
+
         upsampling_factory = get_config_attr(
             "upsampling_factory",
             str,
@@ -589,7 +611,14 @@ class DecoderConfig:
         """
         Compile the decoder module defined by this configuration.
         """
-        block_factory = get_block_factory(self.block_factory)(**self.block_factory_args)
+        if isinstance(self.block_factory, list):
+            block_factory = [
+                get_block_factory(b_fac)(**b_fac_args)
+                for b_fac, b_fac_args in zip(self.block_factory, self.block_factory_args)
+            ]
+        else:
+            block_factory = get_block_factory(self.block_factory)(**self.block_factory_args)
+
         upsampling_factory = get_upsampling_factory(self.upsampling_factory)()
         aggregation_factory = get_aggregation_factory(self.aggregation_factory)
 

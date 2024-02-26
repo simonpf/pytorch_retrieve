@@ -113,22 +113,47 @@ class Encoder(nn.Module, ParamCount):
         self.has_skips = skip_connections
         self.scales = _calculate_output_scales(base_scale, downsampling_factors)
 
+        # Handle block factories and match to stage factories.
         if block_factory is None:
             block_factory = DEFAULT_BLOCK_FACTORY
         if stage_factory is None:
-            stage_factory = SequentialStage(block_factory)
+            if isinstance(block_factory, list):
+                if len(block_factory) < n_stages:
+                    raise RuntimeError(
+                        "If a list of block factories is provided, its length must match "
+                        "the number of stages in the encoder."
+                    )
+                stage_factories = [SequentialStage(b_fac) for b_fac in block_factory]
+            else:
+                stage_factories = [SequentialStage(block_factory) for _ in range(n_stages)]
+        else:
+            if isinstance(stage_factory, list):
+                raise RuntimeError(
+                    "If a list of stage factories is provided, its length must match "
+                    "the number of stages in the encoder."
+                )
+                if isinstance(block_factory, list):
+                    if len(block_factory) < n_stages:
+                        raise RuntimeError(
+                            "If a list of block factories is provided, its length must match "
+                            "the number of stages in the encoder."
+                        )
+                    stage_factories = [s_fac(b_fac) for s_fac, b_fac in zip(stage_factory, block_factory)]
+                else:
+                    stage_factories = [s_fac(block_factory) for s_fac in stage_factory]
+
 
         # Populate list of down samplers and stages.
         self.downsamplers = nn.ModuleList()
         self.stages = nn.ModuleList()
         channels_in = channels[0]
-        for scale, stage_depth, channels_out, f_dwn in zip(
-            self.scales, stage_depths, channels, downsampling_factors
+        for scale, stage_depth, channels_out, f_dwn, s_fac in zip(
+                self.scales, stage_depths, channels, downsampling_factors, stage_factories
         ):
             if downsampler_factory is None:
                 self.downsamplers.append(nn.Identity())
                 self.stages.append(
-                    stage_factory(
+                    s_fac(
                         channels_in,
                         channels_out,
                         stage_depth,
@@ -146,13 +171,11 @@ class Encoder(nn.Module, ParamCount):
                     self.downsamplers.append(nn.Identity())
 
                 self.stages.append(
-                    stage_factory(
+                    s_fac(
                         channels_out,
                         channels_out,
                         stage_depth,
-                        block_factory,
                         downsample=None,
-                        block_kwargs={"scale": scale},
                     )
                 )
             channels_in = channels_out

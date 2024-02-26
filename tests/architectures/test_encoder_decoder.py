@@ -17,6 +17,55 @@ from pytorch_retrieve.architectures.encoder_decoder import (
 from conftest import data_loader_3d
 
 
+def test_encoder_decoder_multiple_block_factories():
+    """
+    Ensure that passing multiple block factories to encoder results in an encoder with
+    different block in different stages.
+    """
+    stem_cfgs = {
+        "x": StemConfig("x", 12, 4, "BasicConv", 16)
+    }
+    encoder_cfg = {
+        "channels": [16, 32, 64],
+        "stage_depths": [1, 2, 3],
+        "block_factory": ["BasicConv", "ResNet", "ResNet"],
+    }
+    encoder_cfg = EncoderConfig.parse(stem_cfgs, encoder_cfg)
+    encoder = encoder_cfg.compile()
+    assert type(encoder.stages[0]) != type(encoder.stages[1][0])
+
+
+    decoder_cfg = {
+        "channels": [64, 32],
+        "stage_depths": [2, 1],
+        "block_factory": ["ResNet", "BasicConv"],
+    }
+    decoder_cfg = DecoderConfig.parse(encoder_cfg, decoder_cfg)
+    decoder = decoder_cfg.compile()
+    assert type(decoder.stages[0][0])  != type(decoder.stages[1])
+
+
+def test_decoder_multiple_block_factories():
+    """
+    Ensure that passing multiple block factories to encoder results in an encoder with
+    different block in different stages.
+    """
+    stem_cfgs = {
+        "x": StemConfig("x", 12, 4, "BasicConv", 16)
+    }
+    encoder_cfg = {
+        "channels": [16, 32, 64],
+        "stage_depths": [1, 2, 3],
+        "block_factory": ["BasicConv", "ResNet", "ResNet"],
+    }
+    encoder_cfg = EncoderConfig.parse(stem_cfgs, encoder_cfg)
+    encoder = encoder_cfg.compile()
+    assert type(encoder.stages[0]) != type(encoder.stages[1][0])
+
+
+
+
+
 SINGLE_INPUT_NO_STEM_CFG = """
 [architecture]
 name = "EncoderDecoder"
