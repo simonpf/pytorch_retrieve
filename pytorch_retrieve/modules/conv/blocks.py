@@ -16,6 +16,7 @@ from .padding import calculate_padding, Reflect, get_padding_factory
 from ..normalization import get_normalization_factory
 from ..activation import get_activation_factory
 from .downsampling import BlurPool
+from .projection import get_projection
 
 
 class BasicConvBlock(nn.Module, ParamCount):
@@ -861,3 +862,236 @@ ALL = set([
     cls for cls in globals().values()
     if isinstance(cls, type) and issubclass(cls, nn.Module)
 ])
+
+
+class SqueezeExcite(nn.Module):
+    """
+    Squeeze and excite module.
+    """
+    def __init__(
+            self,
+            in_channels: int,
+            ratio: float = 0.25,
+            activation_factory: Callable[[], nn.Module] = nn.ReLU,
+            gate_factory: Callable[[], nn.Module] = nn.Sigmoid
+    ):
+        """
+        Args:
+        in_channels: The number of incoming channels.
+            ratio: Reduction ratio
+            activat_factory: An activation factory to use to create the activation function used within
+                the SE block.
+            gate_factory: Function to use for the gatin.
+        """
+        super().__init__()
+        hidden_channels = int(ratio * in_channels)
+        self.conv_reduce = nn.Conv2d(in_channels, hidden_channels, 1, bias=True)
+        self.act = activation_factory()
+        self.conv_expand = nn.Conv2d(hidden_channels, in_channels, 1, bias=True)
+        self.gate = gate_factory()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x_se = x.mean((2, 3), keepdim=True)
+        x_se = self.conv_reduce(x_se)
+        x_se = self.act(x_se)
+        x_se = self.conv_expand(x_se)
+        return x * self.gate(x_se)
+
+
+class InvertedBottleneckBlock(nn.Module, ParamCount):
+    """
+    Inverted-bottleneck block is used in MobileNet and Efficient net where it is referred
+    to as MBConv
+    """
+    def __init__(
+            self,
+            in_channels: int,
+            out_channels: int,
+            expansion_factor: int = 4,
+            kernel_size: int = 3,
+            excitation_ratio: float = 0.0,
+            activation_factory: Callable[[], nn.Module] = nn.ReLU,
+            normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm3d,
+            padding: Optional[Tuple[int]] = None,
+            padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
+            downsample: Optional[int] = None,
+            anti_aliasing: bool = False,
+            fused: bool = False
+    ):
+        super().__init__()
+        self.act = activation_factory()
+        act = activation_factory()
+
+        hidden_channels = out_channels * expansion_factor
+
+        stride = (1, 1)
+        if downsample is not None:
+            if isinstance(downsample, int):
+                downsample = (downsample,) * 2
+            if max(downsample) > 1:
+                stride = downsample
+
+        self.projection = get_projection(
+            in_channels,
+            out_channels,
+            stride=stride,
+            anti_aliasing=anti_aliasing,
+            padding_factory=padding_factory
+        )
+
+        if padding is None:
+            padding = calculate_padding(kernel_size)
+
+
+        blocks = []
+        if not fused:
+            blocks += [
+                nn.Conv2d(in_channels, hidden_channels, kernel_size=1),
+                normalization_factory(hidden_channels),
+                act
+            ]
+
+            if max(stride) > 1 and anti_aliasing:
+                pad = tuple([1 if strd > 1 else 0 for strd in stride])
+                filter_size = tuple([3 if strd > 1 else 1 for strd in stride])
+                blocks += [
+                    padding_factory(pad),
+                    BlurPool(hidden_channels, (1, 1), filter_size)
+                ]
+
+            blocks += [
+                padding_factory(padding),
+                nn.Conv2d(
+                    hidden_channels,
+                    hidden_channels,
+                    kernel_size=kernel_size,
+                    stride=stride,
+                    groups=hidden_channels,
+                ),
+                normalization_factory(hidden_channels),
+                act
+            ]
+        else:
+            if max(stride) > 1 and anti_aliasing:
+                pad = tuple([1 if strd > 1 else 0 for strd in stride])
+                filter_size = tuple([3 if strd > 1 else 1 for strd in stride])
+                blocks += [
+                    padding_factory(pad),
+                    BlurPool(in_channels, (1, 1), filter_size)
+                ]
+
+            blocks += [
+                padding_factory(padding),
+                nn.Conv2d(
+                    in_channels,
+                    hidden_channels,
+                    kernel_size=kernel_size,
+                    stride=stride,
+                ),
+                normalization_factory(hidden_channels),
+                act
+            ]
+
+
+        if excitation_ratio > 0.0:
+            blocks.append(
+                SqueezeExcite(
+                    hidden_channels,
+                    excitation_ratio,
+                    activation_factory
+                )
+            )
+        blocks += [
+            nn.Conv2d(hidden_channels, out_channels, kernel_size=1),
+            normalization_factory(out_channels),
+            act
+        ]
+        self.body = nn.Sequential(*blocks)
+
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Propagate input through layer.
+        """
+        shortcut = self.projection(x)
+        x = self.body(x)
+        return x + shortcut
+
+
+class InvertedBottleneck:
+    """
+    Factory for producing inverted bottleneck blocks.
+    """
+    def __init__(
+        self,
+        kernel_size: Optional[Union[Tuple[int, int], int]] = (3, 3),
+        dilation: int = 1,
+        activation_factory: Callable[[], nn.Module] = nn.ReLU,
+        normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm2d,
+        padding: Optional[Tuple[int]] = None,
+        padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
+        expansion_factor: int = 4,
+        excitation_ratio: float = 0.0,
+        anti_aliasing: bool = False,
+        fused: bool =False
+    ):
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size,) * 2
+        self.kernel_size = kernel_size
+        if isinstance(activation_factory, str):
+            activation_factory = get_activation_factory(activation_factory)
+        self.activation_factory = activation_factory
+        if isinstance(normalization_factory, str):
+            normalization_factory = get_normalization_factory(normalization_factory)
+        self.normalization_factory = normalization_factory
+        if isinstance(padding_factory, str):
+            padding_factory = get_padding_factory(padding_factory)
+        self.padding_factory = padding_factory
+        self.expansion_factor = expansion_factor
+        self.excitation_ratio = excitation_ratio
+        self.anti_aliasing = anti_aliasing
+        self.fused = fused
+
+    def __call__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        downsample: Optional[Union[Tuple[int, int], int]] = None,
+        kernel_size: Optional[Union[Tuple[int, int], int]] = None,
+        padding: Optional[int] = None,
+        **kwargs,
+    ) -> nn.Module:
+        """
+        Instantiate InvertedBottleneck module.
+
+        Args:
+            in_channels: The number of incoming channels.
+            out_channels: The number of outgoing channels.
+
+        Return:
+            The inverted-bottleneck block.
+        """
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size,) * 2
+        if kernel_size is None:
+            kernel_size = self.kernel_size
+
+        if padding is None:
+            padding = (
+                (kernel_size[0]) // 2,
+                (kernel_size[1]) // 2,
+            )
+        return InvertedBottleneckBlock(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            downsample=downsample,
+            padding=padding,
+            expansion_factor=self.expansion_factor,
+            excitation_ratio=self.excitation_ratio,
+            activation_factory=self.activation_factory,
+            normalization_factory=self.normalization_factory,
+            padding_factory=self.padding_factory,
+            anti_aliasing=self.anti_aliasing,
+            fused=self.fused
+        )
