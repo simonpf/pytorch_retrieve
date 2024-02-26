@@ -174,11 +174,8 @@ class OutputConfig:
     def parse(cls, name, cfg):
         target = get_config_attr("target", str, cfg, f"output.{name}", name)
         kind = get_config_attr("kind", str, cfg, f"output.{name}", required=True)
-        shape = cfg.get("shape", None)
-        if shape is None:
-            raise ValueError(
-                f"Output {name} is missing the required 'shape' attribute."
-            )
+        shape = cfg.get("shape", 1)
+
         if isinstance(shape, int):
             shape = (shape,)
         else:
