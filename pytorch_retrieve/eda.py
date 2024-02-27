@@ -257,8 +257,8 @@ def cli(
         name: OutputConfig.parse(name, cfg)
         for name, cfg in model_config["output"].items()
     }
-
     training_schedule = parse_training_config(training_config)
+
     run_eda(
         stats_path,
         input_configs,
