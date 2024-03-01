@@ -22,7 +22,7 @@ LOGGER = logging.getLogger(__name__)
 def run_eda(
     model_directory: Path,
     input_configs: Dict[str, InputConfig],
-    training_configs: Dict[str, TrainingConfig],
+    training_config: TrainingConfig
 ) -> None:
     """
     Performs EDA for given input and training configs.
@@ -31,10 +31,9 @@ def run_eda(
         model_directory: The directory in which to store the computed statistics.
         input_configs: A dictionary mapping input names to corresponding input
             configurations.
-        training_configs: A dictionary mapping training stage names to corresponding
-            training configs.
+        training_config: A TrainingConfig object defining the training settings
+            to use for the EDA.
     """
-    training_config = next(iter(training_configs.values()))
     training_loader = training_config.get_training_data_loader()
     validation_loader = training_config.get_validation_data_loader()
 
@@ -87,10 +86,19 @@ def run_eda(
         " directory."
     ),
 )
+@click.option(
+    "--stage",
+    default=None,
+    help=(
+        "If provided, training settings for the EDA will be loaded from this "
+        "stage of the training schedule."
+    )
+)
 def cli(
     model_path: Path,
     model_config: Path,
     training_config: Path,
+    stage: str
 ) -> int:
     """
     Performs EDA on training and validation data.
@@ -124,4 +132,16 @@ def cli(
     }
 
     training_schedule = parse_training_config(training_config)
-    run_eda(model_path, input_configs, training_schedule)
+    if stage is None:
+        training_config = next(iter(training_schedule.values()))
+    else:
+        if stage not in training_schedule:
+            LOGGER.error(
+                "The given stage '%s' is not a stage in the provided training "
+                "schedule.",
+                stage
+            )
+            return 1
+        training_config = training_schedule[stage]
+
+    run_eda(model_path, input_configs, training_config)
