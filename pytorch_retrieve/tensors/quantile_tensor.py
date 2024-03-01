@@ -40,7 +40,6 @@ class QuantileTensor(torch.Tensor):
     def __new__(cls, tensor, tau, *args, quantile_dim=1, **kwargs):
         new_tensor = super().__new__(cls, tensor, *args, **kwargs)
 
-        print(type(tensor))
         ## Keep reference to original tensor.
         # if isinstance(tensor, QuantileTensor):
         #    new_tensor.base = tensor.base
@@ -63,10 +62,11 @@ class QuantileTensor(torch.Tensor):
         base_kwargs = {key: get_base(val) for key, val in kwargs.items()}
         result = func(*base_args, **base_kwargs)
 
-        print(func, types)
-
         if func == torch.as_tensor:
             return result
+
+        if func == torch.Tensor.unbind or func == torch.unbind:
+            return tuple([QuantileTensor(tensor, tau=args[0].tau) for tensor in result])
 
         if isinstance(result, torch.Tensor):
             q_args = get_quantile_attrs(args)
@@ -88,8 +88,10 @@ class QuantileTensor(torch.Tensor):
         tau = self.tau.to(self.device, self.dtype)
         # Pad dummy dimensions to make broadcasting work.
         tau = tau.__getitem__((...,) + (None,) * (self.ndim - self.quantile_dim - 1))
+
         if y_true.ndim < self.ndim:
-            y_true = y_true.unsqueeze(self.quantile_dim)
+            new_shape = y_true.shape[:1] + (1,) * (self.ndim - y_true.ndim) + y_true.shape[1:]
+            y_true = y_true.reshape(new_shape)
 
         delta = self.base - y_true
         loss = torch.where(delta > 0, tau * delta, (tau - 1.0) * delta)
@@ -221,7 +223,7 @@ class QuantileTensor(torch.Tensor):
 
         return x_pdf, y_pdf
 
-    def expected_value(y_pred, quantiles, quantile_axis=1):
+    def expected_value(self):
         r"""
         Computes the mean of the posterior distribution defined by an array
         of predicted quantiles.
@@ -229,16 +231,13 @@ class QuantileTensor(torch.Tensor):
         Args:
             y_pred: A tensor of predicted quantiles with the quantiles located
                 along the axis given by ``quantile_axis``.
-            quantiles: The quantile fractions corresponding to the quantiles
-                located along the quantile axis.
-            quantile_axis: The axis along which the quantiles are located.
 
         Returns:
 
             Array containing the posterior means for the provided inputs.
         """
         x_cdf, y_cdf = self.cdf()
-        return torch.trapz(x_cdf, y_cdf, self.quantile_dim)
+        return torch.trapz(x_cdf, y_cdf, dim=self.quantile_dim)
 
     def probability_less_than(self, thresh):
         """

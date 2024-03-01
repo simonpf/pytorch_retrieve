@@ -16,6 +16,45 @@ from pytorch_retrieve.modules.conv.stages import SequentialStage
 from pytorch_retrieve.modules.conv.upsampling import Bilinear
 
 
+def cat(
+    tensor_1: Union[torch.Tensor, List[torch.Tensor]],
+    tensor_2: Union[torch.Tensor, List[torch.Tensor]],
+) -> Union[torch.Tensor, List[torch.Tensor]]:
+    """
+    Generic concatenation two tensors or two lists of tensors along first axis.
+
+    Args:
+        tensor_1: A single tensor or a list of tensors.
+        tensor_2: A single tensor or a list of tensors.
+
+    Return:
+        A single tensor if 'tensor_1' and 'tensor_2' are lists. Otherwise
+        a list of tensors.
+    """
+    if isinstance(tensor_1, List):
+        return [torch.cat([t_1, t_2], 1) for t_1, t_2 in zip(tensor_1, tensor_2)]
+    return torch.cat([tensor_1, tensor_2], 1)
+
+
+def forward(
+    module: nn.Module, tensor: Union[torch.Tensor, List[torch.Tensor]]
+) -> Union[torch.Tensor, List[torch.Tensor]]:
+    """
+    Generic forward function for single tensors and lists of tensors.
+
+    Args:
+        module: The torch.nn.Module through which to propagate the provided tensors.
+        tensor: The tensor or tensors to propagate through the module.
+
+    Return:
+        A single tensor or list of tensors obtained by propagating the input
+        'tensor' through the given module.
+    """
+    if isinstance(tensor, list):
+        return [module(tnsr) for tnsr in tensor]
+    return module(tensor)
+
+
 class Decoder(nn.Module, ParamCount):
     """
     A decoder for spatial information.
@@ -77,11 +116,35 @@ class Decoder(nn.Module, ParamCount):
                 "of stages in the decoder by one."
             )
 
+        # Handle block factories and match to stage factories.
         if block_factory is None:
             block_factory = DEFAULT_BLOCK_FACTORY
-
         if stage_factory is None:
-            stage_factory = SequentialStage(block_factory)
+            if isinstance(block_factory, list):
+                if len(block_factory) < n_stages:
+                    raise RuntimeError(
+                        "If a list of block factories is provided, its length must match "
+                        "the number of stages in the encoder."
+                    )
+                stage_factories = [SequentialStage(b_fac) for b_fac in block_factory]
+            else:
+                stage_factories = [SequentialStage(block_factory) for _ in range(n_stages)]
+        else:
+            if isinstance(stage_factory, list):
+                raise RuntimeError(
+                    "If a list of stage factories is provided, its length must match "
+                    "the number of stages in the encoder."
+                )
+                if isinstance(block_factory, list):
+                    if len(block_factory) < n_stages:
+                        raise RuntimeError(
+                            "If a list of block factories is provided, its length must match "
+                            "the number of stages in the encoder."
+                        )
+                    stage_factories = [s_fac(b_fac) for s_fac, b_fac in zip(stage_factory, block_factory)]
+                else:
+                    stage_factories = [s_fac(block_factory) for s_fac in stage_factory]
+
 
         if upsampling_factors is None:
             upsampling_factors = [2] * n_stages
@@ -114,7 +177,10 @@ class Decoder(nn.Module, ParamCount):
         for index, (n_blocks, out_channels) in enumerate(
             zip(stage_depths, channels[1:])
         ):
-            scale /= upsampling_factors[index]
+            f_up = upsampling_factors[index]
+            if isinstance(f_up, (list, tuple)):
+                f_up = max(f_up)
+            scale /= f_up
 
             self.upsamplers.append(
                 upsampler_factory(
@@ -127,7 +193,7 @@ class Decoder(nn.Module, ParamCount):
             channels_combined = out_channels + self.skip_connections.get(scale, 0)
 
             self.stages.append(
-                stage_factory(channels_combined, out_channels, n_blocks, scale=scale)
+                stage_factories[index](channels_combined, out_channels, n_blocks, scale=scale)
             )
             in_channels = out_channels
 
@@ -158,14 +224,17 @@ class Decoder(nn.Module, ParamCount):
             stages = self.stages
 
             for ind, (up, stage) in enumerate(zip(self.upsamplers, stages)):
-                scale /= self.upsampling_factors[ind]
+                f_up = self.upsampling_factors[ind]
+                if isinstance(f_up, (list, tuple)):
+                    f_up = max(f_up)
+                scale /= f_up
                 if scale in self.skip_connections:
-                    y = stage(torch.cat([x[scale], up(y)], dim=1))
+                    y = stage(cat(x[scale], forward(up, y)))
                 else:
-                    y = stage(up(y))
+                    y = stage(forward(up, y))
         else:
             y = x
             stages = self.stages
             for up, stage in zip(self.upsamplers, stages):
-                y = stage(up(y))
+                y = stage(forward(up, y))
         return y

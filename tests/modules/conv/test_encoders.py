@@ -3,6 +3,7 @@ Tests for the pytorch_retrieve.modules.conv.encoders module.
 """
 import torch
 
+from pytorch_retrieve.modules.conv import blocks
 from pytorch_retrieve.modules.conv.encoders import (
     Encoder,
     MultiInputSharedEncoder,
@@ -97,4 +98,35 @@ def test_cascading_encoder():
     x = torch.rand(1, 8, 64, 64)
     y = encoder(x)
 
+    assert y[8].shape == (1, 64, 8, 8)
+
+
+def test_encoder_multiple_block_factories():
+    """
+    Create an encoder with different block factories in different stages.
+    """
+    stage_depths = [4, 4, 4, 4]
+    channels = [8, 16, 32, 64]
+
+    block_factories = [blocks.BasicConv(), blocks.BasicConv(), blocks.ResNet(), blocks.ResNet()]
+
+    encoder = Encoder(
+        channels,
+        stage_depths,
+        [2, 2, 2],
+        block_factory=block_factories,
+        skip_connections=False
+    )
+
+    assert isinstance(encoder.stages[0][0], blocks.BasicConvBlock)
+    assert isinstance(encoder.stages[2][0], blocks.ResNetBlock)
+
+    x = torch.rand(1, 8, 64, 64)
+    y = encoder(x)
+    assert y.shape == (1, 64, 8, 8)
+
+    encoder = Encoder(channels, stage_depths, [2, 2, 2], skip_connections=True)
+    x = torch.rand(1, 8, 64, 64)
+    y = encoder(x)
+    assert isinstance(y, dict)
     assert y[8].shape == (1, 64, 8, 8)

@@ -91,8 +91,11 @@ class SpatialAggregator(nn.Module):
                 "to be installed."
             )
 
+        if isinstance(input_size, int):
+            input_size = (input_size,) * 2
+
         self.position_embedding = AxialPositionalEmbedding(
-            dim=n_channels, shape=(input_size,) * 2
+            dim=n_channels, shape=input_size
         )
         self.body = nn.Sequential(
             *[

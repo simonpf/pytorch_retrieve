@@ -249,3 +249,13 @@ def test_masked_mse_loss():
     y_true = MaskedTensor(y_true, mask=mask)
     mse_loss = y_pred.loss(y_true)
     assert torch.isclose(mse_loss, torch.tensor(1.0))
+
+def test_unbind():
+    """
+    Ensure that unbinding yields a mean tensor.
+    """
+    y_pred = MeanTensor(torch.ones(10, 1))
+    tensors = y_pred.unbind(1)
+    assert isinstance(tensors[0], MeanTensor)
+    tensors = torch.unbind(y_pred, 1)
+    assert isinstance(tensors[0], MeanTensor)

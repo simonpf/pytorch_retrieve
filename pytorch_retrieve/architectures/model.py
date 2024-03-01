@@ -42,10 +42,13 @@ class RetrievalModel(ParamCount, nn.Module):
             The loaded model.
         """
         from . import compile_architecture
-
+        path = Path(path)
         loaded = torch.load(path)
         model = compile_architecture(loaded["model_config"])
-        model.load_state_dict(loaded["state_dict"])
+        state = loaded["state_dict"]
+        if path.suffix == ".ckpt":
+            state = {key[6:]: val for key, val in state.items()}
+        model.load_state_dict(state)
         return model
 
     def save(self, path: Path) -> Path:
@@ -58,3 +61,10 @@ class RetrievalModel(ParamCount, nn.Module):
         state = self.state_dict()
         model_config = self.config_dict
         torch.save({"state_dict": state, "model_config": model_config}, path)
+
+    def to_config_dict(self) -> Dict[str, object]:
+        """
+        Return configuration used to construct the model.
+
+        """
+        return self.config_dict

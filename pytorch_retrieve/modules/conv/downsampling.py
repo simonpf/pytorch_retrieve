@@ -7,10 +7,65 @@ encoder-decoder architecture.
 """
 from typing import Callable, Optional, Tuple, Union
 
+import numpy as np
 import torch
 from torch import nn
 
 from pytorch_retrieve.modules.utils import NoNorm
+
+
+class BlurPool(nn.Module):
+    """
+    A blur pool layer for 2D and 3D downsampling.
+
+    See 'Making Convolutional Networks Shift-Invariant Again' for motivation.
+    """
+    def __init__(self, in_channels: int, stride: Tuple[int], filter_size: Tuple[int]):
+        """
+        Instantiate blur pool filter.
+
+        Args:
+            in_channels: The number of channels in the input tensor.
+            stride: Tuple specifying the stride applied along each dimension.
+            filter_size: Tuple specifying the size of the low-pass filter
+                applied along the time and spatial dimensions.
+        """
+        super().__init__()
+        self.in_channels = in_channels
+        self.stride = stride
+        if len(filter_size) == 2:
+            x = torch.tensor(np.array(np.poly1d((0.5, 0.5)) ** (filter_size[1] - 1)))
+            x = x.to(dtype=torch.float32)
+            y = torch.tensor(np.array(np.poly1d((0.5, 0.5)) ** (filter_size[0] - 1)))
+            y = y.to(dtype=torch.float32)
+            k = y[:, None] * x[None, :]
+            self.filter = nn.Parameter(
+                k.repeat((in_channels, 1, 1, 1)),
+                requires_grad=False
+            )
+        elif len(filter_size) == 3:
+            x = torch.tensor(np.array(np.poly1d((0.5, 0.5)) ** (filter_size[2] - 1)))
+            x = x.to(dtype=torch.float32)
+            y = torch.tensor(np.array(np.poly1d((0.5, 0.5)) ** (filter_size[1] - 1)))
+            y = y.to(dtype=torch.float32)
+            z = torch.tensor(np.array(np.poly1d((0.5, 0.5)) ** (filter_size[0] - 1)))
+            z = z.to(dtype=torch.float32)
+            k = (z[:, None, None] * y[None, :, None] * x[None, None, :]
+            )
+            self.filter = nn.Parameter(
+                k.repeat(in_channels, 1, 1, 1, 1),
+                requires_grad=False
+            )
+        else:
+            raise ValueError("Filter size must be a tuple of length 2 or 3.")
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply blur pool to input."""
+        if self.filter.ndim == 5:
+            return nn.functional.conv3d(x, self.filter, stride=self.stride, groups=self.in_channels)
+        return nn.functional.conv2d(x, self.filter, stride=self.stride, groups=self.in_channels)
+
+
 
 
 class DownsamplingFactoryBase(nn.Module):

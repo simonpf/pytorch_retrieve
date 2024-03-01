@@ -203,6 +203,8 @@ class MLP(ParamCount, nn.Module):
             else:
                 self.output_layer = mod.Linear(in_channels, out_channels)
         self.out_channels = out_channels
+        if isinstance(output_shape, int):
+            output_shape = ()
         self.output_shape = output_shape
 
     def forward(self, x):

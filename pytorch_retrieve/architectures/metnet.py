@@ -83,7 +83,7 @@ class StemConfig:
             out_channels *= 2
         return out_channels
 
-    def to_config_dict(self) -> Dict[str, object]:
+    def to_config_dict(self) -> Dict[str, Any]:
         """
         Convert configuration object to dict representation suitable for
         serialization.
@@ -171,7 +171,7 @@ class TemporalEncoderConfig:
             normalization_factory=normalization_factory,
         )
 
-    def to_config_dict(self) -> Dict[str, object]:
+    def to_config_dict(self) -> Dict[str, Any]:
         """
         Convert configuration object to dict representation suitable for
         serialization.
@@ -236,7 +236,7 @@ class SpatialAggregatorConfig:
     def out_channels(self) -> int:
         return self.n_channels
 
-    def to_config_dict(self) -> Dict[str, object]:
+    def to_config_dict(self) -> Dict[str, Any]:
         """
         Convert configuration object to dict representation suitable for
         serialization.
@@ -263,9 +263,8 @@ class HeadConfig:
     """
     Dataclass describing the head of a MetNet architecture.
     """
-
+    output_config: OutputConfig
     in_channels: int
-    shape: Tuple[int]
     depth: int = 1
     activation_factory: Optional[Callable[[], nn.Module]] = None
     normalization_factory: Optional[Callable[[int], nn.Module]] = None
@@ -285,19 +284,21 @@ class HeadConfig:
             "LayerNorm",
         )
         return HeadConfig(
+            output_config=output_config,
             in_channels=in_channels,
-            shape=output_config.shape,
             depth=depth,
             activation_factory=activation_factory,
             normalization_factory=normalization_factory,
         )
 
-    def to_config_dict(self) -> Dict[str, object]:
+    def to_config_dict(self) -> Dict[str, Any]:
         """
         Convert configuration object to dict representation suitable for
         serialization.
         """
-        return asdict(self)
+        config_dict = asdict(self)
+        config_dict.pop("output_config")
+        return config_dict
 
     def compile(self) -> nn.Module:
         """
@@ -313,11 +314,11 @@ class HeadConfig:
         normalization_factory = get_normalization_factory(self.normalization_factory)
         head = heads.BasicConv(
             in_channels=self.in_channels,
-            out_shape=self.shape,
+            out_shape=self.output_config.shape,
             activation_factory=activation_factory,
             normalization_factory=normalization_factory,
         )
-        return nn.Sequential(head, Mean())
+        return nn.Sequential(head, self.output_config.get_output_layer())
 
 
 @dataclass
@@ -388,7 +389,13 @@ class MetNet(nn.Module):
     """
 
     @classmethod
-    def from_config_dict(cls, config_dict):
+    def from_config_dict(cls, config_dict: Dict[str, Any]) -> "MetNet":
+        """
+        Create MetNet model from a model configuration dictionary.
+
+        Args:
+            config_dict: A dictionary containing the model configuration.
+        """
         input_configs = {
             name: InputConfig.parse(name, cfg)
             for name, cfg in config_dict["input"].items()
@@ -411,6 +418,13 @@ class MetNet(nn.Module):
         return MetNet(metnet_config)
 
     def __init__(self, config: MetNetConfig):
+        """
+        Create a MetNet model.
+
+        Args:
+            config: A MetNetConfig object representing the configuration
+                of the MetNet model.
+        """
         super().__init__()
         self.config = config
         stems = {
@@ -443,7 +457,6 @@ class MetNet(nn.Module):
         # Condition Time
         x = self.ct(x, fstep)
 
-        ##CNN
         x = self.image_encoder(x)
 
         # Temporal Encoder

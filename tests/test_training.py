@@ -28,9 +28,10 @@ activation_factory = "GELU"
 normalization_factory = "LayerNorm"
 
 [input.x]
-in_channels = 1
+n_features = 1
 
 [output.y]
+kind = "Mean"
 shape = [1,]
 """
 
@@ -55,7 +56,7 @@ validation_dataset_args = {"n_samples"=128}
 n_epochs = 2
 batch_size = 8
 optimizer = "SGD"
-optimizer_kwargs = {"lr"= 1e-3}
+optimizer_args = {"lr"= 1e-3}
 metrics = ["Bias", "CorrelationCoef"]
 """
 
@@ -85,6 +86,7 @@ def test_variable_replacement(monkeypatch):
         training_dataset_args = {"path" = "ENV::{PATH}"}
         validation_dataset_args = {"path" = "ENV::{PATH}"}
         n_epochs = 10
+        batch_size = 8
         """
     )
     training_config = TrainingConfig.parse("warm_up", config_dict["warm_up"])
@@ -105,7 +107,10 @@ def test_get_training_dataset(training_config_file):
     assert isinstance(x, torch.Tensor)
 
 
-def test_get_optimizer_and_scheduler(model_config_file, training_config_file):
+def test_get_optimizer_and_scheduler(
+        model_config_file,
+        training_config_file
+):
     """
     Test instantiating optimizer and scheduler
     """
@@ -128,7 +133,12 @@ def test_get_metrics_dict(model_config_file, training_config_file):
     assert len(metrics["y"]) == 2
 
 
-def test_training(model_config_file, training_config_file, tmp_path):
+def test_training(
+        model_config_file,
+        training_config_file,
+        tmp_path,
+        cpu_compute_config
+):
     """
     Run training on synthetic data.
     """
@@ -136,7 +146,53 @@ def test_training(model_config_file, training_config_file, tmp_path):
     schedule = parse_training_config(read_config_file(training_config_file))
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
     module.current_training_config
-    run_training(tmp_path, module, None)
+    run_training(tmp_path, module, compute_config=cpu_compute_config)
+
+    # Assert that checkpoint files are created.
+    ckpts = list((tmp_path / "checkpoints").glob("*.ckpt"))
+    assert len(ckpts) > 0
+
+
+def test_training_encoder_decoder(
+        encoder_decoder_model_config_file,
+        encoder_decoder_training_config_file,
+        cpu_compute_config,
+        tmp_path
+):
+    """
+    Run training on synthetic data.
+    """
+    model = load_and_compile_model(encoder_decoder_model_config_file)
+    schedule = parse_training_config(read_config_file(encoder_decoder_training_config_file))
+    module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+    module.current_training_config
+    run_training(tmp_path, module, compute_config=cpu_compute_config)
+
+    # Assert that checkpoint files are created.
+    ckpts = list((tmp_path / "checkpoints").glob("*.ckpt"))
+    assert len(ckpts) > 0
+
+
+
+def test_load_weights(
+        model_config_file,
+        training_config_file,
+        tmp_path,
+        cpu_compute_config
+):
+    """
+    Run training on synthetic data.
+    """
+    model = load_and_compile_model(model_config_file)
+    schedule = parse_training_config(read_config_file(training_config_file))
+    module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+    module.current_training_config
+    run_training(tmp_path, module, compute_config=cpu_compute_config)
+
+    schedule["warm_up"].load_weights = str(tmp_path / "retrieval_model.pt")
+    module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+    module.current_training_config
+    run_training(tmp_path, module, compute_config=cpu_compute_config)
 
     # Assert that checkpoint files are created.
     ckpts = list((tmp_path / "checkpoints").glob("*.ckpt"))

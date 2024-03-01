@@ -15,7 +15,8 @@ import click
 import lightning as L
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, IterableDataset
+from torch.optim.lr_scheduler import SequentialLR
 from lightning.pytorch import callbacks
 
 from pytorch_retrieve import metrics
@@ -30,8 +31,12 @@ from pytorch_retrieve.utils import (
     read_model_config,
     read_training_config,
     read_compute_config,
+    find_most_recent_checkpoint
 )
 from pytorch_retrieve.lightning import LightningRetrieval
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class TrainingConfigBase:
@@ -57,15 +62,16 @@ class TrainingConfigBase:
 
     def get_training_data_loader(self):
         dataset = self.get_training_dataset()
+        shuffle = not isinstance(dataset, IterableDataset)
         worker_init_fn = None
         if hasattr(dataset, "worker_init_fn"):
             worker_init_fn = dataset.worker_init_fn
         data_loader = DataLoader(
             dataset,
-            shuffle=True,
+            shuffle=shuffle,
             worker_init_fn=worker_init_fn,
             batch_size=self.batch_size,
-            num_workers=8,
+            num_workers=self.n_data_loader_workers,
             pin_memory=True,
         )
         return data_loader
@@ -97,7 +103,6 @@ class TrainingConfigBase:
             worker_init_fn = dataset.worker_init_fn
         data_loader = DataLoader(
             dataset,
-            shuffle=False,
             worker_init_fn=worker_init_fn,
             batch_size=self.batch_size,
             num_workers=8,
@@ -138,11 +143,33 @@ class TrainingConfigBase:
 
         else:
             optimizer_cls = getattr(torch.optim, self.optimizer)
-            optimizer = optimizer_cls(model.parameters(), **self.optimizer_kwargs)
+            optimizer = optimizer_cls(model.parameters(), **self.optimizer_args)
 
         scheduler = self.scheduler
         if scheduler is None:
             return optimizer, None
+
+        if isinstance(scheduler, list):
+            milestones = self.milestones
+            if milestones is None:
+                raise RuntimeError(
+                    "If a list of schedulers is provided, 'milestones' must be "
+                    "provided as well."
+                )
+            schedulers = scheduler
+            scheds = []
+            for scheduler, args in zip(schedulers, self.scheduler_args):
+                scheduler = getattr(torch.optim.lr_scheduler, scheduler)
+                scheduler_args = self.scheduler_args
+                if scheduler_args is None:
+                    scheduler_args = {}
+                scheds.append(scheduler(
+                    optimizer=optimizer,
+                    **args,
+                ))
+            scheduler = SequentialLR(optimizer, schedulers=scheds, milestones=self.milestones)
+            scheduler.stepwise = self.stepwise_scheduling
+            return optimizer, scheduler
 
         scheduler = getattr(torch.optim.lr_scheduler, scheduler)
         scheduler_args = self.scheduler_args
@@ -167,14 +194,15 @@ class TrainingConfigBase:
             A list of callbacks for the current stage of the training.
 
         """
-        cbs = [
-            callbacks.ModelCheckpoint(
-                dirpath=module.model_dir / "checkpoints",
-                filename=module.name,
-                save_top_k=0,
-                save_last=True,
-            ),
-        ]
+        checkpoint_cb = callbacks.ModelCheckpoint(
+            dirpath=module.model_dir / "checkpoints",
+            filename=module.name,
+            save_top_k=0,
+            save_last=True,
+        )
+        checkpoint_cb.CHECKPOINT_NAME_LAST = module.name
+
+        cbs = [checkpoint_cb]
         if self.minimum_lr is not None:
             cbs.append(callbacks.EarlyStopping(monitor="Learning rate", strict=True))
         return cbs
@@ -222,16 +250,21 @@ class TrainingConfig(TrainingConfigBase):
     n_epochs: int
     batch_size: int
     optimizer: str
-    optimizer_kwargs: Optional[dict] = None
+    optimizer_args: Optional[dict] = None
     scheduler: str = None
     scheduler_args: Optional[dict] = None
-    gradient_clipping: Optional[float] = None
+    milestones: Optional[List[int]] = None
     minimum_lr: Optional[float] = None
     reuse_optimizer: bool = False
     stepwise_scheduling: bool = False
     metrics: Optional[Dict[str, List["Metric"]]] = None
 
     log_every_n_steps: Optional[int] = None
+    gradient_clip_val: Optional[float] = None
+    gradient_clip_algorithm: Optional[str] = None
+    accumulate_grad_batches: int = 1
+    load_weights: Optional[str] = None
+    n_data_loader_workers: int = 12
 
     @classmethod
     def parse(cls, name, config_dict: Dict[str, object]):
@@ -288,29 +321,25 @@ class TrainingConfig(TrainingConfigBase):
             "n_epochs", int, config_dict, f"training stage {name}", required=True
         )
         batch_size = get_config_attr(
-            "batch_size", int, config_dict, f"training stage {name}"
+            "batch_size", int, config_dict, f"training stage {name}", 8, required=True
         )
 
         optimizer = get_config_attr(
-            "optimizer", str, config_dict, f"training stage {name}"
+            "optimizer", str, config_dict, f"training stage {name}", "AdamW"
         )
-        optimizer_kwargs = get_config_attr(
-            "optimizer_kwargs", dict, config_dict, f"training stage {name}", {}
+        optimizer_args = get_config_attr(
+            "optimizer_args", dict, config_dict, f"training stage {name}", {"lr": 1e-3}
         )
 
         scheduler = get_config_attr(
-            "scheduler", str, config_dict, f"training stage {name}", "none"
+            "scheduler", None, config_dict, f"training stage {name}", None
         )
-        if scheduler == "none":
-            scheduler = None
         scheduler_args = get_config_attr(
-            "scheduler_args", dict, config_dict, f"training stage {name}", {}
+            "scheduler_args", None, config_dict, f"training stage {name}", {}
         )
-        gradient_clipping = get_config_attr(
-            "gradient_clipping", float, config_dict, f"training stage {name}", -1.0
+        milestones = get_config_attr(
+            "milestones", list, config_dict, f"training stage {name}", None
         )
-        if gradient_clipping < 0:
-            gradient_clipping = None
 
         minimum_lr = get_config_attr(
             "minimum_lr", float, config_dict, f"training stage {name}", -1.0
@@ -334,6 +363,22 @@ class TrainingConfig(TrainingConfigBase):
             else:
                 log_every_n_steps = 50
 
+        gradient_clip_val = get_config_attr(
+            "gradient_clip_val", float, config_dict, f"training stage {name}", None
+        )
+        gradient_clip_algorithm = get_config_attr(
+            "gradient_clip_algorithm", str, config_dict, f"training stage {name}", None
+        )
+        accumulate_grad_batches = get_config_attr(
+            "accumulate_grad_batches", int, config_dict, f"training stage {name}", 1
+        )
+        load_weights = get_config_attr(
+            "load_weights", str, config_dict, f"training stage {name}", None
+        )
+        n_data_loader_workers = get_config_attr(
+            "n_data_loader_workers", int, config_dict, f"training stage {name}", 12
+        )
+
         return TrainingConfig(
             training_dataset=training_dataset,
             dataset_module=dataset_module,
@@ -342,16 +387,21 @@ class TrainingConfig(TrainingConfigBase):
             validation_dataset_args=validation_dataset_args,
             n_epochs=n_epochs,
             optimizer=optimizer,
-            optimizer_kwargs=optimizer_kwargs,
+            optimizer_args=optimizer_args,
             scheduler=scheduler,
             scheduler_args=scheduler_args,
+            milestones=milestones,
             batch_size=batch_size,
-            gradient_clipping=gradient_clipping,
             minimum_lr=minimum_lr,
             reuse_optimizer=reuse_optimizer,
             stepwise_scheduling=stepwise_scheduling,
             metrics=metrics,
             log_every_n_steps=log_every_n_steps,
+            gradient_clip_val=gradient_clip_val,
+            gradient_clip_algorithm=gradient_clip_algorithm,
+            accumulate_grad_batches=accumulate_grad_batches,
+            load_weights=load_weights,
+            n_data_loader_workers=n_data_loader_workers
         )
 
 
@@ -382,10 +432,28 @@ def run_training(
         compute_config = ComputeConfig()
 
     if checkpoint is not None:
-        module = LightningRetrieval.load_from_checkpoint(checkpoint)
+        module = LightningRetrieval.load_from_checkpoint(
+            checkpoint,
+            model=module.model,
+            training_schedule=module.training_schedule,
+            model_dir = module.model_dir,
+            logger=module.logger_class
+        )
 
     while not module.training_finished:
         training_config = module.current_training_config
+
+        # Try to load weights, if 'load_weight' argument is set.
+        if training_config.load_weights is not None:
+            weight_path = Path(training_config.load_weights)
+            if weight_path.exists():
+                data = torch.load(weight_path)
+                module.model.load_state_dict(data["state_dict"])
+            else:
+                LOGGER.error(
+                    "Path provided as 'load_weights' argument does not point "
+                    "to an existing file."
+                )
 
         ckpt_path = model_dir / "checkpoints"
         ckpt_path.mkdir(exist_ok=True)
@@ -402,13 +470,20 @@ def run_training(
             devices=compute_config.devices,
             strategy=compute_config.get_strategy(),
             callbacks=training_config.get_callbacks(module),
+            accumulate_grad_batches=training_config.accumulate_grad_batches,
+            num_sanity_val_steps=0,
+            gradient_clip_val=training_config.gradient_clip_val,
+            gradient_clip_algorithm=training_config.gradient_clip_algorithm
         )
         trainer.fit(
             module,
             train_dataloaders=training_loader,
             val_dataloaders=validation_loader,
+            ckpt_path=checkpoint
         )
+        module = module.to(torch.device("cpu"))
         module.save_model(model_dir)
+        checkpoint = None
 
 
 @click.option(
@@ -446,6 +521,7 @@ def run_training(
     "--resume",
     "-r",
     "resume",
+    is_flag=True,
     default=False,
     help=("If set, training will continue from a checkpoint file if available."),
 )
@@ -478,7 +554,7 @@ def cli(
 
     training_schedule = parse_training_config(training_config)
 
-    module = LightningRetrieval(retrieval_model, "retrieval_module", training_schedule)
+    module = LightningRetrieval(retrieval_model, training_schedule=training_schedule)
 
     compute_config = read_compute_config(LOGGER, model_path, compute_config)
     if isinstance(compute_config, dict):
@@ -486,6 +562,7 @@ def cli(
 
     checkpoint = None
     if resume:
+        print("Module name:", module.name)
         checkpoint = find_most_recent_checkpoint(
             model_path / "checkpoints", module.name
         )
@@ -493,7 +570,6 @@ def cli(
     run_training(
         model_path,
         module,
-        model_path,
         compute_config=compute_config,
         checkpoint=checkpoint,
     )

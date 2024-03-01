@@ -1,7 +1,21 @@
 import torch
 from torch import nn
 
-from pytorch_retrieve.modules.conv.downsampling import MaxPool2d, AvgPool2d, Space2Depth
+from pytorch_retrieve.modules.conv.downsampling import (
+    BlurPool,
+    MaxPool2d,
+    AvgPool2d,
+    Space2Depth
+)
+
+def test_blurpool():
+
+    x = torch.ones(1, 8, 5, 5)
+    x[0, :, 2, 2] = 1.0
+    blur_pool = BlurPool(8, (2, 2), (3, 3))
+    y = blur_pool(x)
+    assert torch.isclose(y, torch.tensor(1.0)).all()
+
 
 
 def test_maxpool2d():

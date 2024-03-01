@@ -3,9 +3,11 @@ pytorch_retrieve.lightning
 
 """
 import copy
+import logging
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Union
 
+import numpy as np
 import torch
 from torch.optim import Optimizer, SGD
 from torch.optim.lr_scheduler import LRScheduler
@@ -20,17 +22,19 @@ from pytorch_retrieve.metrics import ScalarMetric
 RetrievalInput = Union[torch.Tensor, list, dict]
 
 
+LOGGER = logging.getLogger(__name__)
+
+
 class LightningRetrieval(L.LightningModule):
     """
     The RetrievalModule implements a LightningModule for the training
     of PytorchRetrieve models.
     """
-
     def __init__(
         self,
         model: nn.Module,
-        name: Optional[str] = None,
         training_schedule: Dict[str, "TrainingConfig"] = None,
+        name: Optional[str] = None,
         model_dir: Optional[Path] = None,
         logger: Optional[Callable[[Path, str], L.pytorch.loggers.Logger]] = None,
     ):
@@ -47,6 +51,8 @@ class LightningRetrieval(L.LightningModule):
 
         if name is None:
             name = "retrieval_model"
+            if hasattr(model, "config_dict"):
+                name = model.config_dict.get("name", "retrieval_model")
         self.name = name
 
         self.training_schedule = training_schedule
@@ -64,6 +70,10 @@ class LightningRetrieval(L.LightningModule):
         if logger is None:
             logger = loggers.TensorBoardLogger
         self.logger_class = logger
+
+        self.inputs_prev = None
+        self.pred_prev = None
+        self.target_prev = None
 
     @property
     def training_finished(self):
@@ -92,13 +102,8 @@ class LightningRetrieval(L.LightningModule):
             if name is None:
                 name = "retrieval_model"
             path = path / (name + ".pt")
-        torch.save(
-            {
-                "state_dict": self.model.state_dict(),
-                "model_config": self.model.to_config_dict(),
-            },
-            path,
-        )
+        self.model.save(path)
+
 
     @stage.setter
     def stage(self, stage: int) -> None:
@@ -145,7 +150,9 @@ class LightningRetrieval(L.LightningModule):
                     " clear which  target element the predictions should "
                     " be associated with."
                 )
-            target = next(iter(target.values()))
+            name, target = next(iter(target.items()))
+        else:
+            name = None
 
         if isinstance(pred, list):
             if not isinstance(target, list):
@@ -154,10 +161,29 @@ class LightningRetrieval(L.LightningModule):
                 )
             loss = torch.tensor(0.0)
             for pred_s, target_s in zip(pred, target):
+                mask = torch.isnan(target_s)
+                if mask.any():
+                    target_s = torch.nan_to_num(target_s, 0.0)
+                    target_s = MaskedTensor(target_s, mask=mask)
                 loss += pred_s.loss(target_s)
+
+            if name is not None:
+                self.log("Training loss", loss)
+            else:
+                self.log(f"Training loss ({name})", loss)
             return loss
 
+        mask = torch.isnan(target)
+        if mask.any():
+            target = torch.nan_to_num(target, 0.0)
+            target = MaskedTensor(target, mask=mask)
         loss = pred.loss(target)
+
+        if name is not None:
+            self.log("Training loss", loss)
+        else:
+            self.log(f"Training loss ({name})", loss)
+
         return loss
 
     def training_step(self, batch: tuple, batch_idx: int):
@@ -199,7 +225,21 @@ class LightningRetrieval(L.LightningModule):
             )
 
         losses = {}
-        tot_loss = 0.0
+
+        if isinstance(inputs, dict):
+            inpt = next(iter(inputs.values()))
+            if isinstance(inpt, list):
+                inpt = inpt[0]
+            device = inpt.device
+            dtype = inpt.dtype
+        else:
+            inpt = inputs
+            if isinstance(inpt, list):
+                inpt = inpt[0]
+            device = inputs.device
+            dtype = inputs.dtype
+
+        tot_loss = torch.tensor(0.0, requires_grad=True, device=device, dtype=dtype)
         for name in pred:
             key = name.split("::")[-1]
 
@@ -211,7 +251,7 @@ class LightningRetrieval(L.LightningModule):
                     raise RuntimeError(
                         "Model predicts a sequence but the reference data is not."
                     )
-
+                tot_samples = 0
                 losses[key] = 0.0
                 for pred_k_s, target_k_s in zip(pred_k, target_k):
                     mask = torch.isnan(target_k_s)
@@ -219,9 +259,19 @@ class LightningRetrieval(L.LightningModule):
                         target_k_s = torch.nan_to_num(target_k_s, 0.0)
                         target_k_s = MaskedTensor(target_k_s, mask=mask)
 
+                    n_samples = (~mask).sum()
+
+                    if n_samples == 0:
+                        pred_k_s = 0.0 * pred_k_s
+                        target_k_s = 0.0 * target_k_s
+
+                    tot_samples += n_samples
                     loss_k_s = pred_k_s.loss(target_k_s)
-                    tot_loss += loss_k_s
+                    tot_loss = tot_loss + n_samples * loss_k_s
                     losses[name] += loss_k_s.item()
+
+                if tot_samples > 0:
+                    tot_loss = tot_loss / tot_samples
 
             else:
                 mask = torch.isnan(target_k)
@@ -230,7 +280,7 @@ class LightningRetrieval(L.LightningModule):
                     target_k = MaskedTensor(target_k, mask=mask)
 
                 loss_k = pred[name].loss(target_k)
-                tot_loss += loss_k
+                tot_loss = tot_loss + loss_k
                 losses[name] = loss_k.item()
 
         log_dict = {}
@@ -240,12 +290,37 @@ class LightningRetrieval(L.LightningModule):
         self.log("Training loss", tot_loss)
 
         losses["loss"] = tot_loss
+
+        if np.isnan(tot_loss.item()):
+
+            pass
+            #if self.pred_prev is not None:
+            #    for tensors, name in zip(
+            #            [inputs, target, pred, self.inputs_prev, self.target_prev, self.pred_prev],
+            #            ["inputs", "target", "pred", "input_prev", "target_prev", "pred_prev"]
+            #    ):
+            #        if not isinstance(tensors, dict):
+            #            tensors = {"x": tensors}
+
+            #        for key, tensor in tensors.items():
+            #            if isinstance(tensor, list):
+            #                tensor = torch.stack(tensor, -3)
+            #            tensor = tensor.detach().to(dtype=torch.float32, device="cpu").numpy()
+            #            np.save(f"{name}_{key}.npy", tensor)
+
+        self.inputs_prev = inputs
+        self.target_prev = target
+        self.pred_prev = pred
         return losses
 
-    def on_validation_epoch_start(self):
-        self.metrics = self.current_training_config.get_metrics_dict(
-            self.model.output_names
-        )
+    def on_train_start(self):
+        current_config = self.current_training_config
+        if current_config is not None:
+            self.metrics = self.current_training_config.get_metrics_dict(
+                self.model.output_names
+            )
+        else:
+            self.metrics = []
 
     def validation_step_single_sequence(
         self, pred: List[torch.Tensor], target: Union[List[torch.Tensor], dict]
@@ -320,7 +395,11 @@ class LightningRetrieval(L.LightningModule):
                 "Metrics for more than two outputs are defined but "
                 "the model provided only a single, unnamed output."
             )
-            metrics = next(iter(metrics.values()))
+        metrics = next(iter(metrics.values()))
+
+        mask = torch.isnan(target)
+        if mask.any():
+            target = MaskedTensor(target, mask=mask)
 
         loss = pred.loss(target)
 
@@ -331,6 +410,13 @@ class LightningRetrieval(L.LightningModule):
         for metric in scalar_metrics:
             metric = metric.to(device=scalar_pred.device)
             metric.update(scalar_pred, target)
+
+        other_metrics = [
+            metric for metric in metrics if not isinstance(metric, ScalarMetric)
+        ]
+        for metric in other_metrics:
+            metric = metric.to(device=scalar_pred.device)
+            metric.update(pred, target)
 
         return loss
 
@@ -381,46 +467,59 @@ class LightningRetrieval(L.LightningModule):
             target_k = target[key]
             losses[name] = 0.0
 
+            # Determine scalar metrics for this outout
+            metrics_k = metrics.get(name, [])
+            scalar_metrics = [
+                metric for metric in metrics_k if isinstance(metric, ScalarMetric)
+            ]
+            # Other metrics
+            other_metrics = [
+                metric for metric in metrics_k if not isinstance(metric, ScalarMetric)
+            ]
+
             if isinstance(pred_k, list):
+                tot_samples = 0
                 for pred_k_s, target_k_s in zip(pred_k, target_k):
                     mask = torch.isnan(target_k_s)
                     if mask.any():
-                        target_k_s = torch.nan_to_num(target_k_s, 0.0)
                         target_k_s = MaskedTensor(target_k_s, mask=mask)
+                    n_samples = (~mask).sum()
+                    if n_samples == 0:
+                        pred_k_s = 0.0 * pred_k_s
+                        target_k_s = 0.0 * target_k_s
+                    tot_samples += n_samples
 
                     loss_k_s = pred_k_s.loss(target_k_s)
-                    tot_loss += loss_k_s
+                    tot_loss = tot_loss + loss_k_s * n_samples
                     losses[name] += loss_k_s.item()
 
-                    if name in metrics:
-                        metrics_k = metrics[name]
-                        scalar_metrics = [
-                            metric
-                            for metric in metrics_k
-                            if isinstance(metric, ScalarMetric)
-                        ]
+                    if len(scalar_metrics) > 0:
                         pred_k_s = pred_k_s.expected_value()
                         for metric in scalar_metrics:
                             metric = metric.to(device=pred_k_s.device)
                             metric.update(pred_k_s, target_k_s)
 
+                if tot_samples > 0:
+                    tot_loss =  tot_loss / tot_samples
+
+                for metric in other_metrics:
+                    metric = metric.to(device=pred_k_s.device)
+                    metric.update(pred_k, target_k)
+
             else:
                 mask = torch.isnan(target_k)
                 if mask.any():
-                    target_k = torch.nan_to_num(target_k, 0.0)
                     target_k = MaskedTensor(target_k, mask=mask)
 
                 loss_k = pred_k.loss(target_k)
                 tot_loss += loss_k
                 losses[name] += loss_k.item()
 
-                if name in metrics:
-                    metrics_k = metrics[name]
-                    scalar_metrics = [
-                        metric
-                        for metric in metrics_k
-                        if isinstance(metric, ScalarMetric)
-                    ]
+                for metric in other_metrics:
+                    metric = metric.to(device=pred_k.device)
+                    metric.update(pred_k, target_k)
+
+                if len(scalar_metrics) > 0:
                     pred_k = pred_k.expected_value()
                     for metric in scalar_metrics:
                         metric = metric.to(device=pred_k.device)
@@ -435,12 +534,8 @@ class LightningRetrieval(L.LightningModule):
     def on_validation_epoch_end(self):
         for output_name, metrics in self.metrics.items():
             for metric in metrics:
-                self.log(
-                    metric.name + f" (output_name)",
-                    metric.compute(),
-                    on_step=False,
-                    on_epoch=True,
-                )
+                metric = metric.to(self.device)
+                metric.log(self, output_name=output_name)
                 metric.reset()
 
         self.log(
@@ -460,7 +555,7 @@ class LightningRetrieval(L.LightningModule):
         # LR search provided by Lightning.
         if hasattr(self, "lr"):
             curr_config = copy.copy(curr_config)
-            curr_config.optimizer_kwargs["lr"] = self.lr
+            curr_config.optimizer_args["lr"] = self.lr
 
         optimizer, scheduler = curr_config.get_optimizer_and_scheduler(curr_name, self)
 
@@ -504,6 +599,8 @@ class LightningRetrieval(L.LightningModule):
         Hook used to store 'stage' attribute in checkpoint.
         """
         checkpoint["stage"] = self.stage
+        if hasattr(self.model, "config_dict"):
+            checkpoint["model_config"] = self.model.config_dict
 
     def on_load_checkpoint(self, checkpoint) -> None:
         """

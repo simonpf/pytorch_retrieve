@@ -17,7 +17,7 @@ n_features = 16
 n_features = 1
 
 [output.precip_rate]
-kind = "mean"
+kind = "Mean"
 shape = 1
 
 [architecture]
@@ -31,7 +31,8 @@ kind = "avgpool"
 
 [architecture.temporal_encoder]
 hidden_channels = 128
-n_layers = 4
+n_inputs = 4
+n_layers = 2
 
 [architecture.spatial_aggregator]
 depth = 4
@@ -66,6 +67,6 @@ def test_compile_metnet_config():
         "goes": [torch.rand(1, 16, 512, 512) for _ in range(4)],
         "mrms": [torch.rand(1, 1, 512, 512) for _ in range(4)],
     }
-    x["lead_times"] = [15, 30]
+    x["lead_times"] = torch.tensor([[15, 30]])
     y = metnet(x)
     assert len(y["precip_rate"]) == 2
