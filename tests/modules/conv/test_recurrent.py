@@ -33,9 +33,9 @@ def test_assimilation_encoder_decoder():
     channels = [8, 16, 32, 64]
 
     encoder = Encoder(
-        channels,
-        stage_depths,
-        [2, 2, 2],
+        channels=channels,
+        stage_depths=stage_depths,
+        downsampling_factors=[2, 2, 2],
         skip_connections=True,
         block_factory=rec_factory
     )

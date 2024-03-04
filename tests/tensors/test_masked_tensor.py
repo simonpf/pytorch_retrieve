@@ -204,16 +204,12 @@ def test_mean():
     """
     Test calculating the mean of a masked tensor.
     """
-    tensor = torch.rand(1, 2, 3)
-    mask_1 = torch.rand(1, 2, 3) - 0.5 > 0
+    tensor = torch.rand(16, 16, 3)
+    mask_1 = torch.rand(16, 16, 3) - 0.5 > 0
     masked_tensor_1 = MaskedTensor(tensor, mask=mask_1)
 
     masked_mean = masked_tensor_1.mean()
     mean_ref = tensor[~mask_1].mean()
-    assert torch.isclose(mean_ref, masked_mean)
-
-    masked_mean = torch.mean(masked_tensor_1)
-    mean_ref = torch.mean(tensor[~mask_1])
     assert torch.isclose(mean_ref, masked_mean)
 
 

@@ -78,8 +78,8 @@ def test_finalization(tmp_path):
     input_layer_1.epoch_finished()
 
     stats = input_layer_1.compute_stats()
-    save_stats(stats, tmp_path / "stats", "x")
-    assert (tmp_path / "stats" / "x.nc").exists()
+    save_stats(stats, tmp_path / "stats" / "input", "x")
+    assert (tmp_path / "stats" / "input" / "x.nc").exists()
 
     input_layer_2 = InputLayer("x", n_features=1, stats_path=tmp_path / "stats")
     assert input_layer_2.finalized

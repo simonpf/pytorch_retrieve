@@ -22,12 +22,22 @@ def test_encoder():
     stage_depths = [4, 4, 4, 4]
     channels = [8, 16, 32, 64]
 
-    encoder = Encoder(channels, stage_depths, [2, 2, 2], skip_connections=False)
+    encoder = Encoder(
+        channels=channels,
+        stage_depths=stage_depths,
+        downsampling_factors=[2, 2, 2],
+        skip_connections=False
+    )
     x = torch.rand(1, 8, 64, 64)
     y = encoder(x)
     assert y.shape == (1, 64, 8, 8)
 
-    encoder = Encoder(channels, stage_depths, [2, 2, 2], skip_connections=True)
+    encoder = Encoder(
+        channels=channels,
+        stage_depths=stage_depths,
+        downsampling_factors=[2, 2, 2],
+        skip_connections=True
+    )
     x = torch.rand(1, 8, 64, 64)
     y = encoder(x)
     assert isinstance(y, dict)
@@ -111,9 +121,9 @@ def test_encoder_multiple_block_factories():
     block_factories = [blocks.BasicConv(), blocks.BasicConv(), blocks.ResNet(), blocks.ResNet()]
 
     encoder = Encoder(
-        channels,
-        stage_depths,
-        [2, 2, 2],
+        channels=channels,
+        stage_depths=stage_depths,
+        downsampling_factors=[2, 2, 2],
         block_factory=block_factories,
         skip_connections=False
     )
@@ -125,7 +135,12 @@ def test_encoder_multiple_block_factories():
     y = encoder(x)
     assert y.shape == (1, 64, 8, 8)
 
-    encoder = Encoder(channels, stage_depths, [2, 2, 2], skip_connections=True)
+    encoder = Encoder(
+        channels=channels,
+        stage_depths=stage_depths,
+        downsampling_factors=[2, 2, 2],
+        skip_connections=True
+    )
     x = torch.rand(1, 8, 64, 64)
     y = encoder(x)
     assert isinstance(y, dict)
