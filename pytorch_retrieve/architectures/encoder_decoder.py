@@ -222,7 +222,7 @@ class StemConfig:
     kind: str
     out_channels: int
     depth: int = (0,)
-    downsampling: int = 1
+    downsampling: Union[int, Tuple[int]] = 1
     normalize: Optional[str] = None
 
     @classmethod
@@ -266,8 +266,11 @@ class StemConfig:
             default=in_channels,
         )
         downsampling = get_config_attr(
-            "downsampling", int, config_dict, f"architecture.stem.{name}", 1
+            "downsampling", None, config_dict, f"architecture.stem.{name}", 1
         )
+        if isinstance(downsampling, list):
+            downsampling = tuple(downsampling)
+
         normalize = input_config.normalize
         return StemConfig(
             input_name,
@@ -282,7 +285,11 @@ class StemConfig:
 
     @property
     def out_scale(self):
-        return self.in_scale * self.downsampling
+        if isinstance(self.downsampling, int):
+            scl = self.downsampling
+        else:
+            scl = max(self.downsampling)
+        return self.in_scale * scl
 
     def to_config_dict(self) -> Dict[str, object]:
         """
@@ -290,7 +297,7 @@ class StemConfig:
         serialization.
         """
         dct = asdict(self)
-        return asdict(self)
+        return dct
 
     def compile(self) -> nn.Module:
         """
@@ -373,7 +380,10 @@ class EncoderConfig:
              parsed from the provided encoder-decoder architecture.
         """
         input_scales = [config.out_scale for config in stem_configs.values()]
-        inputs = {name: config.out_scale for name, config in stem_configs.items()}
+        inputs = {
+            name: (config.out_scale, config.out_channels)
+            for name, config in stem_configs.items()
+        }
         base_scale = min(input_scales)
 
         kind = get_config_attr("kind", str, config_dict, "architecture.encoder", "none")
@@ -444,6 +454,9 @@ class EncoderConfig:
         encoder.
         """
         scale = self.base_scale
+        if not isinstance(scale, int):
+            scale = max(scale)
+
         scales = [scale]
         for f_d in self.downsampling_factors:
             if isinstance(f_d, list):
@@ -465,7 +478,12 @@ class EncoderConfig:
         Convert configuration object to dict representation suitable for
         serialization.
         """
-        return asdict(self)
+        dct = asdict(self)
+        if isinstance(dct["block_factory_args"], list):
+            args = dct["block_factory_args"]
+            args = [dict(arg) for arg in args]
+            dct["block_factory_args"] = args
+        return dct
 
     def compile(self) -> nn.Module:
         """
@@ -492,6 +510,7 @@ class EncoderConfig:
             self.inputs,
             self.channels,
             self.stage_depths,
+            base_scale=self.base_scale,
             downsampling_factors=self.downsampling_factors,
             block_factory=block_factory,
             aggregator_factory=aggregation_factory,
@@ -603,9 +622,13 @@ class DecoderConfig:
         Convert configuration object to dict representation suitable for
         serialization.
         """
-        config = asdict(self)
-        config["channels"] = config["channels"][1:]
-        return config
+        dct = asdict(self)
+        if isinstance(dct["block_factory_args"], list):
+            args = dct["block_factory_args"]
+            args = [dict(arg) for arg in args]
+            dct["block_factory_args"] = args
+        dct["channels"] = dct["channels"][1:]
+        return dct
 
     def compile(self) -> nn.Module:
         """
@@ -720,31 +743,18 @@ class EncoderDecoderConfig:
         arch_config: Dict[str, object],
     ):
         stem_config_dict = arch_config.get("stem", {})
-        individual_stems = stem_config_dict.get("individual", False)
-        if individual_stems:
-            stem_configs = {}
-            for name, input_config in input_configs.items():
-                if name in stem_config_dict:
-                    config_dict = stem_config_dict[name]
-                else:
-                    if not "default" in stem_config_dict:
-                        raise ValueError(
-                            "Expected a stem config for every input or a "
-                            "'default' stem config because the 'individual' "
-                            " attribute in 'architecture.stem' is set. However, "
-                            " none of these were found."
-                        )
 
-                    config_dict = stem_config_dict["default"]
+        stem_configs = {}
+        for name, input_config in input_configs.items():
+            if name in stem_config_dict:
+                config_dict = stem_config_dict[name]
                 stem_configs[name] = StemConfig.parse(
-                    name, name, input_config, config_dict
+                    f"stem.{name}", name, input_config, config_dict
                 )
-
-        else:
-            stem_configs = {
-                name: StemConfig.parse("stem", name, input_config, stem_config_dict)
-                for name, input_config in input_configs.items()
-            }
+            else:
+                stem_configs[name] = StemConfig.parse(
+                    f"stem.{name}", name, input_config, stem_config_dict
+                )
 
         encoder_config = get_config_attr("encoder", dict, arch_config, "architecture")
         encoder_config = EncoderConfig.parse(stem_configs, encoder_config)

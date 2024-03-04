@@ -4,6 +4,7 @@ pytorch_retrieve.modules.conv.encoders
 
 Defines decoder modules for use within encoder-decoder architectures.
 """
+from copy import copy
 from typing import Callable, Dict, List, Optional, Union
 
 import numpy as np
@@ -159,14 +160,18 @@ class Decoder(nn.Module, ParamCount):
             if isinstance(skip_connections, dict):
                 base_scale = max(skip_connections.keys())
             else:
-                base_scale = np.prod(upsampling_factors)
+                base_scale = np.prod(
+                    [fac if isinstance(fac, int) else max(fac) for fac in upsampling_factors]
+                )
         self.base_scale = base_scale
 
         self.has_skips = True
         if skip_connections is None:
             skip_connections = {}
             self.has_skips = False
-        self.skip_connections = skip_connections
+        else:
+            skip_connections = copy(skip_connections)
+        self.skip_connections = copy(skip_connections)
 
         if self.base_scale in self.skip_connections:
             in_channels = skip_connections[self.base_scale]
@@ -180,6 +185,7 @@ class Decoder(nn.Module, ParamCount):
             f_up = upsampling_factors[index]
             if isinstance(f_up, (list, tuple)):
                 f_up = max(f_up)
+            print("FUP :: ", f_up, self.base_scale, upsampling_factors)
             scale /= f_up
 
             self.upsamplers.append(
@@ -190,7 +196,8 @@ class Decoder(nn.Module, ParamCount):
                 )
             )
 
-            channels_combined = out_channels + self.skip_connections.get(scale, 0)
+            skip_chans = skip_connections.pop(scale, 0)
+            channels_combined = out_channels + skip_chans
 
             self.stages.append(
                 stage_factories[index](channels_combined, out_channels, n_blocks, scale=scale)
@@ -218,6 +225,8 @@ class Decoder(nn.Module, ParamCount):
             if isinstance(x, dict):
                 x = x[self.base_scale]
 
+        prev_scale = -1
+
         if isinstance(x, dict):
             scale = self.base_scale
             y = x[scale]
@@ -228,10 +237,11 @@ class Decoder(nn.Module, ParamCount):
                 if isinstance(f_up, (list, tuple)):
                     f_up = max(f_up)
                 scale /= f_up
-                if scale in self.skip_connections:
+                if scale in self.skip_connections and scale != prev_scale:
                     y = stage(cat(x[scale], forward(up, y)))
                 else:
                     y = stage(forward(up, y))
+                prev_scale = scale
         else:
             y = x
             stages = self.stages

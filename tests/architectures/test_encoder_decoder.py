@@ -211,18 +211,26 @@ depth = 2
 out_channels = 64
 
 [architecture.encoder]
-channels = [64, 128, 128, 256]
+channels = [64, 128, 256, 512]
 stage_depths = [2, 2, 2, 2]
+downsampling_factors = [2, 1, 2]
 
 [architecture.decoder]
-channels = [128, 128, 64]
+channels = [256, 128, 64]
 stage_depths = [2, 2, 2]
+upsampling_factors = [2, 1, 2]
 
 [input.x_1]
 n_features = 16
+scale = 1
 
 [input.x_2]
 n_features = 32
+scale = 1
+
+[input.x_3]
+n_features = 32
+scale = 4
 
 [output.precip]
 kind = "Mean"
@@ -249,8 +257,8 @@ def test_encoder_config_multi_input(multi_input_cfg):
 
     config = EncoderDecoderConfig.parse(input_cfgs, output_cfgs, arch_config)
 
-    assert config.encoder_config.channels == [64, 128, 128, 256]
-    assert config.decoder_config.channels == [256, 128, 128, 64]
+    assert config.encoder_config.channels == [64, 128, 256, 512]
+    assert config.decoder_config.channels == [512, 256, 128, 64]
     assert isinstance(config.stem_configs, dict)
     assert isinstance(config.head_configs, dict)
 
@@ -260,6 +268,7 @@ def test_encoder_config_multi_input(multi_input_cfg):
     x = {
         "x_1": torch.rand(1, 16, 128, 128),
         "x_2": torch.rand(1, 32, 128, 128),
+        "x_3": torch.rand(1, 32, 32, 32),
     }
 
     y = encdec(x)
@@ -522,3 +531,84 @@ def test_preset(name):
     x, y = next(iter(data_loader_3d(8, 8)))
     pred = encdec(x)
     assert pred.shape[:2] == (8, 1)
+
+
+MULTI_INPUT_MULTI_SCALE_CFG = """
+[architecture]
+name = "EncoderDecoder"
+
+[architecture.encoder]
+channels = [64, 128, 256, 512]
+stage_depths = [2, 2, 2, 2]
+downsampling_factors = [[2, 1], [1, 2], [2, 2]]
+
+[architecture.decoder]
+channels = [256, 128, 64, 32]
+stage_depths = [2, 2, 2, 1]
+upsampling_factors = [[2, 2], [1, 2], [2, 1], [2, 2]]
+
+[architecture.stem.x_1]
+depth = 1
+downsampling = [2, 1]
+out_channels = 27
+
+[architecture.stem.x_2]
+depth = 1
+out_channels = 31
+downsampling = 1
+
+[input.x_1]
+n_features = 16
+scale = 1
+
+[input.x_2]
+n_features = 32
+scale = 1
+
+[input.x_3]
+n_features = 32
+scale = 4
+
+[output.precip]
+kind = "Mean"
+shape = 1
+"""
+
+
+@pytest.fixture
+def multi_input_multi_scale_cfg():
+    return toml.loads(MULTI_INPUT_MULTI_SCALE_CFG)
+
+
+def test_encoder_config_multi_input_multi_scale(multi_input_multi_scale_cfg):
+    arch_config = multi_input_multi_scale_cfg["architecture"]
+    input_config = multi_input_multi_scale_cfg["input"]
+    output_config = multi_input_multi_scale_cfg["output"]
+
+    input_cfgs = {
+        name: InputConfig.parse(name, cfg) for name, cfg in input_config.items()
+    }
+    output_cfgs = {
+        name: OutputConfig.parse(name, cfg) for name, cfg in output_config.items()
+    }
+
+    config = EncoderDecoderConfig.parse(input_cfgs, output_cfgs, arch_config)
+
+    assert config.encoder_config.channels == [64, 128, 256, 512]
+    assert config.decoder_config.channels == [512, 256, 128, 64, 32]
+    assert isinstance(config.stem_configs, dict)
+    assert isinstance(config.head_configs, dict)
+
+    encdec = EncoderDecoder.from_config_dict(multi_input_multi_scale_cfg)
+    assert encdec.stems["x_1"][-1].n_params > 0
+
+    x = {
+        "x_1": torch.rand(1, 16, 128, 128),
+        "x_2": torch.rand(1, 32, 128, 128),
+        "x_3": torch.rand(1, 32, 64, 64),
+    }
+
+    y = encdec(x)
+
+    assert y["precip"].shape == (1, 1, 256, 256)
+    assert isinstance(y["precip"], torch.Tensor)

@@ -35,19 +35,28 @@ def get_projection(
     if max(stride) == 1:
         if in_channels == out_channels:
             return nn.Identity()
+        if len(stride) == 3:
+            return nn.Conv3d(in_channels, out_channels, kernel_size=1)
         return nn.Conv2d(in_channels, out_channels, kernel_size=1)
+
 
     blocks = []
 
     if anti_aliasing:
         pad = tuple([1 if strd > 1 else 0 for strd in stride])
         filter_size = tuple([3 if strd > 1 else 1 for strd in stride])
+        strd = (1,) * len(stride)
         blocks += [
             padding_factory(pad),
-            BlurPool(in_channels, (1, 1), filter_size)
+            BlurPool(in_channels, strd, filter_size)
         ]
 
-    blocks.append(
-        nn.Conv2d(in_channels, out_channels, kernel_size=stride, stride=stride)
-    )
+    if len(stride) == 3:
+        blocks.append(
+            nn.Conv3d(in_channels, out_channels, kernel_size=stride, stride=stride)
+        )
+    else:
+        blocks.append(
+            nn.Conv2d(in_channels, out_channels, kernel_size=stride, stride=stride)
+        )
     return nn.Sequential(*blocks)

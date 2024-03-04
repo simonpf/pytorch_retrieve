@@ -448,7 +448,7 @@ class ResNet:
         normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm2d,
         padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
         bottleneck: int = 4,
-            anti_aliasing: bool = False,
+        anti_aliasing: bool = False,
     ):
         if isinstance(kernel_size, int):
             kernel_size = (kernel_size,) * 2
@@ -891,7 +891,7 @@ class SqueezeExcite(nn.Module):
         self.gate = gate_factory()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x_se = x.mean((2, 3), keepdim=True)
+        x_se = x.mean((-2, -1), keepdim=True)
         x_se = self.conv_reduce(x_se)
         x_se = self.act(x_se)
         x_se = self.conv_expand(x_se)
@@ -911,7 +911,7 @@ class InvertedBottleneckBlock(nn.Module, ParamCount):
             kernel_size: int = 3,
             excitation_ratio: float = 0.0,
             activation_factory: Callable[[], nn.Module] = nn.ReLU,
-            normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm3d,
+            normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm2d,
             padding: Optional[Tuple[int]] = None,
             padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
             downsample: Optional[int] = None,
@@ -1025,16 +1025,34 @@ class InvertedBottleneck:
     def __init__(
         self,
         kernel_size: Optional[Union[Tuple[int, int], int]] = (3, 3),
-        dilation: int = 1,
         activation_factory: Callable[[], nn.Module] = nn.ReLU,
         normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm2d,
-        padding: Optional[Tuple[int]] = None,
         padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
         expansion_factor: int = 4,
         excitation_ratio: float = 0.0,
         anti_aliasing: bool = False,
         fused: bool =False
     ):
+        """
+        Args:
+            kernel_size: The size of the convolution kernel used in the
+                grouped convolution.
+            activation_factory: The factory to use to produce the activation
+                function for the block.
+            normalization_factory: The factory to use to produce the normalization
+                layers in the block.
+            padding_factory: The factory to use to produce the padding modules
+                used in the block.
+            expansion_factor: The factor by which to expand the channels in
+                the inverted bottleneck.
+            excitation_ratio: The excitation ratio to use in the squeeze and
+                excite block. If <= 0.0, the squeeze-and-excite block is omitted.
+            anti_aliasing: Whether to apply anit-aliasing filter prior to
+                downsampling.
+            fused: It 'True', the expansion and grouped convolution are fused
+                into a single convolution, which is more performant for large
+                image sizes.
+        """
         if isinstance(kernel_size, int):
             kernel_size = (kernel_size,) * 2
         self.kernel_size = kernel_size
@@ -1067,6 +1085,12 @@ class InvertedBottleneck:
         Args:
             in_channels: The number of incoming channels.
             out_channels: The number of outgoing channels.
+            downsample: An integer or tuple of integers specifying the
+                downsampling to apply in the block.
+            kernel_size: An optional kernel argument to overwrite the
+                default kernel size of the factory.
+            padding: An iteger specifying the padding to apply to each
+                side of the spatial dimensions of the input tensor.
 
         Return:
             The inverted-bottleneck block.
@@ -1082,6 +1106,281 @@ class InvertedBottleneck:
                 (kernel_size[1]) // 2,
             )
         return InvertedBottleneckBlock(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            downsample=downsample,
+            padding=padding,
+            expansion_factor=self.expansion_factor,
+            excitation_ratio=self.excitation_ratio,
+            activation_factory=self.activation_factory,
+            normalization_factory=self.normalization_factory,
+            padding_factory=self.padding_factory,
+            anti_aliasing=self.anti_aliasing,
+            fused=self.fused
+        )
+
+
+class InvertedBottleneck2Plus1Block(nn.Module, ParamCount):
+    """
+    (2 + 1)-dimensional version of the standard inverted bottleneck block.
+    """
+    def __init__(
+            self,
+            in_channels: int,
+            out_channels: int,
+            expansion_factor: int = 4,
+            kernel_size: int = 3,
+            excitation_ratio: float = 0.0,
+            activation_factory: Callable[[], nn.Module] = nn.ReLU,
+            normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm3d,
+            padding: Optional[Tuple[int]] = None,
+            padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
+            downsample: Optional[int] = None,
+            anti_aliasing: bool = False,
+            fused: bool = False
+    ):
+        """
+        Args:
+            in_channels: The number of incoming channels.
+            out_channels: The number of outgoing channels.
+            expansion_factor: The factor by which to expand the channels in
+                the inverted bottleneck.
+            kernel_size: The size of the convolution kernel used in the
+                grouped convolution.
+            activation_factory: The factory to use to produce the activation
+                function for the block.
+            normalization_factory: The factory to use to produce the normalization
+                layers in the block.
+            padding: The padding to apply before the spatial convolution.
+            padding_factory: The factory to use to produce the padding modules
+                used in the block.
+            excitation_ratio: The excitation ratio to use in the squeeze and
+                excite block. If <= 0.0, the squeeze-and-excite block is omitted.
+            anti_aliasing: Whether to apply anit-aliasing filter prior to
+                downsampling.
+            fused: It 'True', the expansion and grouped convolution are fused
+                into a single convolution, which is more performant for large
+                image sizes.
+        """
+        super().__init__()
+        self.act = activation_factory()
+        act = activation_factory()
+
+        hidden_channels = out_channels * expansion_factor
+
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size,) * 3
+        else:
+            kernel_size = tuple(kernel_size)
+
+        stride = (1, 1, 1)
+        if downsample is not None:
+            if isinstance(downsample, int):
+                downsample = (downsample,) * 3
+            else:
+                downsample = tuple(downsample)
+            if max(downsample) > 1:
+                stride = downsample
+
+        self.projection = get_projection(
+            in_channels,
+            out_channels,
+            stride=stride,
+            anti_aliasing=anti_aliasing,
+            padding_factory=padding_factory
+        )
+
+        if padding is None:
+            padding = calculate_padding(kernel_size)
+
+        k_spatial = (1,) + kernel_size[1:]
+        s_spatial = (1,) + stride[1:]
+        p_spatial = (0,) + padding[1:]
+        k_temporal = kernel_size[:1] + (1, 1)
+        s_temporal = stride[:1] + (1, 1)
+        p_temporal = padding[:1] + (0, 0)
+
+        blocks = []
+        if not fused:
+            blocks += [
+                nn.Conv3d(in_channels, hidden_channels, kernel_size=1),
+                normalization_factory(hidden_channels),
+                act
+            ]
+
+            if max(stride) > 1 and anti_aliasing:
+                pad = tuple([1 if strd > 1 else 0 for strd in stride])
+                filter_size = tuple([3 if strd > 1 else 1 for strd in stride])
+                blocks += [
+                    padding_factory(pad),
+                    BlurPool(hidden_channels, (1, 1, 1), filter_size)
+                ]
+
+            blocks += [
+                padding_factory(p_spatial),
+                nn.Conv3d(
+                    hidden_channels,
+                    hidden_channels,
+                    kernel_size=k_spatial,
+                    stride=s_spatial,
+                    groups=hidden_channels,
+                ),
+                normalization_factory(hidden_channels),
+                act
+            ]
+            if max(k_temporal) > 1:
+                blocks += [
+                    padding_factory(p_temporal),
+                    nn.Conv3d(
+                        hidden_channels,
+                        hidden_channels,
+                        kernel_size=k_temporal,
+                        stride=s_temporal,
+                        groups=hidden_channels,
+                    ),
+                    normalization_factory(hidden_channels),
+                    act
+                ]
+        else:
+            if max(stride) > 1 and anti_aliasing:
+                pad = tuple([1 if strd > 1 else 0 for strd in stride])
+                filter_size = tuple([3 if strd > 1 else 1 for strd in stride])
+                blocks += [
+                    padding_factory(pad),
+                    BlurPool(in_channels, (1, 1, 1), filter_size)
+                ]
+
+            blocks += [
+                padding_factory(p_spatial),
+                nn.Conv3d(
+                    in_channels,
+                    hidden_channels,
+                    kernel_size=k_spatial,
+                    stride=s_spatial,
+                ),
+                normalization_factory(hidden_channels),
+                act
+            ]
+            if max(k_temporal) > 1:
+                blocks += [
+                    padding_factory(p_temporal),
+                    nn.Conv3d(
+                        hidden_channels,
+                        hidden_channels,
+                        kernel_size=k_temporal,
+                        stride=s_temporal,
+                    ),
+                    normalization_factory(hidden_channels),
+                    act
+                ]
+
+        blocks += [
+            nn.Conv3d(hidden_channels, out_channels, kernel_size=1),
+            normalization_factory(out_channels),
+            act
+        ]
+        self.body = nn.Sequential(*blocks)
+
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Propagate input through layer.
+        """
+        shortcut = self.projection(x)
+        x = self.body(x)
+        return x + shortcut
+
+
+class InvertedBottleneck2Plus1:
+    """
+    Factory for producing inverted bottleneck blocks.
+    """
+    def __init__(
+        self,
+        kernel_size: Optional[Union[Tuple[int, int], int]] = (3, 3, 3),
+        activation_factory: Callable[[], nn.Module] = nn.ReLU,
+        normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm3d,
+        padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
+        expansion_factor: int = 4,
+        excitation_ratio: float = 0.0,
+        anti_aliasing: bool = False,
+        fused: bool =False
+    ):
+        """
+        Args:
+            kernel_size: The size of the convolution kernel used in the
+                grouped convolution.
+            activation_factory: The factory to use to produce the activation
+                function for the block.
+            normalization_factory: The factory to use to produce the normalization
+                layers in the block.
+            padding_factory: The factory to use to produce the padding modules
+                used in the block.
+            expansion_factor: The factor by which to expand the channels in
+                the inverted bottleneck.
+            excitation_ratio: The excitation ratio to use in the squeeze and
+                excite block. If <= 0.0, the squeeze-and-excite block is omitted.
+            anti_aliasing: Whether to apply anit-aliasing filter prior to
+                downsampling.
+            fused: It 'True', the expansion and grouped convolution are fused
+                into a single convolution, which is more performant for large
+                image sizes.
+        """
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size,) * 3
+        self.kernel_size = kernel_size
+        if isinstance(activation_factory, str):
+            activation_factory = get_activation_factory(activation_factory)
+        self.activation_factory = activation_factory
+        if isinstance(normalization_factory, str):
+            normalization_factory = get_normalization_factory(normalization_factory)
+        self.normalization_factory = normalization_factory
+        if isinstance(padding_factory, str):
+            padding_factory = get_padding_factory(padding_factory)
+        self.padding_factory = padding_factory
+        self.expansion_factor = expansion_factor
+        self.excitation_ratio = excitation_ratio
+        self.anti_aliasing = anti_aliasing
+        self.fused = fused
+
+    def __call__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        downsample: Optional[Union[Tuple[int, int], int]] = None,
+        kernel_size: Optional[Union[Tuple[int, int], int]] = None,
+        padding: Optional[int] = None,
+        **kwargs,
+    ) -> nn.Module:
+        """
+        Instantiate InvertedBottleneck module.
+
+        Args:
+            in_channels: The number of incoming channels.
+            out_channels: The number of outgoing channels.
+            downsample: An integer or tuple of integers specifying the
+                downsampling to apply in the block.
+            kernel_size: An optional kernel argument to overwrite the
+                default kernel size of the factory.
+            padding: An iteger specifying the padding to apply to each
+                side of the spatial dimensions of the input tensor.
+
+        Return:
+            The inverted-bottleneck block.
+        """
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size,) * 3
+        if kernel_size is None:
+            kernel_size = self.kernel_size
+
+        if padding is None:
+            padding = (
+                (kernel_size[0]) // 2,
+                (kernel_size[1]) // 2,
+                (kernel_size[2]) // 2,
+            )
+        return InvertedBottleneck2Plus1Block(
             in_channels,
             out_channels,
             kernel_size=kernel_size,

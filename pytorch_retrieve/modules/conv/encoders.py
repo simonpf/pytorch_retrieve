@@ -56,6 +56,7 @@ class Encoder(nn.Module, ParamCount):
         self,
         channels: List[int],
         stage_depths: List[int],
+        in_channels: Optional[int] = None,
         downsampling_factors: Optional[Union[List[int], int]] = None,
         block_factory: Optional[Callable[[int, int], nn.Module]] = None,
         stage_factory: Optional[Callable[[int, int], nn.Module]] = None,
@@ -68,6 +69,9 @@ class Encoder(nn.Module, ParamCount):
             channels: A list specifying the number of features (or channels)
                 in each stage of the encoder.
             stage_depths: A list containing the number of block in each stage
+                of the encoder.
+            in_channels: The number of channels in the encoder input in case
+                it deviates from the number of channels in the first stage
                 of the encoder.
             downsampling_factors: A list of downsampling factors specifying
                 the degree of spatial downsampling applied between all stages
@@ -146,7 +150,7 @@ class Encoder(nn.Module, ParamCount):
         # Populate list of down samplers and stages.
         self.downsamplers = nn.ModuleList()
         self.stages = nn.ModuleList()
-        channels_in = channels[0]
+        in_channels = channels[0] if in_channels is None else in_channels
         for scale, stage_depth, channels_out, f_dwn, s_fac in zip(
                 self.scales, stage_depths, channels, downsampling_factors, stage_factories
         ):
@@ -154,7 +158,7 @@ class Encoder(nn.Module, ParamCount):
                 self.downsamplers.append(nn.Identity())
                 self.stages.append(
                     s_fac(
-                        channels_in,
+                        in_channels,
                         channels_out,
                         stage_depth,
                         downsample=f_dwn,
@@ -165,7 +169,7 @@ class Encoder(nn.Module, ParamCount):
                 down = f_dwn if isinstance(f_dwn, int) else max(f_dwn)
                 if down > 1:
                     self.downsamplers.append(
-                        downsampler_factory(channels_in, channels_out, f_dwn)
+                        downsampler_factory(in_channels, channels_out, f_dwn)
                     )
                 else:
                     self.downsamplers.append(nn.Identity())
@@ -178,7 +182,7 @@ class Encoder(nn.Module, ParamCount):
                         downsample=None,
                     )
                 )
-            channels_in = channels_out
+            in_channels = channels_out
 
     @property
     def skip_connections(self) -> Dict[int, int]:
@@ -252,8 +256,8 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
     ):
         """
         Args:
-            inputs: A dictionary mapping input names to either to the
-                 corresponding scale of the encoder input.
+            inputs: A dictionary mapping input names to the
+                 corresponding scale of the encoder.
             channels: A list specifying the channels in each stage of the
                  encoder.
             stage_depths: The depth of each stage in the encoder.
@@ -269,9 +273,25 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
                 from the end of each stage, which can forward to a decoder
                 that expects skip connections.
         """
+        # If input dict contain channels use that to determine
+        # number of inputs to first stage.
+        input_chans = {}
+        for scale in inputs.values():
+            if isinstance(scale, tuple):
+                input_chans.setdefault(scale[0], []).append(scale[1])
+        in_channels = None
+        if len(input_chans) > 0:
+            min_scale = min(list(input_chans.keys()))
+            in_channels = input_chans[min_scale]
+            if len(in_channels) == 1:
+                in_channels = in_channels[0]
+            else:
+                in_channels = None
+
         super().__init__(
             channels,
             stage_depths,
+            in_channels = in_channels,
             downsampling_factors=downsampling_factors,
             block_factory=block_factory,
             stage_factory=stage_factory,
@@ -295,29 +315,41 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
         self.stage_inputs = {scale: [] for scale in self.scales}
 
         # Mapping of scales to corresponding channels numbers.
-        scale_channels = {scl: channels for scl, channels in zip(self.scales, channels)}
+        scale_channels = {}
+        for scl, chans in zip(self.scales, channels):
+            if not scl in scale_channels:
+                scale_channels[scl] = chans
 
+        input_channels = {}
         for input_name, scale in inputs.items():
+            if isinstance(scale, tuple):
+                scale, input_chans = scale
+                input_channels[input_name] = input_chans
+            else:
+                input_channels[input_name] = scale_channels[scale]
+            self.stage_inputs[scale].append(input_name)
+
             if not scale in self.scales:
                 raise ValueError(
                     f"Input '{input_name}' has scale {scale}, which doesn't "
                     f" match any stage of the encoder."
                 )
-            self.stage_inputs[scale].append(input_name)
 
         # Create aggregators for all inputs at each scale.
         for ind, (scale, names) in enumerate(self.stage_inputs.items()):
             if scale > self.base_scale:
-                inpts = {name: channels[ind] for name in names}
+                inpts = {name: input_channels[name] for name in names}
                 if len(inpts) > 0:
-                    inpts["__enc__"] = channels[ind]
+                    inpts["__enc__"] = scale_channels[scale]
                     self.aggregators[str(scale)] = aggregator_factory(
-                        inpts, channels[ind]
+                        inpts, scale_channels[scale]
                     )
             # Multiple inputs at base scale.
             elif len(names) > 1:
-                inpts = {name: channels[ind] for name in names}
-                self.aggregators[str(scale)] = aggregator_factory(inpts, channels[ind])
+                inpts = {name: input_channels[name] for name in names}
+                self.aggregators[str(scale)] = aggregator_factory(
+                    inpts, scale_channels[scale]
+                )
 
     def forward_with_skips(self, x: torch.Tensor) -> Dict[set, torch.Tensor]:
         """
@@ -332,6 +364,10 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
         skips = {}
         y = None
 
+        # Need to keep track of repeating scales to avoid aggregating inputs multiple
+        # times.
+        prev_scale = -1
+
         for scale, down, stage in zip(self.scales, self.downsamplers, self.stages):
             # Apply downsampling
             if down is not None:
@@ -339,7 +375,7 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
 
             # Collect inputs
             agg_inputs = []
-            inputs = self.stage_inputs[scale]
+            inputs = self.stage_inputs[scale] if scale != prev_scale else []
 
             # Aggregate and propagate through stage
             if y is not None:
@@ -363,6 +399,7 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
             if not self.aggregate_after:
                 y = stage(y)
 
+            prev_scale = scale
             skips[scale] = y
 
         return skips
@@ -391,6 +428,8 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
 
         y = None
 
+        prev_scale = -1
+
         for scale, down, stage in zip(self.scales, self.downsamplers, self.stages):
             # Apply downsampling
             if down is not None:
@@ -398,7 +437,7 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
 
             # Collect inputs
             agg_inputs = []
-            inputs = self.stage_inputs[scale]
+            inputs = self.stage_inputs[scale] if scale != prev_scale else []
 
             # Aggregate and propagate through stage
             if y is not None:
@@ -418,6 +457,8 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
 
             if not self.aggregate_after:
                 y = stage(y)
+
+            prev_scale = scale
 
         return y
 
@@ -532,6 +573,7 @@ class MultiInputParallelEncoder(nn.Module, ParamCount):
         for scl in self.scales:
             agg = self.aggregators[str(scl)]
             inpts = {inpt: encs[inpt][scl] for inpt in self.agg_inputs[scl]}
+
             results[scl] = agg(inpts)
         return results
 
@@ -640,13 +682,13 @@ class CascadingEncoder(nn.Module):
 
         self.scales = _calculate_output_scales(base_scale, downsampling_factors)
 
-        channels_in = channels[0]
+        in_channels = channels[0]
         modules = []
         module_map = {}
 
         if downsampler_factory is None:
 
-            def downsampler_factory(channels_in, channels_out, f_down):
+            def downsampler_factory(in_channels, channels_out, f_down):
                 return nn.AvgPool2d(kernel_size=f_down, stride=f_down)
 
         def upsampler_factory(f_up):
@@ -660,7 +702,7 @@ class CascadingEncoder(nn.Module):
             down = f_dwn if isinstance(f_dwn, int) else max(f_dwn)
             if down > 1:
                 self.downsamplers.append(
-                    downsampler_factory(channels_in, channels_out, f_dwn)
+                    downsampler_factory(in_channels, channels_out, f_dwn)
                 )
                 self.upsamplers.append(upsampler_factory(f_dwn))
             else:
@@ -668,7 +710,7 @@ class CascadingEncoder(nn.Module):
                 self.upsamplers.append(None)
 
             for block_ind in range(n_blocks):
-                chans_combined = channels_in
+                chans_combined = in_channels
                 if (block_ind > 1) and (stage_ind < n_stages - 1):
                     chans_combined += channels[stage_ind + 1]
                 if (
@@ -686,7 +728,7 @@ class CascadingEncoder(nn.Module):
                 modules.append(mod)
                 depth_map = module_map.setdefault(block_ind + stage_ind, [])
                 depth_map.append((stage_ind, mod))
-                channels_in = channels_out
+                in_channels = channels_out
             stage_ind += 1
 
         self.modules = nn.ModuleList(modules)
