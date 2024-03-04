@@ -16,7 +16,11 @@ def test_decoder():
     stage_depths = [4, 4, 4, 4]
     channels = [8, 16, 32, 64]
 
-    encoder = Encoder(channels, stage_depths, [2, 2, 2])
+    encoder = Encoder(
+        channels=channels,
+        stage_depths=stage_depths,
+        downsampling_factors=[2, 2, 2]
+    )
     decoder = Decoder(channels[::-1], stage_depths[::-1][1:], [2, 2, 2])
 
     x = torch.rand(1, 8, 64, 64)
@@ -24,7 +28,7 @@ def test_decoder():
     assert y.shape == (1, 8, 64, 64)
 
 
-def test_decoder_multiple_block_factoris():
+def test_decoder_multiple_block_factories():
     """
     Create an encoder and corresponding decoder and ensure that
       - Forwarding inputs through both encoder and decoder works.
@@ -34,7 +38,12 @@ def test_decoder_multiple_block_factoris():
 
     block_factories = [blocks.BasicConv(), blocks.BasicConv(), blocks.ResNet(), blocks.ResNet()]
 
-    encoder = Encoder(channels, stage_depths, [2, 2, 2], block_factory=block_factories)
+    encoder = Encoder(
+        channels=channels,
+        stage_depths=stage_depths,
+        downsampling_factors=[2, 2, 2],
+        block_factory=block_factories
+    )
 
     assert isinstance(encoder.stages[0][0], blocks.BasicConvBlock)
     assert isinstance(encoder.stages[2][0], blocks.ResNetBlock)
