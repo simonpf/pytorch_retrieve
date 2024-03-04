@@ -62,6 +62,7 @@ class LightningRetrieval(L.LightningModule):
             self.stage_names = list(self.training_schedule.keys())
 
         self.stage = 0
+        self.prev_optim = None
 
         if model_dir is None:
             model_dir = Path(".")
@@ -557,7 +558,11 @@ class LightningRetrieval(L.LightningModule):
             curr_config = copy.copy(curr_config)
             curr_config.optimizer_args["lr"] = self.lr
 
-        optimizer, scheduler = curr_config.get_optimizer_and_scheduler(curr_name, self)
+        optimizer, scheduler = curr_config.get_optimizer_and_scheduler(
+            curr_name,
+            self,
+            previous_optimizer=self.prev_optim
+        )
 
         conf = {"optimizer": optimizer}
         if scheduler is None:
@@ -592,6 +597,7 @@ class LightningRetrieval(L.LightningModule):
 
     def on_fit_end(self):
         self._tensorboard = None
+        self.prev_optim = self.optimizers().optimizer
         self.stage += 1
 
     def on_save_checkpoint(self, checkpoint) -> None:

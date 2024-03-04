@@ -62,7 +62,7 @@ class InputLayer(StatsTracker, nn.Module):
         if stats_path is None:
             stats_path = Path("stats")
         self.stats_path = stats_path
-        stats_file = stats_path / f"{self.name}.nc"
+        stats_file = stats_path / "input" / f"{self.name}.nc"
         if stats_file.exists():
             with xr.open_dataset(stats_file) as dataset:
                 self._load_stats_tensors(dataset)
