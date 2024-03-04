@@ -140,6 +140,10 @@ class TrainingConfigBase:
                     "set to 'True' but no previous optimizer is available."
                 )
             optimizer = previous_optimizer
+            if "lr" in self.optimizer_args:
+                lr = self.optimizer_args["lr"]
+                for group in optimizer.param_groups:
+                    group["lr"] = lr
 
         else:
             optimizer_cls = getattr(torch.optim, self.optimizer)
@@ -169,6 +173,14 @@ class TrainingConfigBase:
                 ))
             scheduler = SequentialLR(optimizer, schedulers=scheds, milestones=self.milestones)
             scheduler.stepwise = self.stepwise_scheduling
+            return optimizer, scheduler
+
+        if scheduler == "Warmup":
+            total_iters = self.scheduler_args.get("n_iterations", self.n_epochs - 1)
+            stepwise = False
+            scheduler = torch.optim.lr_scheduler.LinearLR(
+                optimizer, start_factor=1e-8, end_factor=1.0, total_iters=total_iters
+            )
             return optimizer, scheduler
 
         scheduler = getattr(torch.optim.lr_scheduler, scheduler)
