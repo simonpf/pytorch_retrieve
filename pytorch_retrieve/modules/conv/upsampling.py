@@ -1,5 +1,5 @@
 """
-Defines factories for creating upsampling block for use in convolutional
+mDefines factories for creating upsampling block for use in convolutional
 neural network architectures.
 """
 from typing import Tuple, Union
@@ -66,7 +66,7 @@ class Trilinear:
             blocks.append(nn.Conv3d(in_channels, out_channels, kernel_size=1))
 
         if isinstance(factor, (int, float)):
-            factor = (factor,) * 2
+            factor = (factor,) * 3
         factor = tuple(factor)
 
         blocks.append(
@@ -76,3 +76,15 @@ class Trilinear:
             )
         )
         return nn.Sequential(*blocks)
+
+
+class ConvTranspose:
+    """
+    Upsampling using transposed convolutions.
+    """
+    def __call__(
+            self, in_channels: int, out_channels: int, factor: Union[float, Tuple[float]]
+    ) -> nn.Module:
+        stride = int(factor)
+        kernel_size = stride
+        return nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride=stride)
