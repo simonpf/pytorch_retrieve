@@ -185,7 +185,6 @@ class Decoder(nn.Module, ParamCount):
             f_up = upsampling_factors[index]
             if isinstance(f_up, (list, tuple)):
                 f_up = max(f_up)
-            print("FUP :: ", f_up, self.base_scale, upsampling_factors)
             scale /= f_up
 
             self.upsamplers.append(
