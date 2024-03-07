@@ -22,6 +22,7 @@ class Mean(stats.StatsTracker, nn.Module):
             name,
             shape: Union[int, Tuple[int]],
     ):
+        self.name = name
         nn.Module.__init__(self)
         if isinstance(shape, int):
             n_features = shape
@@ -51,7 +52,7 @@ class Quantiles(stats.StatsTracker, nn.Module):
         Args:
             tau: A vector containing the quantile fractions to predict.
         """
-
+        self.name = name
         nn.Module.__init__(self)
         if isinstance(shape, int):
             n_features = shape
