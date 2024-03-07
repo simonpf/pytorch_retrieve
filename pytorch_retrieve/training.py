@@ -136,7 +136,7 @@ class TrainingConfigBase:
         if self.reuse_optimizer:
             if previous_optimizer is None:
                 raise RuntimeError(
-                    "Training stage '{self.name}' has 'reuse_optimizer' "
+                    f"Training stage '{self.name}' has 'reuse_optimizer' "
                     "set to 'True' but no previous optimizer is available."
                 )
             optimizer = previous_optimizer
@@ -556,6 +556,10 @@ def cli(
 
     LOGGER = logging.getLogger(__name__)
     model_config = read_model_config(LOGGER, model_path, model_config)
+    module_name = None
+    if "name" in model_config:
+        module_name = model_config[name]
+
     if model_config is None:
         return 1
     retrieval_model = compile_architecture(model_config)
@@ -566,7 +570,11 @@ def cli(
 
     training_schedule = parse_training_config(training_config)
 
-    module = LightningRetrieval(retrieval_model, training_schedule=training_schedule)
+    module = LightningRetrieval(
+        retrieval_model,
+        training_schedule=training_schedule,
+        name=module_name
+    )
 
     compute_config = read_compute_config(LOGGER, model_path, compute_config)
     if isinstance(compute_config, dict):
