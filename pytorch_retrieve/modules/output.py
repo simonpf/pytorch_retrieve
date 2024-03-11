@@ -59,10 +59,10 @@ class Quantiles(stats.StatsTracker, nn.Module):
         else:
             n_features = shape[0]
         stats.StatsTracker.__init__(self, n_features)
-        self.tau = nn.Parameter(torch.tensor(tau, dtype=torch.float32), requires_grad=False)
+        self.tau = torch.tensor(tau, dtype=torch.float32)
 
     def forward(self, x):
         """
         Produces a QuantileTensor from a model output.
         """
-        return QuantileTensor(x, tau=self.tau)
+        return QuantileTensor(x, tau=self.tau.to(device=x.device))
