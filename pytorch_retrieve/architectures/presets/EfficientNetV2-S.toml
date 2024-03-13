@@ -1,5 +1,4 @@
 [encoder]
-
 channels = [24, 48, 64, 128, 160, 256]
 downsampling_factors = [1, 2, 2, 2, 2]
 stage_depths = [1, 2, 2, 3, 4, 15]
@@ -21,7 +20,6 @@ block_factory_args = [
 ]
 
 [decoder]
-
 channels = [160, 128, 64, 48, 24]
 upsampling_factors = [2, 2, 2, 2, 1]
 stage_depths = [4, 3, 2, 2, 1]

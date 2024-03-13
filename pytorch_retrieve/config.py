@@ -311,6 +311,6 @@ class ComputeConfig:
             import pytorch_retrieve
             return strategies.FSDPStrategy(
                 sharding_strategy="SHARD_GRAD_OP",
-                activation_checkpointing_policy=pytorch_retrieve.modules.conv.blocks.ALL
+                activation_checkpointing_policy=pytorch_retrieve.modules.conv.blocks.ALL,
             )
         return self.strategy

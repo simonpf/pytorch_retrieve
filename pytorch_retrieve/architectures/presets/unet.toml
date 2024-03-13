@@ -1,14 +1,22 @@
 [stem]
 depth = 1
-out_channels = 16
+activation_factory = "ReLU"
+block_factory = "BasicConv"
+out_channels = 64
 
 [encoder]
-channels = [16, 32, 64, 128, 256]
+channels = [64, 128, 256, 512, 1024]
 stage_depths = [2, 2, 2, 2, 2]
+activation_factory = "ReLU"
 block_factory = "BasicConv"
-
+normalization_factory = "none"
+dowsampling_factory = "MaxPool"
 
 [decoder]
 channels = [128, 64, 32, 16]
 stage_depths = [2, 2, 2, 2]
 block_factory = "BasicConv"
+activation_factory = "ReLU"
+upsampling_factory = "ConvTranspose"
+skip_connections = true
+normalization_factory = "none"

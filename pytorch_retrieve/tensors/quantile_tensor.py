@@ -93,7 +93,7 @@ class QuantileTensor(torch.Tensor):
             new_shape = y_true.shape[:1] + (1,) * (self.ndim - y_true.ndim) + y_true.shape[1:]
             y_true = y_true.reshape(new_shape)
 
-        delta = self.base - y_true
+        delta = y_true - self.base
         loss = torch.where(delta > 0, tau * delta, (tau - 1.0) * delta)
         return loss.mean()
 

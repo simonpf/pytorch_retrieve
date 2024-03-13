@@ -178,53 +178,76 @@ def test_decoder_config():
 
 AUTOREGRESSIVE_CONFIG = (
     """
-    [architecture]
-    name = "Autoregressive"
+[architecture]
+name = "Autoregressive"
+order = 2
+time_step = 30
+latent_dim = 256
 
-    order = 2
-    latent_dim = 16
-    time_step = 30
+[architecture.encoder]
 
-    [architecture.encoder.encoder]
-    channels = [32, 32, 64]
-    stage_depths = [2, 2, 2]
-    [architecture.encoder.decoder]
-    channels = [32, 16]
-    stage_depths= [2, 2]
+[architecture.encoder.encoder]
+channels = [64, 128, 128]
+stage_depths = [2, 2, 2]
+block_factory = "ResNeXt"
+block_factory_args = {padding_factory="Global", normalization_factory="LayerNormFirst", activation_factory="ReLU"}
+downsampling_factors = [2, 2]
 
-    [architecture.temporal_encoder]
-    kind="recurrent"
-    [architecture.temporal_encoder.encoder]
-    channels = [16, 32, 64]
-    stage_depths = [2, 2, 2]
-    [architecture.temporal_encoder.decoder]
-    channels = [32, 16]
-    stage_depths= [2, 2]
+[architecture.encoder.decoder]
+channels = []
+stage_depths = []
+block_factory = "ResNeXt"
+block_factory_args = {padding_factory="Global", normalization_factory="LayerNormFirst", activation_factory="ReLU"}
 
-    [architecture.propagator]
-    [architecture.propagator.encoder]
-    channels = [32, 32, 64]
-    stage_depths = [2, 2, 2]
-    [architecture.propagator.decoder]
-    channels = [32, 16]
-    stage_depths= [2, 2]
+[architecture.temporal_encoder]
+kind = "Direct"
+n_inputs = 2
 
-    [architecture.decoder]
-    channels = [32]
-    stage_depths = [1]
-    upsampling_factors = [1]
+[architecture.temporal_encoder.encoder]
+stage_depths = [4]
+channels = [256, 256, 256]
+recurrence_factory = "Assimilator"
+block_factory = "ResNeXt"
+block_factory_args = {padding_factory="Global", normalization_factory="LayerNormFirst", activation_factory="ReLU"}
 
-    [architecture.encoder.stem]
-    kind = "BasicConv"
-    depth = 1
-    out_channels = 32
+[architecture.temporal_encoder.decoder]
+stage_depths = []
+channels = []
 
-    [input.seviri]
-    n_features = 12
+[architecture.propagator]
+[architecture.propagator.encoder]
+channels = [256, 256, 256]
+stage_depths = [3, 3, 3]
+downsampling_factors = [[2, 2], [1, 2]]
+block_factory = "ResNeXt"
+block_factory_args = {padding_factory="Global", normalization_factory="LayerNormFirst", activation_factory="ReLU"}
 
-    [output.surface_precip]
-    shape = 1
-    kind = "Mean"
+[architecture.propagator.decoder]
+channels = [256, 256]
+stage_depths = [3, 3]
+block_factory = "ResNeXt"
+upsampling_factors = [[1, 2], [2, 2]]
+block_factory_args = {padding_factory="Global", normalization_factory="LayerNormFirst", activation_factory="ReLU"}
+
+[architecture.decoder]
+channels = [256, 128]
+stage_depths = [1, 1]
+block_factory = "ResNeXt"
+upsampling_factors = [2, 2]
+block_factory_args = {padding_factory="Global", normalization_factory="LayerNormFirst", activation_factory="ReLU"}
+
+[architecture.encoder.stem]
+depth = 1
+out_channels = 64
+
+[architecture.decoder.head]
+depth = 3
+
+[input.seviri]
+n_features = 12
+
+[output.surface_precip]
+kind = "Mean"
 
     """
 )
@@ -257,13 +280,13 @@ def test_autoregressive():
         autoregressive_config
     )
 
-    x = {"seviri": [torch.rand(2, 12, 64, 64) for _ in range(4)]}
+    x = {"seviri": [torch.rand(2, 12, 256, 256) for _ in range(2)]}
     x["lead_time"] = torch.tensor([[30, 60, 90, 120]])
     y = autoregressive(x)
 
     assert "surface_precip" in y
     assert len(y["surface_precip"]) == 4
-    assert y["surface_precip"][0].shape == (2, 1, 64, 64)
+    assert y["surface_precip"][0].shape == (2, 1, 256, 256)
 
 
 def test_autoregressive_save_and_load(tmp_path):

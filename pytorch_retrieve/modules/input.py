@@ -74,11 +74,11 @@ class InputLayer(StatsTracker, nn.Module):
         StatsTracker.initialize(self)
 
         # Initialize torch parameters.
-        self.finalized = nn.Parameter(torch.tensor(0.0, dtype=torch.float32), requires_grad=False)
-        self.p_mean = nn.Parameter(torch.zeros(self.n_features, dtype=torch.float32), requires_grad=False)
-        self.p_std_dev = nn.Parameter(torch.zeros(self.n_features, dtype=torch.float32), requires_grad=False)
-        self.p_min = nn.Parameter(torch.zeros(self.n_features, dtype=torch.float32), requires_grad=False)
-        self.p_max = nn.Parameter(torch.zeros(self.n_features, dtype=torch.float32), requires_grad=False)
+        self.finalized = torch.tensor(0.0, dtype=torch.float32)
+        self.t_mean = torch.zeros(self.n_features, dtype=torch.float32)
+        self.t_std_dev = torch.zeros(self.n_features, dtype=torch.float32)
+        self.t_min = torch.zeros(self.n_features, dtype=torch.float32)
+        self.t_max = torch.zeros(self.n_features, dtype=torch.float32)
 
 
     def forward(self, x: torch.Tensor) -> Optional[torch.Tensor]:
@@ -123,22 +123,52 @@ class InputLayer(StatsTracker, nn.Module):
             return None
         self.initialized = True
 
+    def get_extra_state(self) -> Dict[str, torch.Tensor]:
+        """
+        Get mean, std. dev., min. and max tensors stored in layer.
+
+        Args:
+             state: A dictionary containing the extra state obtained from 'get_extra_state'.
+        """
+        return {
+            "mean": self.t_mean,
+            "std_dev": self.t_std_dev,
+            "min": self.t_min,
+            "max": self.t_max
+        }
+
+    def set_extra_state(self, state) -> None:
+        """
+        Set mean, std. dev., min. and max tensors stored in layer.
+
+        Args:
+             state: A dictionary containing the extra state obtained from 'get_extra_state'.
+        """
+        self.t_mean.set_(state["mean"])
+        self.t_std_dev.set_(state["std_dev"])
+        self.t_min.set_(state["min"])
+        self.t_max.set_(state["max"])
+
+    def set_extra_state(self, state) -> None:
+        """
+        Set mean, std. dev., min. and max tensors stored in layer.
+
+        Args:
+             state: A dictionary containing the extra state obtained from 'get_extra_state'.
+        """
+        self.t_mean.set_(state["mean"])
+        self.t_std_dev.set_(state["std_dev"])
+        self.t_min.set_(state["min"])
+        self.t_max.set_(state["max"])
+
     def _load_stats_tensors(self, dataset: xr.Dataset) -> None:
         """
         Load tensors with input data statistics from dataset.
         """
-        self.p_mean = nn.Parameter(
-            torch.tensor(dataset["mean"].data.astype("float32")), requires_grad=False
-        )
-        self.p_std_dev = nn.Parameter(
-            torch.tensor(dataset["std_dev"].data.astype("float32")), requires_grad=False
-        )
-        self.p_min = nn.Parameter(
-            torch.tensor(dataset["min"].data.astype("float32")), requires_grad=False
-        )
-        self.p_max = nn.Parameter(
-            torch.tensor(dataset["max"].data.astype("float32")), requires_grad=False
-        )
+        self.t_mean = torch.tensor(dataset["mean"].data.astype("float32"))
+        self.t_std_dev = torch.tensor(dataset["std_dev"].data.astype("float32"))
+        self.t_min = torch.tensor(dataset["min"].data.astype("float32"))
+        self.t_max = torch.tensor(dataset["max"].data.astype("float32"))
         device = self.finalized.device
         self.finalized.set_(torch.tensor(1.0, dtype=torch.float32).to(device=device))
 
@@ -191,12 +221,12 @@ class StandardizationLayer(InputLayer):
 
         if self.finalized.item() > 0.0:
             if self.kind == "standardize":
-                mean = self.p_mean.__getitem__((...,) + (None,) * pad_dims)
-                std_dev = self.p_std_dev.__getitem__((...,) + (None,) * pad_dims)
+                mean = self.t_mean.to(device=x.device).__getitem__((...,) + (None,) * pad_dims)
+                std_dev = self.t_std_dev.to(device=x.device).__getitem__((...,) + (None,) * pad_dims)
                 x_n = (x - mean) / std_dev
             elif self.kind == "minmax":
-                mins = self.p_min.__getitem__((...,) + (None,) * pad_dims)
-                maxs = self.p_max.__getitem__((...,) + (None,) * pad_dims)
+                mins = self.t_min.to(device=x.device).__getitem__((...,) + (None,) * pad_dims)
+                maxs = self.t_max.to(device=x.device).__getitem__((...,) + (None,) * pad_dims)
                 x_n = -1.0 + 2.0 * (x - mins) / (maxs - mins)
 
             # Replace NANs

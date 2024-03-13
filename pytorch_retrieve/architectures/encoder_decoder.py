@@ -483,6 +483,9 @@ class EncoderConfig:
             args = dct["block_factory_args"]
             args = [dict(arg) for arg in args]
             dct["block_factory_args"] = args
+        elif type(dct["block_factory_args"]) != dict:
+            args = dct["block_factory_args"]
+            dct["block_factory_args"] = dict(args)
         return dct
 
     def compile(self) -> nn.Module:
@@ -627,6 +630,9 @@ class DecoderConfig:
             args = dct["block_factory_args"]
             args = [dict(arg) for arg in args]
             dct["block_factory_args"] = args
+        elif type(dct["block_factory_args"]) != dict:
+            args = dct["block_factory_args"]
+            dct["block_factory_args"] = dict(args)
         dct["channels"] = dct["channels"][1:]
         return dct
 
