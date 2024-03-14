@@ -263,6 +263,6 @@ def test_load_input_modules(
 
     model_loaded = load_model(tmp_path / "model.pt")
 
-    assert (model_loaded.stems["x"][0].p_min == model.stems["x"][0].p_min).all()
-    assert (model_loaded.stems["x"][0].p_max == model.stems["x"][0].p_max).all()
-    assert (model_loaded.stems["x"][0].p_mean == model.stems["x"][0].p_mean).all()
+    assert (model_loaded.stems["x"][0].t_min == model.stems["x"][0].t_min).all()
+    assert (model_loaded.stems["x"][0].t_max == model.stems["x"][0].t_max).all()
+    assert (model_loaded.stems["x"][0].t_mean == model.stems["x"][0].t_mean).all()
