@@ -134,7 +134,8 @@ class InputLayer(StatsTracker, nn.Module):
             "mean": self.t_mean,
             "std_dev": self.t_std_dev,
             "min": self.t_min,
-            "max": self.t_max
+            "max": self.t_max,
+            "finalized": self.finalized
         }
 
     def set_extra_state(self, state) -> None:
@@ -148,6 +149,7 @@ class InputLayer(StatsTracker, nn.Module):
         self.t_std_dev.set_(state["std_dev"])
         self.t_min.set_(state["min"])
         self.t_max.set_(state["max"])
+        self.finalized.set_(state["finalized"])
 
     def set_extra_state(self, state) -> None:
         """
