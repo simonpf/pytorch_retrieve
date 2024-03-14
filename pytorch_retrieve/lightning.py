@@ -533,6 +533,9 @@ class LightningRetrieval(L.LightningModule):
         self.log("Validation loss", tot_loss)
 
     def on_validation_epoch_end(self):
+        """
+        Log metrics and learning rate at the end of the validation epoch.
+        """
         for output_name, metrics in self.metrics.items():
             for metric in metrics:
                 metric = metric.to(self.device)
@@ -543,6 +546,8 @@ class LightningRetrieval(L.LightningModule):
             "Learning rate",
             self.trainer.optimizers[0].param_groups[0]["lr"],
         )
+
+
 
     def configure_optimizers(self):
         if self.training_schedule is None:
@@ -610,6 +615,13 @@ class LightningRetrieval(L.LightningModule):
 
     def on_load_checkpoint(self, checkpoint) -> None:
         """
-        Hook used load store 'stage' attribute from checkpoint.
+        Sets the 'prev_optim' attribute to avoid issues when training with 'reuse_optimizer' option.
         """
         self.stage = checkpoint["stage"]
+        curr_config = copy.copy(self.current_training_config)
+        curr_config.reuse_optimizer = False
+        self.prev_optim, _ = curr_config.get_optimizer_and_scheduler(
+            self.stage_name,
+            self,
+            previous_optimizer=self.prev_optim
+        )

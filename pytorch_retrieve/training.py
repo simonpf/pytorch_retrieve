@@ -136,7 +136,7 @@ class TrainingConfigBase:
         if self.reuse_optimizer:
             if previous_optimizer is None:
                 raise RuntimeError(
-                    f"Training stage '{self.name}' has 'reuse_optimizer' "
+                    f"Training stage '{name}' has 'reuse_optimizer' "
                     "set to 'True' but no previous optimizer is available."
                 )
             optimizer = previous_optimizer
