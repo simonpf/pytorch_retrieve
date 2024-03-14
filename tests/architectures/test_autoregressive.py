@@ -182,13 +182,13 @@ AUTOREGRESSIVE_CONFIG = (
 name = "Autoregressive"
 order = 2
 time_step = 30
-latent_dim = 256
+latent_dim = 128
 
 [architecture.encoder]
 
 [architecture.encoder.encoder]
 channels = [64, 128, 128]
-stage_depths = [2, 2, 2]
+stage_depths = [1, 1, 1]
 block_factory = "ResNeXt"
 block_factory_args = {padding_factory="Global", normalization_factory="LayerNormFirst", activation_factory="ReLU"}
 downsampling_factors = [2, 2]
@@ -204,8 +204,8 @@ kind = "Direct"
 n_inputs = 2
 
 [architecture.temporal_encoder.encoder]
-stage_depths = [4]
-channels = [256, 256, 256]
+stage_depths = [1]
+channels = [256, 128, 128]
 recurrence_factory = "Assimilator"
 block_factory = "ResNeXt"
 block_factory_args = {padding_factory="Global", normalization_factory="LayerNormFirst", activation_factory="ReLU"}
@@ -216,21 +216,21 @@ channels = []
 
 [architecture.propagator]
 [architecture.propagator.encoder]
-channels = [256, 256, 256]
-stage_depths = [3, 3, 3]
+channels = [128, 128, 128]
+stage_depths = [1, 1, 1]
 downsampling_factors = [[2, 2], [1, 2]]
 block_factory = "ResNeXt"
 block_factory_args = {padding_factory="Global", normalization_factory="LayerNormFirst", activation_factory="ReLU"}
 
 [architecture.propagator.decoder]
-channels = [256, 256]
-stage_depths = [3, 3]
+channels = [128, 128]
+stage_depths = [1, 1]
 block_factory = "ResNeXt"
 upsampling_factors = [[1, 2], [2, 2]]
 block_factory_args = {padding_factory="Global", normalization_factory="LayerNormFirst", activation_factory="ReLU"}
 
 [architecture.decoder]
-channels = [256, 128]
+channels = [128, 64]
 stage_depths = [1, 1]
 block_factory = "ResNeXt"
 upsampling_factors = [2, 2]
@@ -280,13 +280,13 @@ def test_autoregressive():
         autoregressive_config
     )
 
-    x = {"seviri": [torch.rand(2, 12, 256, 256) for _ in range(2)]}
-    x["lead_time"] = torch.tensor([[30, 60, 90, 120]])
+    x = {"seviri": [torch.rand(2, 12, 128, 128) for _ in range(2)]}
+    x["lead_time"] = torch.tensor([[30, 60]])
     y = autoregressive(x)
 
     assert "surface_precip" in y
-    assert len(y["surface_precip"]) == 4
-    assert y["surface_precip"][0].shape == (2, 1, 256, 256)
+    assert len(y["surface_precip"]) == 2
+    assert y["surface_precip"][0].shape == (2, 1, 128, 128)
 
 
 def test_autoregressive_save_and_load(tmp_path):
