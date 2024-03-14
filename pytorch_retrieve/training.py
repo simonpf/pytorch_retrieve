@@ -105,7 +105,7 @@ class TrainingConfigBase:
             dataset,
             worker_init_fn=worker_init_fn,
             batch_size=self.batch_size,
-            num_workers=8,
+            num_workers=self.n_data_loader_workers,
             pin_memory=True,
         )
         return data_loader
