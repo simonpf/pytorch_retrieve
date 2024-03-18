@@ -460,7 +460,10 @@ def run_training(
             weight_path = Path(training_config.load_weights)
             if weight_path.exists():
                 data = torch.load(weight_path)
-                module.model.load_state_dict(data["state_dict"])
+                state = data["state_dict"]
+                if weight_path.suffix == ".ckpt":
+                    state = {key[6:]: val for key, val in state.items()}
+                module.model.load_state_dict(state)
             else:
                 LOGGER.error(
                     "Path provided as 'load_weights' argument does not point "

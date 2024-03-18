@@ -22,8 +22,8 @@ MODEL_CONFIG = """
 name = "MLP"
 
 [architecture.body]
-hidden_channels = 128
-n_layers = 4
+hidden_channels = 64
+n_layers = 2
 activation_factory = "GELU"
 normalization_factory = "LayerNorm"
 
@@ -145,7 +145,6 @@ def test_training(
     model = load_and_compile_model(model_config_file)
     schedule = parse_training_config(read_config_file(training_config_file))
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
-    module.current_training_config
     run_training(tmp_path, module, compute_config=cpu_compute_config)
 
     # Assert that checkpoint files are created.
@@ -165,7 +164,6 @@ def test_training_encoder_decoder(
     model = load_and_compile_model(encoder_decoder_model_config_file)
     schedule = parse_training_config(read_config_file(encoder_decoder_training_config_file))
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
-    module.current_training_config
     run_training(tmp_path, module, compute_config=cpu_compute_config)
 
     # Assert that checkpoint files are created.
@@ -186,14 +184,17 @@ def test_load_weights(
     model = load_and_compile_model(model_config_file)
     schedule = parse_training_config(read_config_file(training_config_file))
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
-    module.current_training_config
     run_training(tmp_path, module, compute_config=cpu_compute_config)
 
     schedule["warm_up"].load_weights = str(tmp_path / "retrieval_model.pt")
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
-    module.current_training_config
     run_training(tmp_path, module, compute_config=cpu_compute_config)
 
     # Assert that checkpoint files are created.
     ckpts = list((tmp_path / "checkpoints").glob("*.ckpt"))
     assert len(ckpts) > 0
+
+    # Check loading weights from checkpoint.
+    schedule["warm_up"].load_weights = str(ckpts[0])
+    module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+    run_training(tmp_path, module, compute_config=cpu_compute_config)
