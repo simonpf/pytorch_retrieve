@@ -151,18 +151,6 @@ class InputLayer(StatsTracker, nn.Module):
         self.t_max.set_(state["max"])
         self.finalized.set_(state["finalized"])
 
-    def set_extra_state(self, state) -> None:
-        """
-        Set mean, std. dev., min. and max tensors stored in layer.
-
-        Args:
-             state: A dictionary containing the extra state obtained from 'get_extra_state'.
-        """
-        self.t_mean.set_(state["mean"])
-        self.t_std_dev.set_(state["std_dev"])
-        self.t_min.set_(state["min"])
-        self.t_max.set_(state["max"])
-
     def _load_stats_tensors(self, dataset: xr.Dataset) -> None:
         """
         Load tensors with input data statistics from dataset.
