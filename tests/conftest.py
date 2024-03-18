@@ -88,9 +88,32 @@ def mlp_training_schedule():
 
 
 ENCODER_DECODER_CONFIG = """
+
 [architecture]
 name = "EncoderDecoder"
-preset = "unet"
+
+[architecture.stem]
+depth = 1
+activation_factory = "ReLU"
+block_factory = "BasicConv"
+out_channels = 16
+
+[architecture.encoder]
+channels = [16, 32]
+stage_depths = [2, 2]
+activation_factory = "ReLU"
+block_factory = "BasicConv"
+normalization_factory = "none"
+dowsampling_factory = "MaxPool"
+
+[architecture.decoder]
+channels = [16]
+stage_depths = [2]
+block_factory = "BasicConv"
+activation_factory = "ReLU"
+upsampling_factory = "ConvTranspose"
+skip_connections = true
+normalization_factory = "none"
 
 [input.x]
 n_features = 4

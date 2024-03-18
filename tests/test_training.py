@@ -54,7 +54,7 @@ training_dataset = "Synthetic1d"
 training_dataset_args = {"n_samples"=256}
 validation_dataset_args = {"n_samples"=128}
 n_epochs = 2
-batch_size = 8
+batch_size = 64
 optimizer = "SGD"
 optimizer_args = {"lr"= 1e-3}
 metrics = ["Bias", "CorrelationCoef"]

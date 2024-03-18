@@ -59,7 +59,7 @@ def test_correlation_coef():
 @pytest.mark.skipif(not HAS_MATPLOTLIB, reason="needs matplotlib")
 def test_plot_samples():
     """
-    Test the worst sample metric.
+    Test the plot sample metric.
     """
 
     metric = PlotSamples()
@@ -80,7 +80,7 @@ def test_plot_samples():
 @pytest.mark.skipif(not HAS_MATPLOTLIB, reason="needs matplotlib")
 def test_plot_samples_sequence():
     """
-    Test the worst sample metric.
+    Test the plot sample metric.
     """
     metric = PlotSamples()
     data_loader = data_loader_3d(1024, 8)
