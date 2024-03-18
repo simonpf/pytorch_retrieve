@@ -898,6 +898,39 @@ class SqueezeExcite(nn.Module):
         return x * self.gate(x_se)
 
 
+class PWSqueezeExcite(nn.Module):
+    """
+    Squeeze and excite module.
+    """
+    def __init__(
+            self,
+            in_channels: int,
+            ratio: float = 0.25,
+            activation_factory: Callable[[], nn.Module] = nn.ReLU,
+            gate_factory: Callable[[], nn.Module] = nn.Sigmoid
+    ):
+        """
+        Args:
+        in_channels: The number of incoming channels.
+            ratio: Reduction ratio
+            activat_factory: An activation factory to use to create the activation function used within
+                the SE block.
+            gate_factory: Function to use for the gatin.
+        """
+        super().__init__()
+        hidden_channels = int(ratio * in_channels)
+        self.conv_reduce = nn.Conv2d(in_channels, hidden_channels, 1, bias=True)
+        self.act = activation_factory()
+        self.conv_expand = nn.Conv2d(hidden_channels, in_channels, 1, bias=True)
+        self.gate = gate_factory()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x_se = self.conv_reduce(x)
+        x_se = self.act(x_se)
+        x_se = self.conv_expand(x_se)
+        return x * self.gate(x_se)
+
+
 class InvertedBottleneckBlock(nn.Module, ParamCount):
     """
     Inverted-bottleneck block is used in MobileNet and Efficient net where it is referred
@@ -995,7 +1028,7 @@ class InvertedBottleneckBlock(nn.Module, ParamCount):
 
         if excitation_ratio > 0.0:
             blocks.append(
-                SqueezeExcite(
+                PWSqueezeExcite(
                     hidden_channels,
                     excitation_ratio,
                     activation_factory
@@ -1119,6 +1152,39 @@ class InvertedBottleneck:
             anti_aliasing=self.anti_aliasing,
             fused=self.fused
         )
+
+
+class PWSqueezeExcite3D(nn.Module):
+    """
+    3D pointwise squeeze and excite module.
+    """
+    def __init__(
+            self,
+            in_channels: int,
+            ratio: float = 0.25,
+            activation_factory: Callable[[], nn.Module] = nn.ReLU,
+            gate_factory: Callable[[], nn.Module] = nn.Sigmoid
+    ):
+        """
+        Args:
+        in_channels: The number of incoming channels.
+            ratio: Reduction ratio
+            activat_factory: An activation factory to use to create the activation function used within
+                the SE block.
+            gate_factory: Function to use for the gatin.
+        """
+        super().__init__()
+        hidden_channels = int(ratio * in_channels)
+        self.conv_reduce = nn.Conv3d(in_channels, hidden_channels, 1, bias=True)
+        self.act = activation_factory()
+        self.conv_expand = nn.Conv3d(hidden_channels, in_channels, 1, bias=True)
+        self.gate = gate_factory()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x_se = self.conv_reduce(x)
+        x_se = self.act(x_se)
+        x_se = self.conv_expand(x_se)
+        return x * self.gate(x_se)
 
 
 class InvertedBottleneck2Plus1Block(nn.Module, ParamCount):
@@ -1274,6 +1340,15 @@ class InvertedBottleneck2Plus1Block(nn.Module, ParamCount):
                     normalization_factory(hidden_channels),
                     act
                 ]
+
+        if excitation_ratio > 0.0:
+            blocks.append(
+                PWSqueezeExcite3D(
+                    hidden_channels,
+                    excitation_ratio,
+                    activation_factory
+                )
+            )
 
         blocks += [
             nn.Conv3d(hidden_channels, out_channels, kernel_size=1),

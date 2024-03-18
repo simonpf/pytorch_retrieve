@@ -179,13 +179,12 @@ def test_inverted_bottleneck_2p1():
     # Test squeeze-and-excite block
     factory = InvertedBottleneck2Plus1(
         expansion_factor=6,
-        excitation_ratio=0.25,
         anti_aliasing=True
 
     )
     module_2 = factory(
         64, 64, downsample=(2, 2, 1), expansion_factor=6,
-        excitation_ratio=0.25, anti_aliasing=True
+        anti_aliasing=True
     )
     assert module_2.n_params > module.n_params
 
@@ -195,16 +194,31 @@ def test_inverted_bottleneck_2p1():
     # Test fused block
     factory = InvertedBottleneck2Plus1(
         expansion_factor=6,
-        excitation_ratio=0.25,
         anti_aliasing=True,
         fused=True
 
     )
     module_3 = factory(
-        64, 64, downsample=(1, 2, 1), expansion_factor=6,
-        excitation_ratio=0.25, anti_aliasing=True
+        64, 64, downsample=(1, 2, 1),
+        expansion_factor=6,
+        excitation_ratio=0.25,
+        anti_aliasing=True
     )
     assert module_3.n_params > module_2.n_params
 
     y = module_3(x)
+    assert y.shape == (1, 64, 8, 16, 32)
+
+    # Test with squeeze-and-excite block.
+    factory = InvertedBottleneck2Plus1(
+        expansion_factor=6,
+        excitation_ratio=0.25,
+    )
+    module_4 = factory(
+        64, 64, downsample=(1, 2, 1), expansion_factor=6,
+        excitation_ratio=0.25, anti_aliasing=True
+    )
+    assert module_4.n_params > module_2.n_params
+
+    y = module_4(x)
     assert y.shape == (1, 64, 8, 16, 32)
