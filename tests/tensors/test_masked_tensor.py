@@ -330,12 +330,12 @@ def test_any_all():
     """
     Test any and all operations.
     """
-    tensor_1 = torch.rand(1, 2, 3)
+    tensor_1 = torch.rand(4, 4, 4)
     tensor_1 = tensor_1 > 0.5
     masked_tensor_1 = MaskedTensor(tensor_1, mask=tensor_1)
 
     assert (masked_tensor_1 <= 0.5).all()
-    assert not (masked_tensor_1 > 0.5).all()
+    assert not (masked_tensor_1 > 0.5).any()
 
 
 def test_transpose():
@@ -394,3 +394,86 @@ def test_tensor_ops():
     masked_tensor_8 = torch.stack([masked_tensor_7, masked_tensor_7])
     assert masked_tensor_8.shape == (2, 50, 5)
     assert masked_tensor_8.mask.shape == (2, 50, 5)
+
+
+def test_type_as():
+    """
+    Test type conversion of masked tensors.
+    """
+    tensor = torch.rand(10, 10, 10)
+    mask = torch.rand(10, 10, 10) - 0.5 > 0
+    masked_tensor = MaskedTensor(tensor, mask=mask)
+    other = torch.rand(10, 10, 10).to(dtype=torch.int64)
+    masked_tensor = masked_tensor.type_as(other)
+    assert masked_tensor.dtype == torch.int64
+
+
+def test_setitem():
+    """
+    Test type conversion of masked tensors.
+    """
+    tensor = torch.rand(10, 10, 10)
+    mask = torch.rand(10, 10, 10) - 0.5 > 0
+    masked_tensor = MaskedTensor(tensor, mask=mask)
+    masked_tensor[0] = 1.0
+    assert torch.all(torch.isclose(masked_tensor[0], torch.tensor(1.0)))
+
+
+def test_relu():
+    """
+    Test ReLU function.
+    """
+    tensor = torch.rand(10, 10, 10)
+    mask = torch.rand(10, 10, 10) - 0.5 > 0
+    tensor[mask] = torch.nan
+    masked_tensor = nn.functional.relu(MaskedTensor(tensor, mask=mask))
+
+    assert not (masked_tensor.base >= 0.0).all()
+    assert (masked_tensor >= 0.0).all()
+
+
+def test_binary_cross_entropy():
+    """
+    Ensure that masked values are ignored in calculation of masked binary
+    cross entropy.
+    """
+    tensor = 100 * torch.rand(10, 10, 10)
+    mask = torch.rand(10, 10, 10) - 0.5 > 0
+    tensor[mask] = -10.0
+    masked_tensor = MaskedTensor(tensor, mask=mask)
+
+    target = torch.ones_like(tensor)
+
+    loss = nn.functional.binary_cross_entropy_with_logits(
+        tensor[~mask], target[~mask]
+    )
+    loss_masked = nn.functional.binary_cross_entropy_with_logits(
+        masked_tensor, target
+    )
+
+    assert torch.isclose(loss, loss_masked)
+
+
+def test_cross_entropy():
+    """
+    Ensure that masked values are ignored in calculation of masked
+    cross entropy.
+    """
+    tensor = 100 * torch.rand(100, 3, 100)
+    mask = torch.rand(100, 3, 100) - 0.5 > 0
+    tensor[mask] = -10.0
+    masked_tensor = MaskedTensor(tensor, mask=mask)
+
+    target = 2 * torch.ones_like(tensor[:, 0], dtype=torch.int64)
+
+    target_mask = mask.any(1)
+
+    loss = nn.functional.cross_entropy(
+        tensor.transpose(1, -1)[~target_mask],
+        target[~target_mask]
+    )
+    loss_masked = nn.functional.cross_entropy(
+        masked_tensor, target
+    )
+
+    assert torch.isclose(loss, loss_masked)
