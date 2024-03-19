@@ -122,42 +122,20 @@ class MaskedTensor(torch.Tensor):
         return pow(self, exp)
 
 
-def extract_mask(arg):
-    if isinstance(arg, (tuple, list, set)):
-        return [extract_mask(nested) for nested in arg]
-    elif isinstance(arg, dict):
-        return {key: extract_mask(nested) for key, nested in arg.items()}
-    elif isinstance(arg, MaskedTensor):
-        return arg.mask
-    elif isinstance(arg, torch.Tensor):
-        return torch.zeros_like(arg, dtype=bool, device=arg.device)
-    elif isinstance(arg, float):
-        return torch.zeros(1, dtype=bool)
-    return arg
+def get_base(tensor: torch.Tensor) -> torch.Tensor:
+    """
+    Get raw data tensor from a tensor.
 
+    This function extract the underlying data tensor 'base' from a
+    MaskedTensor or simply returns the given tensor if it is not
+    a MaskedTensor.
 
-def strip_type(arg):
-    if isinstance(arg, (tuple, list, set)):
-        return [strip_type(nested) for nested in arg]
-    elif isinstance(arg, dict):
-        return {key: strip_type(nested) for key, nested in arg.items()}
-    elif isinstance(arg, MaskedTensor):
-        return torch.Tensor(arg)
-    return arg
+    Args:
+         tensor: The tensor from which to extract the underlying data tensor.
 
-
-def implements(torch_function):
-    """Register a torch function override for ScalarTensor"""
-
-    def decorator(func):
-        functools.update_wrapper(func, torch_function)
-        HANDLED_FUNCTIONS[torch_function] = func
-        return func
-
-    return decorator
-
-
-def get_base(tensor):
+    Return:
+         A torch.Tensor object containing the raw data in 'tensor'.
+    """
     if isinstance(tensor, MaskedTensor):
         return tensor.base
     return tensor
@@ -719,18 +697,24 @@ def tlt(inpt, other, out=None):
 @implements(torch.Tensor.type_as)
 def type_as(inpt, other):
     """
-    Element-wise comparison of tensor
+    Implements function of the same name.
     """
     return inpt.to(dtype=other.dtype)
 
 
 @implements(torch.Tensor.__setitem__)
 def setitem(inpt, *args, **kwargs):
+    """
+    Setting of tensor content.
+    """
     get_base(inpt).__setitem__(*[get_base(arg) for arg in args], **kwargs)
 
 
 @implements(torch.nn.functional.relu)
 def relu(inpt, **kwargs):
+    """
+    Application of ReLU activation function.
+    """
     return MaskedTensor(
         torch.nn.functional.relu(inpt.base, **kwargs),
         mask=inpt.mask,
@@ -739,26 +723,40 @@ def relu(inpt, **kwargs):
 
 @implements(torch.pow)
 def pow(inpt, exp, *args, out=None):
+    """
+    Pow function.
+    """
     return MaskedTensor(torch.pow(inpt.base, exp, *args, out=out), mask=inpt.mask)
-
 
 @implements(torch.Tensor.pow)
 def tpow(inpt, exp, *args, out=None):
+    """
+    Pow function.
+    """
     return pow(inpt, exp, *args, out=out)
 
 
 @implements(torch._C._TensorBase.pow)
 def tpow(inpt, exp, *args, out=None):
+    """
+    Pow function.
+    """
     return pow(inpt, exp, *args, out=out)
 
 
 @implements(torch.Tensor.pow_)
 def ipow(inpt, exp, *args):
+    """
+    Pow function.
+    """
     return pow(inpt, exp, *args, out=inpt.base)
 
 
 @implements(torch.maximum)
 def maximum(inpt, other, *args):
+    """
+    Element-wise maximum.
+    """
     min_val = torch.finfo(inpt.dtype).min
 
     if isinstance(inpt, MaskedTensor):
@@ -774,11 +772,17 @@ def maximum(inpt, other, *args):
 
 @implements(torch.Tensor.maximum)
 def tmaximum(inpt, exp, *args):
+    """
+    Member function version of maximum.
+    """
     return maximum(inpt, exp, *args)
 
 
 @implements(torch.max)
 def max(inpt, dim, keepdim=False, *args, out=None):
+    """
+    Max function.
+    """
     min_val = torch.finfo(inpt.dtype).min
     inpt = torch.where(inpt.mask, min_val, inpt.base)
     if dim is None:
@@ -793,11 +797,17 @@ def max(inpt, dim, keepdim=False, *args, out=None):
 
 @implements(torch.Tensor.max)
 def tmax(inpt, dim=None, keepdim=False, *args, out=None):
+    """
+    Member-function version of max function.
+    """
     return torch.max(inpt, dim, keepdim=False, *args, out=None)
 
 
 @implements(torch.minimum)
 def minimum(inpt, other, *args):
+    """
+    Element-wise minimum.
+    """
     max_val = torch.finfo(inpt.dtype).max
 
     if isinstance(inpt, MaskedTensor):
@@ -813,11 +823,17 @@ def minimum(inpt, other, *args):
 
 @implements(torch.Tensor.minimum)
 def tminimum(inpt, exp, *args):
+    """
+    Member function version of minimum.
+    """
     return minimum(inpt, exp, *args)
 
 
 @implements(torch.min)
 def min(inpt, dim, keepdim=False, *args, out=None):
+    """
+    Min function.
+    """
     max_val = torch.finfo(inpt.dtype).max
     inpt = torch.where(inpt.mask, max_val, inpt.base)
     if dim is None:
@@ -832,11 +848,17 @@ def min(inpt, dim, keepdim=False, *args, out=None):
 
 @implements(torch.Tensor.min)
 def tmin(inpt, dim=None, keepdim=False, *args, out=None):
+    """
+    Member function version of min function.
+    """
     return torch.min(inpt, dim, keepdim=False, *args, out=None)
 
 
 @implements(torch.select)
 def select(inpt, dim, index):
+    """
+    Select function.
+    """
     return MaskedTensor(
         torch.select(inpt.base, dim, index), mask=torch.select(inpt.mask, dim, index)
     )
@@ -844,6 +866,9 @@ def select(inpt, dim, index):
 
 @implements(torch.all)
 def all(inpt, dim, keepdim=False, *args, out=None):
+    """
+    All function.
+    """
     if dim is None:
         return inpt.base[~inpt.mask].all()
     res = (inpt.base | inpt.mask).all(dim=dim, keepdim=keepdim, *args, out=out)
@@ -853,11 +878,17 @@ def all(inpt, dim, keepdim=False, *args, out=None):
 
 @implements(torch.Tensor.all)
 def all(inpt, dim=None, keepdim=False, *args):
+    """
+    Member-function version of all function.
+    """
     return torch.all(inpt, dim=dim, keepdim=keepdim, *args)
 
 
 @implements(torch.any)
 def any(inpt, dim, keepdim=False, *args, out=None):
+    """
+    All function.
+    """
     if dim is None:
         return inpt.base[~inpt.mask].any()
     res = (inpt.base & ~inpt.mask).any(dim=dim, keepdim=keepdim, *args, out=out)
@@ -866,12 +897,18 @@ def any(inpt, dim, keepdim=False, *args, out=None):
 
 
 @implements(torch.Tensor.any)
-def any(inpt, dim=None, keepdim=False, *args):
+def tany(inpt, dim=None, keepdim=False, *args):
+    """
+    Member-function version of all function.
+    """
     return torch.any(inpt, dim=dim, keepdim=keepdim, *args)
 
 
 @implements(torch.transpose)
 def transpose(inpt, dim1, dim2):
+    """
+    Transpose function.
+    """
     return MaskedTensor(
         torch.transpose(inpt.base, dim1, dim2),
         mask=torch.transpose(inpt.mask, dim1, dim2),
@@ -880,4 +917,48 @@ def transpose(inpt, dim1, dim2):
 
 @implements(torch.Tensor.transpose)
 def ttranspose(inpt, dim1, dim2):
+    """
+    Member function version of transpose function.
+    """
     return transpose(inpt, dim1, dim2)
+
+
+@implements(torch.nn.functional.binary_cross_entropy_with_logits)
+def binary_cross_entropy(pred, target, *args, **kwargs):
+    """
+    Masked binary cross entropy.
+    """
+    mask = ~combine_masks(pred, target)
+    return torch.nn.functional.binary_cross_entropy_with_logits(
+        get_base(pred)[mask],
+        get_base(target)[mask],
+        *args,
+        **kwargs
+    )
+
+
+@implements(torch.nn.functional.cross_entropy)
+def cross_entropy(pred, target, *args, **kwargs):
+    """
+    Masked binary cross entropy.
+    """
+    if isinstance(pred, MaskedTensor):
+        mask = get_mask(pred).any(1)
+    else:
+        mask = None
+    if isinstance(target, MaskedTensor):
+        if mask is None:
+            mask = get_mask(target)
+        else:
+            mask = mask + get_mask(target)
+
+
+    pred = pred.transpose(-1, 1)
+
+    valid = ~mask
+    return torch.nn.functional.cross_entropy(
+        get_base(pred)[valid],
+        get_base(target)[valid],
+        *args,
+        **kwargs
+    )
