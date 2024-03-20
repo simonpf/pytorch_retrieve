@@ -18,4 +18,5 @@ Provides specialized tensor classes used by ``pytorch_retrieve``.
 """
 from .mean_tensor import MeanTensor
 from .quantile_tensor import QuantileTensor
+from .probability_tensor import ProbabilityTensor
 from .masked_tensor import MaskedTensor

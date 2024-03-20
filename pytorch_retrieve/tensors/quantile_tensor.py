@@ -33,8 +33,8 @@ def select(tensor: torch.Tensor, dim: int, ind: Union[int, slice]):
 
 class QuantileTensor(torch.Tensor):
     """
-    A QuantileTensor is a tensor that holds predictions that represent a tensor
-    of distributions using a squence of quantiles.
+    A QuantileTensor is a tensor that holds probabilitis estimates
+    of scalar quantities represented using a squence of quantiles.
     """
 
     def __new__(cls, tensor, tau, *args, quantile_dim=1, **kwargs):
@@ -159,33 +159,16 @@ class QuantileTensor(torch.Tensor):
 
     def pdf(self):
         """
-        Calculates the cumulative distribution functions (PDF) of the
+        Calculate the probability distribution function (PDF) of the
         distributions represented by this quantile tensor.
 
         This method  extends the quantiles in 'y_pred' to  0 and 1 by
         extending the first and last segments with a 50% reduction in the
         slope.
 
-        Args:
-            y_pred: Array containing a range of predicted quantiles. The array
-                is expected to contain the quantiles along the axis given by
-                ``quantile_dim.``
-            quantiles: Array containing quantile fraction corresponding to the
-                the predicted quantiles.
-            quantile_dim: The index of the axis f the ``y_pred`` array, along
-                which the quantiles are found.
-
         Returns:
             Tuple ``(x_pdf, y_pdf)`` of x and corresponding y-values of the PDF
             corresponding to quantiles given by ``y_pred``.
-
-        Raises:
-
-            InvalidArrayTypeException: When the data is provided neither as
-                numpy array nor as torch tensor.
-
-            InvalidDimensionException: When the provided predicted quantiles do
-                not match the provided number of quantiles.
         """
 
         qdim = self.quantile_dim
@@ -239,9 +222,18 @@ class QuantileTensor(torch.Tensor):
         x_cdf, y_cdf = self.cdf()
         return torch.trapz(x_cdf, y_cdf, dim=self.quantile_dim)
 
-    def probability_less_than(self, thresh):
+    def probability_less_than(self, thresh: float) -> torch.Tensor:
         """
-        A mean tensor alone is not a probabilistic estimate.
+        Calculate the probabilities that predicted values are less than a given
+        threshold.
+
+        Args:
+             thresh: The threshold value.
+
+        Return:
+             A tensor with one less dimension that this probability tensor
+             containing the probabilities that the predicted values are less
+             than 'thresh'.
         """
         x_cdf, y_cdf = self.cdf()
 
@@ -269,9 +261,18 @@ class QuantileTensor(torch.Tensor):
 
         return prob
 
-    def probability_larger_than(self, thresh):
+    def probability_greater_than(self, thresh):
         """
-        A mean tensor alone is not a probabilistic estimate.
+        Calculate the probabilities that predicted values are greater than a given
+        threshold.
+
+        Args:
+             thresh: The threshold value.
+
+        Return:
+             A tensor with one less dimension that this probability tensor
+             containing the probabilities that the predicted values are greater
+             than 'thresh'.
         """
         return 1.0 - self.probability_less_than(thresh)
 

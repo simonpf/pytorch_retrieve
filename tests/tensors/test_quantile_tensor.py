@@ -379,7 +379,7 @@ def test_probability_less_than():
     assert np.all(np.isclose(p, 0.5 - 0.498, atol=0.01))
 
 
-def test_probability_larger_than():
+def test_probability_greater_than():
     tau = np.linspace(0, 1, 34)[1:-1]
     quantiles = torch.tensor(norm.ppf(tau))
 
@@ -390,5 +390,5 @@ def test_probability_larger_than():
 
     for thresh in [-3, -1, 0, 1, 3]:
         p_less = quantile_tensor.probability_less_than(0.0)
-        p_larger = quantile_tensor.probability_larger_than(0.0)
-        assert np.all(np.isclose(p_less + p_larger, 1.0, rtol=0.01))
+        p_greater = quantile_tensor.probability_greater_than(0.0)
+        assert np.all(np.isclose(p_less + p_greater, 1.0, rtol=0.01))

@@ -2,7 +2,7 @@
 pytorch_retrieve.tensors.mean_tensor
 ====================================
 
-Provides the MeanTensor class, which is used to represent tensor containing
+Provides the MeanTensor class, which is used to represent tensors containing
 predictions of the posterior mean.
 """
 from collections.abc import Sequence, Iterable, Mapping
@@ -15,10 +15,8 @@ HANDLED_FUNCTIONS = {}
 
 def implements(torch_function):
     """
-    Register a torch function override for ScalarTensor
-
+    Register a torch function override for MeanTensor.
     """
-
     def decorator(func):
         functools.update_wrapper(func, torch_function)
         HANDLED_FUNCTIONS[torch_function] = func

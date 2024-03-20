@@ -962,3 +962,14 @@ def cross_entropy(pred, target, *args, **kwargs):
         *args,
         **kwargs
     )
+
+
+@implements(torch.bucketize)
+def bucketize(inpt, boundary, *args, **kwargs):
+    """
+    Masked binary cross entropy.
+    """
+    return MaskedTensor(
+        torch.bucketize(inpt.base, boundary, *args, **kwargs),
+        mask=inpt.mask
+    )
