@@ -18,6 +18,7 @@ block_factory_args = [
     {expansion_factor=6, excitation_ratio=0.25, anti_aliasing=true},
     {expansion_factor=6, excitation_ratio=0.25, anti_aliasing=true},
 ]
+aggregation_factory = "Linear3d"
 
 [decoder]
 channels = [160, 128, 64, 48, 24]
@@ -38,4 +39,5 @@ block_factory_args = [
     {expansion_factor=4, excitation_ratio=0.0, fused=true, anti_aliasing=true},
     {expansion_factor=1, excitation_ratio=0.0, fused=true, anti_aliasing=true},
 ]
+aggregation_factory = "Linear3d"
 skip_connections=true
