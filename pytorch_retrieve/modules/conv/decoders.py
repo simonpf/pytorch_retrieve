@@ -11,6 +11,7 @@ import numpy as np
 import torch
 from torch import nn
 
+from .utils import Scale
 from pytorch_retrieve.modules.utils import ParamCount
 from pytorch_retrieve.modules.conv.encoders import DEFAULT_BLOCK_FACTORY
 from pytorch_retrieve.modules.conv.stages import SequentialStage
@@ -148,21 +149,24 @@ class Decoder(nn.Module, ParamCount):
 
 
         if upsampling_factors is None:
-            upsampling_factors = [2] * n_stages
+            upsampling_factors = [(2, 2)] * n_stages
         if self.n_stages != len(upsampling_factors):
             raise ValueError(
                 "The number of upsampling factors  must equal to the "
                 "number of stages."
             )
+
+        upsampling_factors = [
+            f_u if isinstance(f_u, (tuple, list)) else (f_u, f_u)
+            for f_u in upsampling_factors
+        ]
         self.upsampling_factors = upsampling_factors
 
         if base_scale is None:
             if isinstance(skip_connections, dict):
                 base_scale = max(skip_connections.keys())
             else:
-                base_scale = np.prod(
-                    [fac if isinstance(fac, int) else max(fac) for fac in upsampling_factors]
-                )
+                base_scale = Scale(tuple(np.prod(np.array(upsampling_factors), 0)))
         self.base_scale = base_scale
 
         self.has_skips = True
@@ -183,9 +187,7 @@ class Decoder(nn.Module, ParamCount):
             zip(stage_depths, channels[1:])
         ):
             f_up = upsampling_factors[index]
-            if isinstance(f_up, (list, tuple)):
-                f_up = max(f_up)
-            scale /= f_up
+            scale //= f_up
 
             self.upsamplers.append(
                 upsampler_factory(
@@ -199,7 +201,12 @@ class Decoder(nn.Module, ParamCount):
             channels_combined = out_channels + skip_chans
 
             self.stages.append(
-                stage_factories[index](channels_combined, out_channels, n_blocks, scale=scale)
+                stage_factories[index](
+                    channels_combined,
+                    out_channels,
+                    n_blocks,
+                    scale=scale
+                )
             )
             in_channels = out_channels
 
@@ -233,9 +240,7 @@ class Decoder(nn.Module, ParamCount):
 
             for ind, (up, stage) in enumerate(zip(self.upsamplers, stages)):
                 f_up = self.upsampling_factors[ind]
-                if isinstance(f_up, (list, tuple)):
-                    f_up = max(f_up)
-                scale /= f_up
+                scale //= f_up
                 if scale in self.skip_connections and scale != prev_scale:
                     y = stage(cat(x[scale], forward(up, y)))
                 else:

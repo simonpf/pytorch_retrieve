@@ -1,5 +1,6 @@
 import torch
 
+from pytorch_retrieve.modules.conv.utils import Scale
 from pytorch_retrieve.modules.conv.encoders import Encoder
 from pytorch_retrieve.modules.conv.decoders import Decoder
 from pytorch_retrieve.modules.conv.blocks import BasicConv
@@ -43,7 +44,7 @@ def test_assimilation_encoder_decoder():
     y = encoder(x)
 
     assert len(y) == 4
-    assert y[8][0].shape == (1, 64, 8, 8)
+    assert y[Scale(8)][0].shape == (1, 64, 8, 8)
 
     decoder = Decoder(
         channels[::-1],

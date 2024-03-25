@@ -85,6 +85,6 @@ class ConvTranspose:
     def __call__(
             self, in_channels: int, out_channels: int, factor: Union[float, Tuple[float]]
     ) -> nn.Module:
-        stride = int(factor)
+        stride = factor
         kernel_size = stride
         return nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride=stride)

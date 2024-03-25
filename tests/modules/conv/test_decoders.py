@@ -3,6 +3,7 @@ Tests for the pytorch_retrieve.modules.conv.decoders module.
 """
 import torch
 
+
 from pytorch_retrieve.modules.conv import blocks
 from pytorch_retrieve.modules.conv.encoders import Encoder
 from pytorch_retrieve.modules.conv.decoders import Decoder

@@ -12,6 +12,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+import numpy as np
 import torch
 from torch import nn
 
@@ -30,6 +31,7 @@ from pytorch_retrieve.modules.conv.encoders import (
     MultiInputSharedEncoder,
     MultiInputParallelEncoder,
 )
+from pytorch_retrieve.modules.conv.utils import Scale
 from pytorch_retrieve.modules.conv.decoders import Decoder
 from pytorch_retrieve.modules.activation import get_activation_factory
 from pytorch_retrieve.modules.normalization import get_normalization_factory
@@ -218,7 +220,7 @@ class StemConfig:
     """
     input_name: str
     in_channels: int
-    in_scale: int
+    in_scale: Tuple[int]
     kind: str
     out_channels: int
     depth: int = (0,)
@@ -247,7 +249,8 @@ class StemConfig:
             A StemConfig object holding the parsed configuration of this stem.
         """
         in_channels = input_config.n_features
-        in_scale = input_config.scale
+        in_scale = Scale(input_config.scale)
+
         depth = get_config_attr(
             "depth", int, config_dict, f"architecture.stem.{name}", 0
         )
@@ -285,11 +288,8 @@ class StemConfig:
 
     @property
     def out_scale(self):
-        if isinstance(self.downsampling, int):
-            scl = self.downsampling
-        else:
-            scl = max(self.downsampling)
-        return self.in_scale * scl
+        return self.in_scale * self.downsampling
+
 
     def to_config_dict(self) -> Dict[str, object]:
         """
@@ -351,10 +351,11 @@ class EncoderConfig:
 
     kind: str
     inputs: Dict[str, int]
+    input_channels: Dict[str, int]
     channels: List[int]
     stage_depths: List[int]
     downsampling_factors: List[int]
-    base_scale: int = 1
+    base_scale: Tuple[int] = Scale(1)
     block_factory: Union[str, List[str]] = "BasicConv"
     block_factory_args: Union[Dict[str, Any], List[Dict[str, Any]]] = None
     downsampling_factory: Optional[str] = None
@@ -381,9 +382,12 @@ class EncoderConfig:
         """
         input_scales = [config.out_scale for config in stem_configs.values()]
         inputs = {
-            name: (config.out_scale, config.out_channels)
-            for name, config in stem_configs.items()
+            name: config.out_scale for name, config in stem_configs.items()
         }
+        input_channels = {
+            name: config.out_channels for name, config in stem_configs.items()
+        }
+        tot_scales = np.prod(np.array(input_scales), -1)
         base_scale = min(input_scales)
 
         kind = get_config_attr("kind", str, config_dict, "architecture.encoder", "none")
@@ -428,6 +432,7 @@ class EncoderConfig:
         return EncoderConfig(
             kind=kind,
             inputs=inputs,
+            input_channels=input_channels,
             channels=channels,
             stage_depths=stage_depths,
             downsampling_factors=downsampling_factors,
@@ -453,14 +458,9 @@ class EncoderConfig:
         List of the scales corresponding to the output of all stages of the
         encoder.
         """
-        scale = self.base_scale
-        if not isinstance(scale, int):
-            scale = max(scale)
-
+        scale = Scale(self.base_scale)
         scales = [scale]
         for f_d in self.downsampling_factors:
-            if isinstance(f_d, list):
-                f_d = max(f_d)
             scale = scale * f_d
             scales.append(scale)
         return scales
@@ -514,6 +514,7 @@ class EncoderConfig:
             self.channels,
             self.stage_depths,
             base_scale=self.base_scale,
+            input_channels=self.input_channels,
             downsampling_factors=self.downsampling_factors,
             block_factory=block_factory,
             aggregator_factory=aggregation_factory,
@@ -604,11 +605,17 @@ class DecoderConfig:
         aggregation_factory = get_config_attr(
             "aggregation_factory", str, config_dict, "architecture.decoder", "Linear"
         )
+
+        skip_connections = encoder_config.skip_connections
+        skip_connections = {
+            key.scale: value for key, value in skip_connections.items()
+        }
+
         return DecoderConfig(
             channels=channels,
             stage_depths=stage_depths,
             upsampling_factors=upsampling_factors,
-            skip_connections=encoder_config.skip_connections,
+            skip_connections=skip_connections,
             block_factory=block_factory,
             block_factory_args=block_factory_args,
             upsampling_factory=upsampling_factory,
@@ -651,12 +658,17 @@ class DecoderConfig:
         upsampling_factory = get_upsampling_factory(self.upsampling_factory)()
         aggregation_factory = get_aggregation_factory(self.aggregation_factory)
 
+        skip_connections = self.skip_connections
+        skip_connections = {
+            Scale(key): value for key, value in skip_connections.items()
+        }
+
         return Decoder(
             channels=self.channels,
             stage_depths=self.stage_depths,
             upsampling_factors=self.upsampling_factors,
             block_factory=block_factory,
-            skip_connections=self.skip_connections,
+            skip_connections=skip_connections,
             upsampler_factory=upsampling_factory,
         )
 

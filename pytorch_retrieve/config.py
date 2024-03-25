@@ -142,13 +142,15 @@ class InputConfig:
     """
 
     n_features: int
-    scale: int = 1
+    scale: Tuple[int] = (1, 1)
     normalize: str = "none"
 
     @classmethod
     def parse(cls, name, cfg):
         n_features = get_config_attr("n_features", int, cfg, f"input.{name}")
-        scale = get_config_attr("scale", int, cfg, f"input.{name}", 1)
+        scale = get_config_attr("scale", None, cfg, f"input.{name}", 1)
+        if isinstance(scale, int):
+            scale = (scale, scale)
         normalize = get_config_attr("normalize", str, cfg, f"input.{name}", "none")
         return InputConfig(n_features, scale=scale, normalize=normalize)
 
