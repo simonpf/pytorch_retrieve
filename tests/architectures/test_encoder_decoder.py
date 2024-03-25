@@ -567,7 +567,7 @@ scale = 1
 
 [input.x_3]
 n_features = 32
-scale = 4
+scale = 2
 
 [output.precip]
 kind = "Mean"

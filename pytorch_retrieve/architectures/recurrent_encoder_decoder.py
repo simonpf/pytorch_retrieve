@@ -28,6 +28,7 @@ from pytorch_retrieve.modules.conv.encoders import (
     MultiInputSharedEncoder,
     MultiInputParallelEncoder,
 )
+from pytorch_retrieve.modules.conv.utils import Scale
 from pytorch_retrieve.modules.conv.decoders import Decoder
 from pytorch_retrieve.modules.conv.recurrent import GRU, Assimilator, forward
 from pytorch_retrieve.modules.activation import get_activation_factory
@@ -174,11 +175,9 @@ class EncoderConfig:
         List of the scales corresponding to the output of all stages of the
         encoder.
         """
-        scale = self.base_scale
+        scale = Scale(self.base_scale)
         scales = [scale]
         for f_d in self.downsampling_factors:
-            if not isinstance(f_d, int):
-                f_d = max(f_d)
             scale = scale * f_d
             scales.append(scale)
         return scales
@@ -281,8 +280,7 @@ class DecoderConfig:
         )
         default = [2] * len(stage_depths)
         upsampling_factors = get_config_attr(
-            "upsampling_factors", list, config_dict, "architecture.decoder", default
-        )
+            "upsampling_factors", list, config_dict, "architecture.decoder", default)
 
         block_factory = get_config_attr(
             "block_factory", str, config_dict, "architecture.decoder", "BasicConv"
@@ -306,11 +304,15 @@ class DecoderConfig:
         recurrence_factory_args = get_config_attr(
             "recurrence_factory_args", dict, config_dict, "architecture.decoder", {}
         )
+        skip_connections = encoder_config.skip_connections
+        skip_connections = {
+            key.scale: value for key, value in skip_connections.items()
+        }
         return DecoderConfig(
             channels=channels,
             stage_depths=stage_depths,
             upsampling_factors=upsampling_factors,
-            skip_connections=encoder_config.skip_connections,
+            skip_connections=skip_connections,
             block_factory=block_factory,
             block_factory_args=block_factory_args,
             upsampling_factory=upsampling_factory,
@@ -340,12 +342,17 @@ class DecoderConfig:
         upsampling_factory = get_upsampling_factory(self.upsampling_factory)()
         aggregation_factory = get_aggregation_factory(self.aggregation_factory)
 
+        skip_connections = self.skip_connections
+        skip_connections = {
+            Scale(key): value for key, value in skip_connections.items()
+        }
+
         return Decoder(
             channels=self.channels,
             stage_depths=self.stage_depths,
             upsampling_factors=self.upsampling_factors,
             block_factory=block_factory,
-            skip_connections=self.skip_connections,
+            skip_connections=skip_connections,
             upsampler_factory=upsampling_factory,
         )
 
