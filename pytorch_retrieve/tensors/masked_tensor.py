@@ -973,3 +973,11 @@ def bucketize(inpt, boundary, *args, **kwargs):
         torch.bucketize(inpt.base, boundary, *args, **kwargs),
         mask=inpt.mask
     )
+
+
+@implements(torch.Tensor.clone)
+def clone(inpt):
+    """
+    Member function version of maximum.
+    """
+    return MaskedTensor(inpt.base.clone(), mask=inpt.mask.clone())

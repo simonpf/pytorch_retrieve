@@ -477,3 +477,17 @@ def test_cross_entropy():
     )
 
     assert torch.isclose(loss, loss_masked)
+
+
+def test_clone_tensor():
+    """
+    Ensure that masks are cloned when masked tensors are cloned.
+    """
+    tensor = 100 * torch.rand(100, 3, 100)
+    mask = torch.rand(100, 3, 100) - 0.5 > 0
+    masked_tensor = MaskedTensor(tensor, mask=mask)
+    assert not masked_tensor.mask.all()
+
+    masked_tensor2 = masked_tensor.clone()
+    masked_tensor2.mask[:] = True
+    assert not masked_tensor.mask.all()
