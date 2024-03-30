@@ -982,6 +982,10 @@ class EncoderDecoder(RetrievalModel):
         else:
             encs = {}
             for name, tensor in x.items():
+
+                if not name in self.stems:
+                    continue
+
                 if isinstance(tensor, list):
                     is_sequence = True
                     tensor = torch.stack(tensor, -3)
