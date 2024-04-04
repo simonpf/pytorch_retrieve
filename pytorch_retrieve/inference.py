@@ -2,24 +2,32 @@
 pytorch_retrieve.inference
 ==========================
 
-
-
+This module implements generic inference functionality for pytorch_retrieve retrievals.
 """
 from dataclasses import dataclass
+import logging
+import importlib
 from pathlib import Path
 from threading import Thread
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from queue import Queue
+
+import click
+import numpy as np
+import torch
+from torch import nn
+from rich.progress import Progress
 
 from pytorch_retrieve.tensors import (
     ProbabilityTensor,
     MeanTensor,
     QuantileTensor,
 )
+from pytorch_retrieve.tiling import Tiler
+from pytorch_retrieve.architectures import load_model
 
 
-import torch
-from torch import nn
+LOGGER = logging.getLogger(__name__)
 
 
 def batch_size_rec(inputs) -> int:
@@ -115,8 +123,9 @@ class InferenceConfig:
     """
     Defines which output quantities to compute for a given output.
     """
-    tile_size: Optional[int] = None
-    spatial_overlap: Optional[int] = None
+    batch_size: int = 8
+    tile_size: Optional[Tuple[int, int]] = None
+    spatial_overlap: Optional[Tuple[int, int]] = None
     temporal_overlap: Optional[int] = None
 
 
@@ -125,12 +134,16 @@ def process(
         model: nn.Module,
         inputs,
         inference_config: Dict[str, InferenceConfig],
+        device: torch.device = torch.device("cpu"),
+        dtype: torch.dtype = torch.float32
 ):
     """
     Process batch of inputs.
     """
-    results = {}
+    model = to_rec(model, dtype=dtype, device=device)
+    inputs = to_rec(inputs, dtype=dtype, device=device)
 
+    results = {}
     with torch.no_grad():
         preds = model(inputs)
         if isinstance(preds, torch.Tensor):
@@ -140,10 +153,8 @@ def process(
                 results[key] = tensor.expected_value().cpu()
             else:
                 results[key] = tensor.cpu()
-
     return results
 
-    
 
 class BatchProcessor:
     """
@@ -159,7 +170,7 @@ class BatchProcessor:
             dtype: str = "float32"
     ):
         super().__init__()
-        self.model = torch.load(model)
+        self.model = model
         self.batch_size = batch_size
         self.input_queue = Queue(maxsize=batch_size)
         self.output_queue = Queue()
@@ -167,8 +178,12 @@ class BatchProcessor:
         if inference_config is None:
             inference_config = {}
         self.inference_config = inference_config
-        self.device = torch.device(device)
-        self.dtype = getattr(torch, dtype)
+        if isinstance(device, str):
+            device = torch.device(device)
+        self.device = device
+        if isinstance(dtype, str):
+            dtype = getattr(torch, dtype)
+        self.dtype = dtype
 
         self.input_buffer_size = 0
         self.input_buffer = None
@@ -197,13 +212,18 @@ class BatchProcessor:
              the given batch size. This list may be empty.
         """
 
-        if inpt is None: if self.input_buffer is None or len(self.input_buffer) == 0: return []
+        if inpt is None:
+
+            if self.input_buffer is None or len(self.input_buffer) == 0:
+                return []
 
             inpt, _ = cat_n_rec([self.input_buffer], self.input_buffer_size)
             res = process(
                 self.model,
                 inpt,
-                self.inference_config
+                self.inference_config,
+                device=self.device,
+                dtype=self.dtype,
             )
             self.output_buffer_size += self.input_buffer_size
             if self.output_buffer is None:
@@ -239,7 +259,7 @@ class BatchProcessor:
             batch, self.input_buffer = cat_n_rec([self.input_buffer], self.batch_size)
             self.input_buffer_size -= self.batch_size
 
-            res = process(self.model, batch, self.inference_config)
+            res = process(self.model, batch, self.inference_config, device=self.device, dtype=self.dtype)
 
             self.output_buffer_size += self.batch_size
             if self.output_buffer is None:
@@ -261,14 +281,194 @@ class BatchProcessor:
 
 def run_inference(
         model: nn.Module,
-        input_path: Path,
         input_loader: Any,
-        input_loader_args: Dict[str, Any],
-        inference_config: InferenceConfig
+        inference_config: InferenceConfig,
+        output_path: Path,
+        device: torch.device = torch.device("cpu"),
+        dtype: torch.dtype = torch.float32
 ) -> None:
     """
     Run inference.
     """
 
-    input_loader = input_loader(input_path, **input_loader_args)
-    for input_data, *args in input_loader:
+    arg_stack = []
+    cntr = 1
+
+    with Progress() as progress:
+
+        task = progress.add_task("Processing input:", total=len(input_loader))
+
+        for input_data, *args in input_loader:
+
+            tile_size = inference_config.tile_size
+            overlap = inference_config.spatial_overlap
+            batch_size = inference_config.batch_size
+
+            processor = BatchProcessor(
+                model,
+                batch_size=batch_size,
+                device=device,
+                dtype=dtype
+            )
+
+            if tile_size is not None:
+                if overlap is None:
+                    overlap = tile_size // 8
+
+                tiler = Tiler(input_data, tile_size=tile_size, overlap=overlap)
+
+                results = np.array([[None] * tiler.N] * tiler.M)
+                tile_stack = []
+
+                for row_ind in range(tiler.M):
+                    for col_ind in range(tiler.N):
+                        outputs = processor.process(tiler.get_tile(row_ind, col_ind))
+                        tile_stack.append((row_ind, col_ind))
+                        for output in outputs:
+                            tile_inds, *tile_stack = tile_stack
+                            results.__setitem__(tile_inds, output)
+
+                outputs = processor.process(None)
+                for output in outputs:
+                    tile_inds, *tile_stack = tile_stack
+                    results.__setitem__(tile_inds, output)
+
+                assert len(tile_stack) == 0
+
+                results = tiler.assemble(results)
+
+                if hasattr(input_loader, "save_results"):
+                    input_loader.save_results(results, output_path, *args)
+                else:
+                    results = xr.Dataset({
+                            key: (("samples",), tensor.numpy()) for key, tensor in results.items()
+                        })
+                    result.to_netcdf(f"results_{cntr}.nc")
+                    cntr += 1
+
+            else:
+                arg_stack.append(args)
+                results = processor.process(input_data)
+                for result in results:
+                    args, *arg_stack = arg_stack
+
+                    if hasattr(input_loader, save_results):
+                        input_loader.save_results(result, output_path, *args)
+                    else:
+                        result = xr.Dataset({
+                            key: (("samples",), tensor.numpy()) for key, tensor in result.items()
+                        })
+                        result.to_netcdf(f"results_{cntr}.nc")
+                        cntr += 1
+
+            progress.update(task, advance=1.0)
+
+
+@click.argument("model", type=str,)
+@click.argument("input_loader", type=str)
+@click.argument("input_path", type=str)
+@click.option(
+    "--input_loader_args",
+    type=str,
+    help=(
+        "A string specifying a Python dictionary that will be passed as additional "
+        "arguments to the __init__ call of the input loader."
+    )
+)
+@click.option(
+    "--output_path",
+    type=str,
+    default=None,
+    help=(
+        "An optional destination to which to write the inference results."
+    )
+)
+@click.option(
+    "--device",
+    type=str,
+    default="cpu",
+    help=(
+        "The device on which to perform inference."
+    )
+)
+@click.option(
+    "--dtype",
+    type=str,
+    default="float32",
+    help=(
+        "The floating point type to use for inference."
+    )
+)
+def cli(
+        model: str,
+        input_loader: Any,
+        input_path: Path,
+        input_loader_args: Dict[str, Any],
+        output_path: Optional[Path] = None,
+        device: str = "cpu",
+        dtype: str = "float32"
+) -> None:
+    """
+    Run inference using MODEL on input files in INPUT_PATH.
+
+    This function will load retrieval input data from INPUT_PATH using the provided
+    INPUT_LOADER class. Results will be written to the current working directory
+    or the location pointed to by --output_path if provfided.
+    """
+
+    try:
+        model = load_model(model)
+    except Exception:
+        LOGGER.exception(
+            "Encountered the following error when trying to load the model from "
+            " file '%s'.",
+            model
+        )
+        return 1
+
+    input_loader_parts = input_loader.split(".")
+    input_loader_module = ".".join(input_loader_parts[:-1])
+    try:
+        module = importlib.import_module(input_loader_module)
+    except ImportError:
+        LOGGER.error(
+            "Could not import the module '%s' containing the data loader. Please make sure "
+            "that the corresponding package and all of its dependencies are installed."
+        )
+        return 1
+
+    if input_loader_args is not None:
+        try:
+            input_loader_args = eval(input_loader_args)
+        except Exception:
+            LOGGER.error(
+                "Encountered an error when trying to parse the 'input_loader_args' dict."
+            )
+            return 1
+    else:
+        input_loader_args = {}
+
+    try:
+        input_loader = getattr(module, input_loader_parts[-1])(input_path, **input_loader_args)
+    except Exception:
+        LOGGER.exception(
+            "Encountered the following error when trying to instantiate the input loader."
+        )
+        return 1
+
+
+
+    if output_path is None:
+        output_path = Path(".")
+
+    device = torch.device(device)
+    dtype = getattr(torch, dtype)
+
+    run_inference(
+        model,
+        input_loader,
+        InferenceConfig(tile_size=(128, 64), spatial_overlap=16),
+        output_path,
+        device=device,
+        dtype=dtype,
+    )

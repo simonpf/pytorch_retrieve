@@ -561,7 +561,7 @@ def cli(
     model_config = read_model_config(LOGGER, model_path, model_config)
     module_name = None
     if "name" in model_config:
-        module_name = model_config[name]
+        module_name = model_config["name"]
 
     if model_config is None:
         return 1
