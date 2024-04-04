@@ -5,6 +5,7 @@ pytorch_retrieve.modules.conv.encoders
 Defines decoder modules for use within encoder-decoder architectures.
 """
 from copy import copy
+from math import ceil
 from typing import Callable, Dict, List, Optional, Union
 
 import numpy as np
@@ -15,7 +16,7 @@ from .utils import Scale
 from pytorch_retrieve.modules.utils import ParamCount
 from pytorch_retrieve.modules.conv.encoders import DEFAULT_BLOCK_FACTORY
 from pytorch_retrieve.modules.conv.stages import SequentialStage
-from pytorch_retrieve.modules.conv.upsampling import Bilinear
+from pytorch_retrieve.modules.conv.upsampling import Bilinear, Trilinear
 
 
 def cat(
@@ -111,6 +112,7 @@ class Decoder(nn.Module, ParamCount):
         self.n_stages = n_stages
         self.upsamplers = nn.ModuleList()
         self.stages = nn.ModuleList()
+        self.channels = channels
 
         if len(channels) != self.n_stages + 1:
             raise ValueError(
@@ -210,7 +212,81 @@ class Decoder(nn.Module, ParamCount):
             )
             in_channels = out_channels
 
-    def forward(self, x: Union[torch.Tensor, List[torch.Tensor]]) -> torch.Tensor:
+
+    @property
+    def multi_scale_outputs(self) -> Dict[Scale, int]:
+        """
+        Return a dictionary specifying the number of channels for each
+        stage of the multi-scale outputs of the decoder.
+        """
+        scale = self.base_scale
+        stages = self.stages
+        outputs = {}
+        for f_up, chans in zip(self.upsampling_factors, self.channels[1:]):
+            scale //= f_up
+            outputs[scale] = chans
+        return outputs
+
+
+    def forward_multi_scale_output(
+        self,
+        x: Union[torch.Tensor, Dict[Scale, torch.Tensor]]
+    ) -> Dict[Scale, torch.Tensor]:
+        """
+        Forward input through decoder and return outputs at all decoder scales.
+
+        Args:
+            x: A single tensor corresponding to the decoder input at the
+                 decoder's base scale or a dictionary mapping scale to
+                 corresponding skip-connection input.
+        Return:
+            A dictionary mapping the scales of the decoder's stages to
+                corresponding outputs.
+        """
+        outputs = {}
+        if self.has_skips:
+            if not isinstance(x, dict):
+                raise ValueError(
+                    f"For a decoder with skip connections the input must "
+                    f"be a dictionary mapping stage indices to inputs."
+                )
+        else:
+            if isinstance(x, dict):
+                x = x[self.base_scale]
+
+        prev_scale = -1
+
+        if isinstance(x, dict):
+            scale = self.base_scale
+            y = x[scale]
+            stages = self.stages
+
+            for ind, (up, stage) in enumerate(zip(self.upsamplers, stages)):
+                f_up = self.upsampling_factors[ind]
+                scale //= f_up
+                if scale in self.skip_connections and scale != prev_scale:
+                    y = stage(cat(x[scale], forward(up, y)))
+                else:
+                    y = stage(forward(up, y))
+                outputs[scale] = y
+                prev_scale = scale
+        else:
+            y = x
+            scale = self.base_scale
+            stages = self.stages
+            for ind, (up, stage) in enumerate(zip(self.upsamplers, stages)):
+                f_up = self.upsampling_factors[ind]
+                scale //= f_up
+                y = stage(forward(up, y))
+                outputs[scale] = y
+
+        return outputs
+
+
+    def forward(
+            self,
+            x: Union[torch.Tensor, Dict[Scale, torch.Tensor]]
+    ) -> torch.Tensor:
         """
         Args:
             x: The output from the encoder. This should be a single tensor
@@ -252,3 +328,139 @@ class Decoder(nn.Module, ParamCount):
             for up, stage in zip(self.upsamplers, stages):
                 y = stage(forward(up, y))
         return y
+
+
+class MultiScalePropagator(nn.Module, ParamCount):
+    def __init__(
+        self,
+        inputs: Dict[Scale, int],
+        stage_depths: List[int],
+        block_factory: Optional[Callable[[int, int], nn.Module]] = None,
+        stage_factory: Optional[Callable[[int, int], nn.Module]] = None,
+        upsampler_factory: Callable[[int, int, int], nn.Module] = Trilinear(),
+        base_scale: Optional[int] = None,
+        residual: bool = True,
+        order: int = 2
+    ):
+        super().__init__()
+
+        self.scales = sorted(inputs.keys(), reverse=True)
+
+        n_stages = len(inputs)
+
+        if block_factory is None:
+            block_factory = DEFAULT_BLOCK_FACTORY
+        if stage_factory is None:
+            if isinstance(block_factory, list):
+                if len(block_factory) < n_stages:
+                    raise RuntimeError(
+                        "If a list of block factories is provided, its length must match "
+                        "the number of stages in the encoder."
+                    )
+                stage_factories = [SequentialStage(b_fac) for b_fac in block_factory]
+            else:
+                stage_factories = [SequentialStage(block_factory) for _ in range(n_stages)]
+        else:
+            if isinstance(stage_factory, list):
+                raise RuntimeError(
+                    "If a list of stage factories is provided, its length must match "
+                    "the number of stages in the encoder."
+                )
+                if isinstance(block_factory, list):
+                    if len(block_factory) < n_stages:
+                        raise RuntimeError(
+                            "If a list of block factories is provided, its length must match "
+                            "the number of stages in the encoder."
+                        )
+                    stage_factories = [s_fac(b_fac) for s_fac, b_fac in zip(stage_factory, block_factory)]
+                else:
+                    stage_factories = [s_fac(block_factory) for s_fac in stage_factory]
+        self.residual = residual
+
+        self.upsamplers = nn.ModuleList()
+        self.stages = nn.ModuleList()
+        self.order = order
+
+        prev_scale = None
+        prev_chans = None
+
+        for ind, scale in enumerate(self.scales):
+
+            stage_channels = inputs[scale]
+            input_channels = (order + (prev_scale is not None)) * stage_channels
+            n_blocks = stage_depths[ind]
+
+            self.stages.append(
+                stage_factories[ind](
+                    input_channels,
+                    stage_channels,
+                    n_blocks,
+                    scale=scale
+                )
+            )
+
+            if ind < len(self.scales) - 1:
+                next_scale = self.scales[ind + 1]
+                next_channels = inputs[next_scale]
+                self.upsamplers.append(
+                    upsampler_factory(
+                        in_channels=stage_channels,
+                        out_channels=next_channels,
+                        factor=(scale // next_scale).scale
+                    )
+                )
+            else:
+                self.upsamplers.append(None)
+
+            prev_scale = scale
+
+    def forward(
+            self,
+            inputs: Dict[Scale, torch.Tensor],
+            n_steps: int
+    ) -> List[torch.Tensor]:
+
+        """
+        Make multi-scale prediction for n steps.
+
+        Args:
+            inputs: A dictionary containing the multi-scale inputs for
+                to propagate.
+            n_steps: The number of prediction steps at the finest temporal scale.
+
+        Return:
+            A list containing the predicted tensors for each forecast step.
+        """
+        min_scale = min(self.scales)
+        prev_preds = None
+
+        for scale, stage, upsampler in zip(
+                self.scales,
+                self.stages,
+                self.upsamplers,
+        ):
+            t_scale = scale.scale[0] // min_scale.scale[0]
+            scale_steps = ceil(n_steps / t_scale)
+            preds = list(torch.unbind(inputs[scale][:, :, -self.order:], 2))
+
+            for step in range(scale_steps):
+                if prev_preds is None:
+                    inpt = torch.cat(preds[-self.order:], 1)
+                else:
+                    inpt = torch.cat(preds[-self.order:] + [prev_preds[step]], 1)
+                pred_step = stage(inpt)
+
+                if self.residual and prev_preds is not None:
+                    pred_step = pred_step + prev_preds[step]
+
+                preds.append(pred_step)
+
+                preds = preds[-scale_steps:]
+
+            if upsampler is not None:
+                preds = torch.stack(preds, 2)
+                preds = torch.unbind(upsampler(preds), 2)
+
+            prev_preds = preds
+
+        return preds[:n_steps]
