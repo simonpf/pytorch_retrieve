@@ -9,7 +9,7 @@ import logging
 import importlib
 from pathlib import Path
 from threading import Thread
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 from queue import Queue
 
 import click
@@ -284,14 +284,28 @@ def run_inference(
         model: nn.Module,
         input_loader: Any,
         inference_config: InferenceConfig,
-        output_path: Path,
+        output_path: Optional[Path] = None,
         device: torch.device = torch.device("cpu"),
         dtype: torch.dtype = torch.float32
-) -> None:
+) -> Union[List[Path], List[xr.Dataset]]:
     """
-    Run inference.
-    """
+    Run inference using the given model on a sequence of inputs provided by an
+    input loader.
 
+    Args:
+        model: The retrieval model to use for inference.
+        input_loader: A loader object providing access to the input data.
+        inference_config: An InferenceConfig object defining the details of the inference to
+            perform.
+        output_path: An optional output path to which to write the results.
+        device: The device on which to perform the inference.
+        dtype: The floating point type to use for the inference.
+
+    Return:
+        If an output path is provided, a list of the output files that were written is returned.
+        If no output path is provided, the retrieval results are returned as a list of xarray.Datasets.
+    """
+    outputs = []
     arg_stack = []
     cntr = 1
 
@@ -330,7 +344,7 @@ def run_inference(
 
                 tiler = Tiler(input_data, tile_size=tile_size, overlap=overlap)
 
-                results = np.array([[None] * tiler.N] * tiler.M)
+                results_tiled = np.array([[None] * tiler.N] * tiler.M)
                 tile_stack = []
 
                 for row_ind in range(tiler.M):
@@ -339,49 +353,68 @@ def run_inference(
                         tile_stack.append((row_ind, col_ind))
                         for output in outputs:
                             tile_inds, *tile_stack = tile_stack
-                            results.__setitem__(tile_inds, output)
+                            results_tiled.__setitem__(tile_inds, output)
 
                 outputs = processor.process(None)
                 for output in outputs:
                     tile_inds, *tile_stack = tile_stack
-                    results.__setitem__(tile_inds, output)
+                    results_tiled.__setitem__(tile_inds, output)
 
                 assert len(tile_stack) == 0
 
-                results = tiler.assemble(results)
+                results_ass = tiler.assemble(results_tiled)
 
-                if hasattr(input_loader, "save_results"):
-                    input_loader.save_results(results, output_path, *args)
+                if hasattr(input_loader, "finalize_results"):
+                    results = input_loader.finalize_results(results_ass, *args)
                 else:
                     results = {}
                     dims = {}
-                    for key, tensor in results.items():
+                    for key, tensor in results_ass.items():
                         dms = []
                         for ind in range(tensor.ndim - 2):
                             dms.append(
                                 dims.setdefault(tensor.shape[ind], f"dim_{len(dims) + 1}")
                             )
                         results[key] = (tuple(dims) + ("x", "y"), tensor)
-                    result = xr.Dataset(results)
-                    result.to_netcdf(f"results_{cntr}.nc")
-                    cntr += 1
+                    results = xr.Dataset(results)
+
+                filename = f"results_{cntr}.nc"
+
+                if results is not None:
+                    if isinstance(results, tuple):
+                        results, filename = results
+                    if output_path is not None:
+                        results.to_netcdf(output_path / filename)
+                        outputs.append(output_path / filename)
+                    else:
+                        outputs.append(results)
 
             else:
                 arg_stack.append(args)
-                results = processor.process(input_data)
-                for result in results:
+                results_stack = processor.process(input_data)
+                results_stack += processor.process(None)
+                for results in results_stack:
                     args, *arg_stack = arg_stack
 
-                    if hasattr(input_loader, save_results):
-                        input_loader.save_results(result, output_path, *args)
-                    else:
-                        result = xr.Dataset({
-                            key: (("samples",), tensor.numpy()) for key, tensor in result.items()
-                        })
-                        result.to_netcdf(f"results_{cntr}.nc")
-                        cntr += 1
+                    results = xr.Dataset({
+                        key: (("samples",), tensor.numpy().flatten()) for key, tensor in results.items()
+                    })
+                    filename = f"results_{cntr}.nc"
+                    if hasattr(input_loader, "finalize_results"):
+                        results = input_loader.finalize_results(results, *args)
+                    if results is not None:
+                        if isinstance(results, tuple):
+                            results, filename = results
+                        if output_path is not None:
+                            results.to_netcdf(output_path / filename)
+                            outputs.append(output_path / filename)
+                        else:
+                            outputs.append(results)
 
+            cntr += 1
             progress.update(task, advance=1.0)
+
+    return outputs
 
 
 @click.argument("model", type=str,)
@@ -478,6 +511,8 @@ def cli(
 
     if output_path is None:
         output_path = Path(".")
+    else:
+        output_path = Path(output_path)
 
     device = torch.device(device)
     dtype = getattr(torch, dtype)
