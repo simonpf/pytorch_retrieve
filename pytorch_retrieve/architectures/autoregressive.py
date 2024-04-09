@@ -217,7 +217,7 @@ class TemporalEncoderConfig:
             n_inputs = 0
 
         stem_config = encoder_decoder.StemConfig(
-            "latent", latent_dim, 1, "none", latent_dim, 0, 1, "none"
+            "latent", latent_dim, 1, "none", latent_dim, 0, 1, upsampling=1
         )
         encoder_dict = get_config_attr("encoder", None, config_dict, "architecture.temporal_encoder", required=True)
         encoder_config = recurrent.EncoderConfig.parse(
@@ -364,7 +364,7 @@ class PropagatorConfig:
         """
 
         stem_config = encoder_decoder.StemConfig(
-            "latent", latent_dim, (1, 1), "none", order * latent_dim, 0, 1, "none"
+            "latent", latent_dim, (1, 1), "none", order * latent_dim, 0, 1, upsampling=1
         )
         encoder_dict = get_config_attr("encoder", None, config_dict, "architecture.propagator", required=True)
         encoder_dict["channels"][0] = order * latent_dim
