@@ -16,6 +16,7 @@ from .encoder_decoder import EncoderDecoder
 from .recurrent_encoder_decoder import RecurrentEncoderDecoder
 from .metnet import MetNet
 from .autoregressive import Autoregressive
+from .multi_scale_autoregressor import MultiScaleAutoregressor
 from .direct_forecast import DirectForecast
 from .model import RetrievalModel
 
@@ -47,6 +48,8 @@ def compile_architecture(config_dict) -> nn.Module:
         model = RecurrentEncoderDecoder.from_config_dict(config_dict)
     elif arch_name == "Autoregressive":
         model = Autoregressive.from_config_dict(config_dict)
+    elif arch_name == "MultiScaleAutoregressor":
+        model = MultiScaleAutoregressor.from_config_dict(config_dict)
     elif arch_name == "DirectForecast":
         model = DirectForecast.from_config_dict(config_dict)
     elif arch_name == "MetNet":
