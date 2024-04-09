@@ -180,7 +180,8 @@ class OutputConfig:
 
         if isinstance(shape, int):
             shape = (shape,)
-        else:
+
+        if not isinstance(shape, int):
             try:
                 shape = tuple(shape)
             except ValueError:

@@ -167,3 +167,37 @@ def test_heterogeneous_downsampling():
     y = encoder(x)
 
     assert y[Scale(4)].shape == (1, 64, 16, 16)
+
+
+def test_multiple_inputs_first_stage():
+    """
+    Test an encoder with multiple inputs at base scale and ensure that
+    first stage isn't skipped.
+    """
+    stage_depths = [4, 4, 4, 4]
+    channels = [8, 16, 32, 64]
+
+    encoder = MultiInputSharedEncoder(
+        inputs={
+            "x_1": Scale((1, 1, 1)),
+            "x_2": Scale((1, 1, 1)),
+        },
+        channels=channels,
+        stage_depths=stage_depths,
+        downsampling_factors=[(2, 1), (1, 2), (2, 2)],
+        input_channels = {
+            "x_1": 7,
+            "x_2": 9,
+        }
+    )
+
+    x = {
+        "x_1": torch.rand(1, 7, 64, 64),
+        "x_2": torch.rand(1, 9, 64, 64),
+    }
+    y = encoder(x)
+
+    y[Scale(4)].mean().backward()
+
+    for param in encoder.parameters():
+        assert param.grad is not None

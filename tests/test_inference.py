@@ -73,9 +73,9 @@ def test_batch_processor(tmp_path):
     model = nn.Identity()
 
     x = [
-        torch.arange(10).reshape((10, 1)),
-        torch.arange(10, 20).reshape((10, 1)),
-        torch.arange(20, 30).reshape((10, 1)),
+        torch.arange(10).reshape((10, 1)).to(torch.float32),
+        torch.arange(10, 20).reshape((10, 1)).to(torch.float32),
+        torch.arange(20, 30).reshape((10, 1)).to(torch.float32),
     ]
 
     processor = BatchProcessor(
@@ -93,7 +93,7 @@ def test_batch_processor(tmp_path):
         assert torch.isclose(x[ind], results[ind + 1][0]["retrieved"]).all()
 
 
-def test_batch_processor(tmp_path):
+def test_batch_processor_irregular(tmp_path):
     """
     Test batched processing of inputs with irregular batch sizes.
     """

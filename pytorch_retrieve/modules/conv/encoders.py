@@ -263,13 +263,19 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
             channels: A list specifying the channels in each stage of the
                  encoder.
             stage_depths: The depth of each stage in the encoder.
+            downsampling_factors: A list of integers, tuples or Scale objects
+                defining the degree of downsampling applied between consecutive
+                stages.
+            input_channels: An optional dictionary mapping input names to
+                the corresponding number of input channels.
             block_factory: Factory to create the blocks in each stage.
+            aggregator_factory: Factory object to use to create the aggregation
+                blocks.
             stage_factory: Optional stage factory to create the encoder
                 stages. Defaults to ``SequentialStageFactory``.
             downsampler_factory: Optional factory to create downsampling
                 layers. If not provided, the block factory must provide
                 downsampling functionality.
-            aggregator_factory: Factory to create block to merge inputs.
             base_scale: The scale of the input with the highest resolution.
             skip_connections: If 'True', the encoder will return the outputs
                 from the end of each stage, to forward to a decoder that
@@ -284,7 +290,8 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
         scale_chans = {scale: channels[0]}
         for chans, f_d in zip(channels[1:], downsampling_factors):
             scale *= f_d
-            scale_chans[scale] = chans
+            if not scale in scale_chans:
+                scale_chans[scale] = chans
 
         input_chans = {}
         for input_name, scl in inputs.items():
@@ -371,6 +378,7 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
         # Need to keep track of repeating scales to avoid aggregating inputs multiple
         # times.
         prev_scale = -1
+        first_stage = True
 
         for scale, down, stage in zip(self.scales, self.downsamplers, self.stages):
             # Apply downsampling
@@ -385,9 +393,11 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
             if y is not None:
                 if self.aggregate_after:
                     y = stage(y)
+                    first_stage = False
 
             if y is None and len(inputs) == 1:
                 y = stage(x[inputs[0]])
+                first_stage = False
             elif len(inputs) > 0:
                 agg_inputs = {inpt: x[inpt] for inpt in inputs}
                 if y is not None:
@@ -400,8 +410,10 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
                 else:
                     y = next(iter(agg_inputs.values()))
 
-            if not self.aggregate_after:
+            if first_stage or not self.aggregate_after:
+                first_stage = False
                 y = stage(y)
+
 
             prev_scale = scale
             skips[scale] = y

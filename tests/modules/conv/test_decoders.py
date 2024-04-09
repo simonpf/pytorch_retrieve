@@ -2,7 +2,7 @@
 Tests for the pytorch_retrieve.modules.conv.decoders module.
 """
 import torch
-
+from torch import nn
 
 from pytorch_retrieve.modules.conv import blocks
 from pytorch_retrieve.modules.conv.encoders import Encoder
@@ -98,6 +98,39 @@ def test_decoder_multiple_block_factories():
     assert y.shape == (1, 8, 64, 64)
 
 
+class Plus1Block(nn.Module):
+    """
+    Increases input by 1.
+    """
+    def __init__(self, in_channels, out_channels):
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        super().__init__()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        new_shape = list(x.shape)
+        new_shape[1] = self.out_channels
+        return (x.mean() + 1) * torch.ones(
+            new_shape,
+            dtype=x.dtype,
+            device=x.device
+        )
+
+
+class Plus1:
+    """
+    Factory for Plus1Blocks.
+    """
+    def __call__(
+            self,
+            in_channels: int,
+            out_channels: int,
+            *args,
+            **kwargs
+    ):
+        return Plus1Block(in_channels, out_channels)
+
+
 def test_multi_scale_propagator():
     """
     Tests predictions with a MultiScalePropagator.
@@ -109,6 +142,7 @@ def test_multi_scale_propagator():
     }
     channels = [48, 24, 12]
     stage_depths = [4, 3, 2]
+
     block_factory = blocks.BasicConv()
 
     propagator = MultiScalePropagator(
@@ -139,3 +173,29 @@ def test_multi_scale_propagator():
     y = propagator(x, 3)
     assert len(y) == 3
     assert y[0].shape == (2, 16, 64, 64)
+
+
+    # Synthetic case with deterministic output values.
+    stage_depths = [1, 1, 1]
+    inputs = {
+        Scale((4, 8, 8)): 16,
+        Scale((2, 4, 4)): 16,
+        Scale((1, 2, 2)): 16,
+    }
+
+    propagator = MultiScalePropagator(
+        inputs,
+        stage_depths,
+        Plus1(),
+        residual=False,
+        order=1
+    )
+
+    x = {
+        Scale((4, 8, 8)): torch.ones(2, 16, 2, 16, 16),
+        Scale((2, 4, 4)): 2 * torch.ones(2, 16, 4, 32, 32),
+        Scale((1, 2, 2)): 3 * torch.ones(2, 16, 8, 64, 64),
+    }
+    y = propagator(x, 4)
+    assert len(y) == 4
+    assert torch.isclose(y[0], torch.tensor(3.0)).all()

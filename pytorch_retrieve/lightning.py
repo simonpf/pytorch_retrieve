@@ -241,6 +241,7 @@ class LightningRetrieval(L.LightningModule):
             dtype = inputs.dtype
 
         tot_loss = torch.tensor(0.0, requires_grad=True, device=device, dtype=dtype)
+
         for name in pred:
             key = name.split("::")[-1]
 
@@ -293,7 +294,6 @@ class LightningRetrieval(L.LightningModule):
             log_dict[f"Training loss ({name})"] = loss
         self.log_dict(log_dict)
         self.log("Training loss", tot_loss)
-
         losses["loss"] = tot_loss
 
         if np.isnan(tot_loss.item()):

@@ -128,7 +128,7 @@ class Decoder(nn.Module, ParamCount):
                 if len(block_factory) < n_stages:
                     raise RuntimeError(
                         "If a list of block factories is provided, its length must match "
-                        "the number of stages in the encoder."
+                        "the number of stages in the decoder."
                     )
                 stage_factories = [SequentialStage(b_fac) for b_fac in block_factory]
             else:
@@ -137,13 +137,13 @@ class Decoder(nn.Module, ParamCount):
             if isinstance(stage_factory, list):
                 raise RuntimeError(
                     "If a list of stage factories is provided, its length must match "
-                    "the number of stages in the encoder."
+                    "the number of stages in the decoder."
                 )
                 if isinstance(block_factory, list):
                     if len(block_factory) < n_stages:
                         raise RuntimeError(
                             "If a list of block factories is provided, its length must match "
-                            "the number of stages in the encoder."
+                            "the number of stages in the decoder."
                         )
                     stage_factories = [s_fac(b_fac) for s_fac, b_fac in zip(stage_factory, block_factory)]
                 else:
@@ -355,7 +355,7 @@ class MultiScalePropagator(nn.Module, ParamCount):
                 if len(block_factory) < n_stages:
                     raise RuntimeError(
                         "If a list of block factories is provided, its length must match "
-                        "the number of stages in the encoder."
+                        "the number of stages in the propagator."
                     )
                 stage_factories = [SequentialStage(b_fac) for b_fac in block_factory]
             else:
@@ -364,13 +364,13 @@ class MultiScalePropagator(nn.Module, ParamCount):
             if isinstance(stage_factory, list):
                 raise RuntimeError(
                     "If a list of stage factories is provided, its length must match "
-                    "the number of stages in the encoder."
+                    "the number of stages in the propagator."
                 )
                 if isinstance(block_factory, list):
                     if len(block_factory) < n_stages:
                         raise RuntimeError(
                             "If a list of block factories is provided, its length must match "
-                            "the number of stages in the encoder."
+                            "the number of stages in the propagator."
                         )
                     stage_factories = [s_fac(b_fac) for s_fac, b_fac in zip(stage_factory, block_factory)]
                 else:
@@ -439,15 +439,18 @@ class MultiScalePropagator(nn.Module, ParamCount):
                 self.stages,
                 self.upsamplers,
         ):
+
             t_scale = scale.scale[0] // min_scale.scale[0]
             scale_steps = ceil(n_steps / t_scale)
             preds = list(torch.unbind(inputs[scale][:, :, -self.order:], 2))
+
 
             for step in range(scale_steps):
                 if prev_preds is None:
                     inpt = torch.cat(preds[-self.order:], 1)
                 else:
                     inpt = torch.cat(preds[-self.order:] + [prev_preds[step]], 1)
+
                 pred_step = stage(inpt)
 
                 if self.residual and prev_preds is not None:
@@ -455,7 +458,7 @@ class MultiScalePropagator(nn.Module, ParamCount):
 
                 preds.append(pred_step)
 
-                preds = preds[-scale_steps:]
+            preds = preds[-scale_steps:]
 
             if upsampler is not None:
                 preds = torch.stack(preds, 2)
@@ -463,4 +466,4 @@ class MultiScalePropagator(nn.Module, ParamCount):
 
             prev_preds = preds
 
-        return preds[:n_steps]
+        return preds[-n_steps:]
