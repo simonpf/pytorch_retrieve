@@ -17,6 +17,7 @@ import numpy as np
 import torch
 from torch import nn
 from rich.progress import Progress
+import xarray as xr
 
 from pytorch_retrieve.tensors import (
     ProbabilityTensor,
@@ -298,7 +299,19 @@ def run_inference(
 
         task = progress.add_task("Processing input:", total=len(input_loader))
 
-        for input_data, *args in input_loader:
+        input_iterator = iter(input_loader)
+
+        while True:
+
+            try:
+                input_data, *args = next(input_iterator)
+            except StopIteration:
+                break
+            except Exception:
+                LOGGER.exception(
+                    "Encountered and error when iterating over input samples."
+                )
+                continue
 
             tile_size = inference_config.tile_size
             overlap = inference_config.spatial_overlap
@@ -340,9 +353,16 @@ def run_inference(
                 if hasattr(input_loader, "save_results"):
                     input_loader.save_results(results, output_path, *args)
                 else:
-                    results = xr.Dataset({
-                            key: (("samples",), tensor.numpy()) for key, tensor in results.items()
-                        })
+                    results = {}
+                    dims = {}
+                    for key, tensor in results.items():
+                        dms = []
+                        for ind in range(tensor.ndim - 2):
+                            dms.append(
+                                dims.setdefault(tensor.shape[ind], f"dim_{len(dims) + 1}")
+                            )
+                        results[key] = (tuple(dims) + ("x", "y"), tensor)
+                    result = xr.Dataset(results)
                     result.to_netcdf(f"results_{cntr}.nc")
                     cntr += 1
 
@@ -455,8 +475,6 @@ def cli(
             "Encountered the following error when trying to instantiate the input loader."
         )
         return 1
-
-
 
     if output_path is None:
         output_path = Path(".")
