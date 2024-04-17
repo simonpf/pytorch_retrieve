@@ -858,11 +858,6 @@ class ResNeXt2Plus1:
             padding_factory=self.padding_factory
         )
 
-ALL = set([
-    cls for cls in globals().values()
-    if isinstance(cls, type) and issubclass(cls, nn.Module)
-])
-
 
 class SqueezeExcite(nn.Module):
     """
@@ -1469,3 +1464,9 @@ class InvertedBottleneck2Plus1:
             anti_aliasing=self.anti_aliasing,
             fused=self.fused
         )
+
+
+ALL = set([
+    cls for cls in globals().values()
+    if isinstance(cls, type) and issubclass(cls, nn.Module)
+])
