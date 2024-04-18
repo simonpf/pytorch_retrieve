@@ -291,6 +291,7 @@ def run_inference(
     """
     Run inference using the given model on a sequence of inputs provided by an
     input loader.
+<<<<<<< HEAD
 
     Args:
         model: The retrieval model to use for inference.
@@ -301,6 +302,18 @@ def run_inference(
         device: The device on which to perform the inference.
         dtype: The floating point type to use for the inference.
 
+=======
+
+    Args:
+        model: The retrieval model to use for inference.
+        input_loader: A loader object providing access to the input data.
+        inference_config: An InferenceConfig object defining the details of the inference to
+            perform.
+        output_path: An optional output path to which to write the results.
+        device: The device on which to perform the inference.
+        dtype: The floating point type to use for the inference.
+
+>>>>>>> ccdf2ca (Fixes for inference.)
     Return:
         If an output path is provided, a list of the output files that were written is returned.
         If no output path is provided, the retrieval results are returned as a list of xarray.Datasets.
