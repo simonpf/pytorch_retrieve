@@ -28,6 +28,7 @@ dependencies = [
     "scipy",
     "numpy",
     "xarray",
+    "rich",
     "tensorboard",
     "axial-attention",
     "torchvision"
