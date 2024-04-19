@@ -136,17 +136,21 @@ class Bias(ScalarMetric, tm.Metric):
             self.error += (pred - target).sum()
             self.counts += pred.numel()
         else:
+
+            device = torch.device("cpu")
+            self.to(device=device)
+
             coords = []
             for cond in self.conditional:
                 if mask is None:
                     coords.append(conditional[cond].squeeze())
                 else:
                     coords.append(conditional[cond].squeeze()[~mask])
-            coords = torch.stack(coords, -1)
+            coords = torch.stack(coords, -1).to(device=device)
 
-            wgts = pred - target
+            wgts = (pred - target).to(device=device)
             bins = tuple([
-                bns.to(device=pred.device, dtype=pred.dtype) for bns in self.bins
+                bns.to(device=device, dtype=pred.dtype) for bns in self.bins
             ])
             self.error += torch.histogramdd(coords, bins=bins, weight=wgts)[0]
             self.counts += torch.histogramdd(coords, bins=bins)[0]
@@ -224,6 +228,9 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
             self.counts += torch.numel(target)
         else:
 
+            device = torch.device("cpu")
+            self.to(device)
+
             coords = []
             for cond in self.conditional:
                 if mask is not None:
@@ -231,10 +238,12 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
                 else:
                     coords.append(conditional[cond].squeeze().flatten())
 
-            coords = torch.stack(coords, -1)
+            coords = torch.stack(coords, -1).to(device=device)
             bins = tuple([
-                bns.to(device=pred.device, dtype=pred.dtype) for bns in self.bins
+                bns.to(device=device, dtype=pred.dtype) for bns in self.bins
             ])
+            pred = pred.to(device=device)
+            target = target.to(device=device)
 
             self.x += torch.histogramdd(coords, bins=bins, weight=pred)[0]
             self.x2 += torch.histogramdd(coords, bins=bins, weight=pred ** 2)[0]
@@ -308,6 +317,10 @@ class MSE(ScalarMetric, tm.Metric):
             self.error += ((pred - target) ** 2).sum()
             self.counts += torch.numel(pred)
         else:
+
+            device = torch.device("cpu")
+            self.to(device)
+
             coords = []
             for cond in self.conditional:
                 if mask is not None:
@@ -315,10 +328,12 @@ class MSE(ScalarMetric, tm.Metric):
                 else:
                     coords.append(conditional[cond].squeeze().flatten())
 
-            coords = torch.stack(coords, -1)
+            coords = torch.stack(coords, -1).to(device=device)
             bins = tuple([
-                bns.to(device=pred.device, dtype=pred.dtype) for bns in self.bins
+                bns.to(device=device, dtype=pred.dtype) for bns in self.bins
             ])
+            pred = pred.to(device=device)
+            target = target.to(device=device)
             self.error += torch.histogramdd(coords, bins=bins, weight=(pred - target) ** 2)[0]
             self.counts += torch.histogramdd(coords, bins=bins)[0]
 
