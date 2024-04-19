@@ -769,13 +769,14 @@ class EncoderDecoderConfig:
         decoder_config = DecoderConfig.parse(encoder_config, decoder_config)
 
         head_config_dict = arch_config.get("head", {})
-        if "base" in head_config_dict:
+        individual = head_config_dict.get("individual", True)
+        if individual:
             head_configs = {}
             for name, output_config in output_configs.items():
                 if name in head_config_dict:
                     config_dict = head_config_dict[name]
                 else:
-                    config_dict = head_config_dict["base"]
+                    config_dict = head_config_dict.get("default", {})
                 head_configs[name] = HeadConfig.parse(
                     decoder_config.out_channels, output_config, name, config_dict
                 )
@@ -829,7 +830,7 @@ class EncoderDecoderConfig:
         if isinstance(self.stem_config, dict):
             if name in self.stem_config:
                 return self.stem_config[name]
-            return self.stem_config["base"]
+            return self.stem_config["default"]
         return self.stem_config
 
     def get_head_config(self, name: str) -> HeadConfig:
@@ -846,7 +847,7 @@ class EncoderDecoderConfig:
         if isinstance(self.head_config, dict):
             if name in self.head_config:
                 return self.head_config[name]
-            return self.head_config["base"]
+            return self.head_config["default"]
         return self.head_config
 
 
