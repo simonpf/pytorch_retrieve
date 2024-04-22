@@ -6,7 +6,7 @@ Provides TorchMetrics metrics modules that handle pytorch_retrieve's
 probabilistic outputs.
 """
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple, Union
 
 from lightning import LightningModule
 from lightning.pytorch.utilities import rank_zero_only
@@ -21,15 +21,54 @@ from pytorch_retrieve.tensors import MaskedTensor
 LOGGER = logging.getLogger(__name__)
 
 
+BinSpec = Union[int, Tuple[float, float, int]]
+
+
 class ScalarMetric:
     """
     Dummy class to identify metrics that evaluate scalar predictions,
     i.e., predictions that consists of a single value.
     """
+    def __init__(
+        self,
+        conditional: Optional[Dict[str, BinSpec]] = None
+    ):
+        conds = []
+        bins = []
+        shape = []
+        if conditional is None:
+            self.conditional = None
+        else:
+            for name, bin_cfg in conditional.items():
+                conds.append(name)
+                if isinstance(bin_cfg, int):
+                    bins.append(torch.arange(bin_cfg + 1) - 0.5)
+                    shape.append(bin_cfg)
+                elif isinstance(bin_cfg, tuple):
+                    start, end, n_bins = bin_cfg
+                    bins.append(torch.linspace(start, end, n_bins + 1))
+                    shape.append(n_bins)
+                else:
+                    raise RuntimeError(
+                        f"Metric 'Bias' received unsupported value of type "
+                        " {type(bin_cfg)} in 'conditional'. Expected a single "
+                        " integer or tuple '(start, end, n_bins)'."
+                    )
+            self.conditional = conds
+        self.bins = bins
+        self.shape = shape
+
 
     def log(
         self, lightning_module: LightningModule, output_name: Optional[str] = None
     ) -> None:
+        """
+        Log metric results.
+
+        Args:
+            lightning_module: The lightning module with which the training is performed.
+            output_name: The name of the output the accuracy of which this metric measured.
+        """
         value = self.compute()
         name = self.name
         if output_name is not None:
@@ -53,31 +92,69 @@ class Bias(ScalarMetric, tm.Metric):
 
     name = "Bias"
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.add_state("error", default=torch.tensor(0.0), dist_reduce_fx="sum")
-        self.add_state("counts", default=torch.tensor(0.0), dist_reduce_fx="sum")
+    def __init__(
+            self,
+            conditional: Optional[Dict[str, BinSpec]] = None,
+            **kwargs
+    ):
+        ScalarMetric.__init__(self, conditional)
+        tm.Metric.__init__(self, **kwargs)
+        error = torch.zeros(self.shape)
+        counts = torch.zeros(self.shape)
+        self.add_state("error", default=error, dist_reduce_fx="sum")
+        self.add_state("counts", default=counts, dist_reduce_fx="sum")
 
-    def update(self, pred: torch.Tensor, target: torch.Tensor) -> None:
+    def update(
+            self,
+            pred: torch.Tensor,
+            target: torch.Tensor,
+            conditional: Dict[str, torch.Tensor] = None
+    ) -> None:
         """
         Args:
             pred: A tensor containing the point predictions from the
                 retrieval model.
             target: A tensor containing the reference values corresponding
                 to 'pred'.
+            conditional: An optional dictionary containing values to
+                condition the calculation of the bias onto.
         """
         pred = pred.squeeze()
         target = target.squeeze()
 
+        mask = None
         if isinstance(target, MaskedTensor):
             mask = target.mask
+            target = target.base
             if isinstance(pred, MaskedTensor):
                 mask = mask | pred.mask
+                pred = pred.base
             pred = pred[~mask]
             target = target[~mask]
 
-        self.error += (pred - target).sum()
-        self.counts += pred.numel()
+        if self.conditional is None:
+            self.error += (pred - target).sum()
+            self.counts += pred.numel()
+        else:
+
+            device = torch.device("cpu")
+            self.to(device=device)
+
+            coords = []
+            for cond in self.conditional:
+                if mask is None:
+                    coords.append(conditional[cond].squeeze())
+                else:
+                    coords.append(conditional[cond].squeeze()[~mask])
+            coords = torch.stack(coords, -1).to(device=device)
+
+            wgts = (pred - target).to(device=device)
+            bins = tuple([
+                bns.to(device=device, dtype=pred.dtype) for bns in self.bins
+            ])
+            self.error += torch.histogramdd(coords, bins=bins, weight=wgts)[0]
+            self.counts += torch.histogramdd(coords, bins=bins)[0]
+
 
     def compute(self) -> torch.Tensor:
         """
@@ -93,62 +170,178 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
     """
     Linear correlation coefficient.
     """
-
     name = "CorrelationCoef"
 
-    def update(self, pred: torch.Tensor, target: torch.Tensor):
+    def __init__(
+            self,
+            conditional: Optional[Dict[str, BinSpec]] = None
+    ):
+        ScalarMetric.__init__(self, conditional)
+        tm.regression.PearsonCorrCoef.__init__(self)
+
+        error = torch.zeros(self.shape)
+        self.add_state("x", default=torch.zeros(self.shape), dist_reduce_fx="sum")
+        self.add_state("x2", default=torch.zeros(self.shape), dist_reduce_fx="sum")
+        self.add_state("xy", default=torch.zeros(self.shape), dist_reduce_fx="sum")
+        self.add_state("y", default=torch.zeros(self.shape), dist_reduce_fx="sum")
+        self.add_state("y2", default=torch.zeros(self.shape), dist_reduce_fx="sum")
+        self.add_state("counts", default=torch.zeros(self.shape), dist_reduce_fx="sum")
+
+    def update(
+            self,
+            pred: torch.Tensor,
+            target: torch.Tensor,
+            conditional: Optional[Dict[str, torch.Tensor]] = None
+    ):
         """
         Args:
             pred: A tensor containing the point predictions from the
                 retrieval model.
             target: A tensor containing the reference values corresponding
                 to 'pred'.
+            conditional: An optional dictionary containing values to
+                condition the calculation of the bias onto.
         """
         pred = pred.squeeze()
         target = target.squeeze()
 
+        mask = None
         if isinstance(target, MaskedTensor):
             mask = target.mask
+            target = target.base
             if isinstance(pred, MaskedTensor):
                 mask = mask | pred.mask
+                pred = pred.base
             pred = pred[~mask]
             target = target[~mask]
 
         if pred.dim() >= 2:
             pred = pred.flatten()
             target = target.flatten()
-        super().update(pred.to(dtype=torch.float32), target.to(dtype=torch.float32))
+
+        if self.conditional is None:
+            self.x += pred.sum()
+            self.x2 += (pred ** 2).sum()
+            self.xy += (pred * target).sum()
+            self.y += target.sum()
+            self.y2 += (target ** 2).sum()
+            self.counts += torch.numel(target)
+        else:
+
+            device = torch.device("cpu")
+            self.to(device)
+
+            coords = []
+            for cond in self.conditional:
+                if mask is not None:
+                    coords.append(conditional[cond].squeeze()[~mask].flatten())
+                else:
+                    coords.append(conditional[cond].squeeze().flatten())
+
+            coords = torch.stack(coords, -1).to(device=device)
+            bins = tuple([
+                bns.to(device=device, dtype=pred.dtype) for bns in self.bins
+            ])
+            pred = pred.to(device=device)
+            target = target.to(device=device)
+
+            self.x += torch.histogramdd(coords, bins=bins, weight=pred)[0]
+            self.x2 += torch.histogramdd(coords, bins=bins, weight=pred ** 2)[0]
+            self.xy += torch.histogramdd(coords, bins=bins, weight=pred * target)[0]
+            self.y += torch.histogramdd(coords, bins=bins, weight=target)[0]
+            self.y2 += torch.histogramdd(coords, bins=bins, weight=target ** 2)[0]
+            self.counts += torch.histogramdd(coords, bins=bins)[0]
+
+    def compute(self) -> torch.Tensor:
+        """
+        Calculate the correlation coefficient.
+        """
+        x_mean = self.x / self.counts
+        y_mean = self.y / self.counts
+        x_var = self.x2 / self.counts - x_mean ** 2
+        y_var = self.y2 / self.counts - y_mean ** 2
+        corr = (self.xy / self.counts - x_mean * y_mean) / torch.sqrt(x_var * y_var)
+        return corr
 
 
-class MSE(ScalarMetric, tm.regression.MeanSquaredError):
+class MSE(ScalarMetric, tm.Metric):
     """
     The mean-squared error.
     """
 
     name = "MSE"
 
-    def update(self, pred: torch.Tensor, target: torch.Tensor):
+    def __init__(
+            self,
+            conditional: Optional[Dict[str, BinSpec]] = None
+    ):
+        ScalarMetric.__init__(self, conditional=conditional)
+        tm.Metric.__init__(self)
+        error = torch.zeros(self.shape)
+        counts = torch.zeros(self.shape)
+        self.add_state("error", default=error, dist_reduce_fx="sum")
+        self.add_state("counts", default=counts, dist_reduce_fx="sum")
+
+    def update(
+            self,
+            pred: torch.Tensor,
+            target: torch.Tensor,
+            conditional: Optional[Dict[str, torch.Tensor]] = None
+    ) -> None:
         """
         Args:
             pred: A tensor containing the point predictions from the
                 retrieval model.
             target: A tensor containing the reference values corresponding
                 to 'pred'.
+            conditional: An optional dictionary containing values to
+                condition the calculation of the bias onto.
         """
         pred = pred.squeeze()
         target = target.squeeze()
 
         if isinstance(target, MaskedTensor):
             mask = target.mask
+            target = target.base
             if isinstance(pred, MaskedTensor):
                 mask = mask | pred.mask
+                pred = pred.base
             pred = pred[~mask]
             target = target[~mask]
 
         if pred.dim() > 2:
             pred = pred.flatten()
             target = target.flatten()
-        super().update(pred, target)
+
+        if self.conditional is None:
+            self.error += ((pred - target) ** 2).sum()
+            self.counts += torch.numel(pred)
+        else:
+
+            device = torch.device("cpu")
+            self.to(device)
+
+            coords = []
+            for cond in self.conditional:
+                if mask is not None:
+                    coords.append(conditional[cond].squeeze()[~mask].flatten())
+                else:
+                    coords.append(conditional[cond].squeeze().flatten())
+
+            coords = torch.stack(coords, -1).to(device=device)
+            bins = tuple([
+                bns.to(device=device, dtype=pred.dtype) for bns in self.bins
+            ])
+            pred = pred.to(device=device)
+            target = target.to(device=device)
+            self.error += torch.histogramdd(coords, bins=bins, weight=(pred - target) ** 2)[0]
+            self.counts += torch.histogramdd(coords, bins=bins)[0]
+
+    def compute(self) -> torch.Tensor:
+        """
+        Calculate the MSE.
+        """
+        return self.error / self.counts
 
 
 class PlotSamples(tm.Metric):
@@ -252,7 +445,7 @@ class PlotSamples(tm.Metric):
             n_rows = len(sequence["pred"])
 
         img = make_grid(images, nrow=n_rows)
-        name = self.name + f" ({output_name})"
+        name = self.name + f" ({output_name}, {self.sample_indices})"
         if hasattr(lightning_module.logger.experiment, "log_image"):
             lightning_module.logger.experiment.log_image(name, img)
         if hasattr(lightning_module.logger.experiment, "add_image"):
