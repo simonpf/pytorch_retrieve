@@ -395,7 +395,7 @@ def test_encoder_config_3d(multi_output_cfg):
     """
     arch_config = multi_output_cfg["architecture"]
     arch_config["stem"]["kind"] = "BasicConv3d"
-    arch_config["head"] = {"kind": "BasicConv3d"}
+    arch_config["head"] = {"default": {"kind": "BasicConv3d"}}
     arch_config["encoder"]["block_factory"] = "ResNeXt2Plus1"
     arch_config["encoder"]["aggregation_factory"] = "Linear3d"
     arch_config["encoder"]["downsampling_factors"] = [[1, 2, 2]] * 3
@@ -654,7 +654,7 @@ depth = 1
 downsampling = [2, 1, 1]
 out_channels = 31
 
-[architecture.head]
+[architecture.head.default]
 kind = "BasicConv3d"
 
 [input.x_1]
