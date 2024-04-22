@@ -115,7 +115,7 @@ def to_rec(tensor, device=None, dtype=None) -> Any:
         }
 
     raise RuntimeError(
-        f"Encountered unsupported type {type(inputs)} in input to 'to_rec'."
+        f"Encountered unsupported type {type(tensor)} in input to 'to_rec'."
     )
 
 
@@ -470,7 +470,7 @@ def cli(
     """
 
     try:
-        model = load_model(model)
+        model = load_model(model).eval()
     except Exception:
         LOGGER.exception(
             "Encountered the following error when trying to load the model from "

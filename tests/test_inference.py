@@ -71,7 +71,6 @@ def test_batch_processor(tmp_path):
     Test batched processing of inputs.
     """
     model = nn.Identity()
-    torch.save(model, tmp_path / "model.pt")
 
     x = [
         torch.arange(10).reshape((10, 1)),
@@ -80,7 +79,7 @@ def test_batch_processor(tmp_path):
     ]
 
     processor = BatchProcessor(
-        model=tmp_path / "model.pt",
+        model=model,
         batch_size=4,
     )
 
@@ -99,16 +98,15 @@ def test_batch_processor(tmp_path):
     Test batched processing of inputs with irregular batch sizes.
     """
     model = nn.Identity()
-    torch.save(model, tmp_path / "model.pt")
 
     x = [
-        torch.arange(3).reshape((3, 1, 1, 1)),
-        torch.arange(3, 10).reshape((7, 1, 1, 1)),
-        torch.arange(10, 30).reshape((20, 1, 1, 1)),
+        torch.arange(3).reshape((3, 1, 1, 1)).to(torch.float32),
+        torch.arange(3, 10).reshape((7, 1, 1, 1)).to(torch.float32),
+        torch.arange(10, 30).reshape((20, 1, 1, 1)).to(torch.float32),
     ]
 
     processor = BatchProcessor(
-        model=tmp_path / "model.pt",
+        model=model,
         batch_size=4,
     )
 

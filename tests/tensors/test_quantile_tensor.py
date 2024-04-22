@@ -270,20 +270,20 @@ def test_masked_quantile_loss():
     """
     tau = torch.tensor([0.5])
 
-    tensor = torch.ones(10, 1)
-    mask = torch.rand(10, 1) > 0.5
+    tensor = torch.ones(100, 1)
+    mask = torch.rand(100, 1) > 0.5
     tensor[mask] = np.nan
     tensor = MaskedTensor(tensor, mask=mask)
 
     y_pred = QuantileTensor(tensor, tau=tau)
 
-    y_true = torch.zeros(10)
+    y_true = torch.zeros(100)
     q_loss = y_pred.loss(y_true)
     ref = torch.abs(y_pred.base - q_loss).mean()
     assert torch.isclose(q_loss, ref)
 
-    y_true = torch.zeros(10)
-    mask = torch.rand(10) > 0.5
+    y_true = torch.zeros(100)
+    mask = torch.rand(100) > 0.5
     y_true[mask] = np.nan
     y_true = MaskedTensor(y_true, mask=mask)
 
