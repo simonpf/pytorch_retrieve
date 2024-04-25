@@ -63,11 +63,7 @@ class Encoder(nn.Module, ParamCount):
         block_factory: Optional[Callable[[int, int], nn.Module]] = None,
         stage_factory: Optional[Callable[[int, int], nn.Module]] = None,
         downsampler_factory: Callable[[int, int], nn.Module] = None,
-<<<<<<< HEAD
         base_scale: Union[int, np.ndarray] = Scale(1),
-=======
-        base_scale: Union[int, np.ndarray] = 1,
->>>>>>> 978c1f6 (Fix scale handling in encoder/decoder architecture.)
         skip_connections: bool = True,
     ):
         """

@@ -755,7 +755,7 @@ out_channels = 24
 upsampling = [1, 2, 2]
 upsampling_factory = "Trilinear"
 
-[architecture.head]
+[architecture.head.default]
 kind = "BasicConv3d"
 
 [input.cpcir]
