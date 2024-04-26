@@ -81,6 +81,7 @@ def test_batch_processor(tmp_path):
     processor = BatchProcessor(
         model=model,
         batch_size=4,
+        device="cpu"
     )
 
     results = []
@@ -108,6 +109,7 @@ def test_batch_processor(tmp_path):
     processor = BatchProcessor(
         model=model,
         batch_size=4,
+        device="cpu"
     )
 
     results = []
