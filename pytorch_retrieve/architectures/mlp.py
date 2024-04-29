@@ -445,7 +445,7 @@ class MLP(RetrievalModel):
         self.aggregator = None
         hidden_channels = body_cfg.hidden_channels
         if isinstance(stem_cfgs, dict):
-            inputs = {name: cfg.in_channels for name, cfg in stem_cfgs.items()}
+            inputs = {name: hidden_channels for name, cfg in stem_cfgs.items()}
             self.stems = nn.ModuleDict(
                 {name: cfg.compile(hidden_channels) for name, cfg in stem_cfgs.items()}
             )
@@ -500,7 +500,7 @@ class MLP(RetrievalModel):
 
     def forward(self, inputs: Union[torch.Tensor, dict[str, torch.Tensor]]):
 
-        if not isinstance(input, dict):
+        if not isinstance(inputs, dict):
             if len(self.stems) > 1:
                 raise ValueError(
                     "The input is a single tensor but the architecture has more "
@@ -511,7 +511,7 @@ class MLP(RetrievalModel):
             inputs = stem(inputs)
         else:
             inputs = {
-                key: self.stems[key](tensor) for key, tensor in inputs.items()
+                key: stem(inputs[key]) for key, stem in self.stems.items()
             }
             inputs = self.aggregator(inputs)
 

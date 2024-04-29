@@ -17,6 +17,28 @@ from pytorch_retrieve.architectures.encoder_decoder import (
 from conftest import data_loader_3d
 
 
+def test_stem_config():
+    """
+    Test that up- and down-sampling in stem are handled correctly.
+    """
+    stem_config = StemConfig(
+        "x", 4, (2, 2), "BasicConv",
+        out_channels=12,
+        depth=2,
+        downsampling=(4, 4),
+        upsampling=(2, 2),
+        normalize="none"
+    )
+    assert stem_config.out_scale == (1, 4, 4)
+
+    stem = stem_config.compile()
+
+    x = torch.rand(1, 4, 32, 32)
+    y = stem(x)
+    assert y.shape == (1, 12, 16, 16)
+
+
+
 def test_encoder_decoder_multiple_block_factories():
     """
     Ensure that passing multiple block factories to encoder results in an encoder with
@@ -567,7 +589,7 @@ scale = 1
 
 [input.x_3]
 n_features = 32
-scale = 4
+scale = 2
 
 [output.precip]
 kind = "Mean"
@@ -711,3 +733,76 @@ def test_encoder_config_multi_step_multi_input_multi_scale(
     assert y["precip"][0].shape == (1, 1, 128, 128)
     assert isinstance(y["precip"], list)
     assert isinstance(y["precip"][0], torch.Tensor)
+
+
+MULTI_STEP_MULTI_INPUT_UPSAMPLING_CFG = """
+[architecture]
+name = "EncoderDecoder"
+preset = "EfficientNetV2-2p1-Seq"
+
+[architecture.stem]
+kind = "BasicConv3d"
+depth = 1
+kernel_size = [1, 3, 3]
+out_channels = 24
+downsampling = [1, 2, 2]
+
+[architecture.stem.atms]
+kind = "BasicConv3d"
+depth = 1
+kernel_size = [1, 3, 3]
+out_channels = 24
+upsampling = [1, 2, 2]
+upsampling_factory = "Trilinear"
+
+[architecture.head.default]
+kind = "BasicConv3d"
+
+[input.cpcir]
+n_features=1
+scale = 4
+
+[input.atms]
+n_features=9
+scale = 16
+
+[output.surface_precip]
+kind = "Quantiles"
+shape = 1
+quantiles = 32
+"""
+
+
+@pytest.fixture
+def multi_step_multi_input_upsampling_cfg():
+    return toml.loads(MULTI_STEP_MULTI_INPUT_UPSAMPLING_CFG)
+
+
+def test_encoder_config_multi_step_multi_input_upsampling(
+        multi_step_multi_input_upsampling_cfg
+):
+
+    arch_config = multi_step_multi_input_upsampling_cfg["architecture"]
+    input_config = multi_step_multi_input_upsampling_cfg["input"]
+    output_config = multi_step_multi_input_upsampling_cfg["output"]
+
+    input_cfgs = {
+        name: InputConfig.parse(name, cfg) for name, cfg in input_config.items()
+    }
+    output_cfgs = {
+        name: OutputConfig.parse(name, cfg) for name, cfg in output_config.items()
+    }
+
+
+    encdec = EncoderDecoder.from_config_dict(multi_step_multi_input_upsampling_cfg)
+
+    x = {
+        "cpcir": [torch.rand(1, 1, 256, 256) for _ in range(8)],
+        "atms": [torch.rand(1, 9, 64, 64) for _ in range(8)],
+    }
+
+    y = encdec(x)
+
+    assert y["surface_precip"][0].shape == (1, 32, 1, 256, 256)
+    assert isinstance(y["surface_precip"], list)
+    assert isinstance(y["surface_precip"][0], torch.Tensor)

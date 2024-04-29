@@ -12,7 +12,7 @@ from torch import nn
 
 class LayerNormFirst(nn.Module):
     """
-    Layer norm that normalizes the first dimension.
+    Layer norm performed along the first dimension.
     """
 
     def __init__(self, n_channels, eps=1e-6):
@@ -22,6 +22,7 @@ class LayerNormFirst(nn.Module):
             eps: Epsilon added to variance to avoid numerical issues.
         """
         super().__init__()
+        self.n_channels = n_channels
         self.scaling = nn.Parameter(torch.ones(n_channels), requires_grad=True)
         self.bias = nn.Parameter(torch.zeros(n_channels), requires_grad=True)
         self.eps = eps
@@ -30,10 +31,43 @@ class LayerNormFirst(nn.Module):
         """
         Apply normalization to x.
         """
+        dtype = x.dtype
         mu = x.mean(1, keepdim=True)
-        var = (x - mu).pow(2).mean(1, keepdim=True)
-        x_n = (x - mu) / torch.sqrt(var + self.eps)
-        x = self.scaling[..., None, None] * x_n + self.bias[..., None, None]
+        x_n = (x - mu).to(dtype=torch.float32)
+        var = x_n.pow(2).mean(1, keepdim=True)
+        x_n = x_n / torch.sqrt(var + self.eps)
+        shape_ext = (self.n_channels,) + (1,) * (x_n.dim() - 2)
+        x = self.scaling.reshape(shape_ext) * x_n.to(dtype=dtype) + self.bias.reshape(shape_ext)
+        return x
+
+
+class RMSNorm(nn.Module):
+    """
+    Root-mean-square normalization
+    """
+
+    def __init__(self, n_channels, eps=1e-6):
+        """
+        Args:
+            n_channels: The number of channels in the input.
+            eps: Epsilon added to variance to avoid numerical issues.
+        """
+        super().__init__()
+        self.n_channels = n_channels
+        self.scaling = nn.Parameter(torch.ones(n_channels), requires_grad=True)
+        self.bias = nn.Parameter(torch.zeros(n_channels), requires_grad=True)
+        self.eps = eps
+
+    def forward(self, x):
+        """
+        Apply normalization to x.
+        """
+        dtype = x.dtype
+        mu = x.mean(1, keepdim=True)
+        var = (x - mu).to(dtype=torch.float32).pow(2).mean(1, keepdim=True)
+        x_n = (x.to(dtype=torch.float32) / torch.sqrt(var + self.eps)).to(dtype=dtype)
+        shape_ext = (self.n_channels,) + (1,) * (x_n.dim() - 2)
+        x = self.scaling.reshape(shape_ext) * x_n + self.bias.reshape(shape_ext)
         return x
 
 

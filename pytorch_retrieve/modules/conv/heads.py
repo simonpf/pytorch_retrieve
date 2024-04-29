@@ -50,7 +50,8 @@ class BasicConv(nn.Sequential):
                     residual_connection=residual_connections,
                 )
             )
-        head_blocks.append(nn.Conv2d(in_channels, np.prod(out_shape), kernel_size=1))
+        n_chans = np.prod(out_shape) if len(out_shape) > 0 else 1
+        head_blocks.append(nn.Conv2d(in_channels, n_chans, kernel_size=1))
         super().__init__(*head_blocks)
         self.out_shape = tuple(out_shape)
 
@@ -97,7 +98,8 @@ class BasicConv3d(nn.Sequential):
                     residual_connection=residual_connections,
                 )
             )
-        head_blocks.append(nn.Conv3d(in_channels, np.prod(out_shape), kernel_size=1))
+        n_chans = np.prod(out_shape) if len(out_shape) > 0 else 1
+        head_blocks.append(nn.Conv3d(in_channels, n_chans, kernel_size=1))
         super().__init__(*head_blocks)
         self.out_shape = tuple(out_shape)
 

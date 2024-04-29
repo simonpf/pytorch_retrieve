@@ -580,7 +580,7 @@ def cli(
     )
 
     compute_config = read_compute_config(LOGGER, model_path, compute_config)
-    if isinstance(compute_config, dict):
+    if compute_config is not None:
         compute_config = ComputeConfig.parse(compute_config)
 
     checkpoint = None

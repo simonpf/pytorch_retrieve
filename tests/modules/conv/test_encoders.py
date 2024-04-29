@@ -3,6 +3,7 @@ Tests for the pytorch_retrieve.modules.conv.encoders module.
 """
 import torch
 
+from pytorch_retrieve.modules.conv.utils import Scale
 from pytorch_retrieve.modules.conv import blocks
 from pytorch_retrieve.modules.conv.encoders import (
     Encoder,
@@ -41,7 +42,7 @@ def test_encoder():
     x = torch.rand(1, 8, 64, 64)
     y = encoder(x)
     assert isinstance(y, dict)
-    assert y[8].shape == (1, 64, 8, 8)
+    assert y[Scale(8)].shape == (1, 64, 8, 8)
 
 
 def test_multi_input_shared_encoder():
@@ -69,7 +70,7 @@ def test_multi_input_shared_encoder():
     )
     y = encoder(inpt)
     assert isinstance(y, dict)
-    assert y[8].shape == (1, 64, 8, 8)
+    assert y[Scale(8)].shape == (1, 64, 8, 8)
 
 
 def test_multi_input_parallel_encoder():
@@ -108,7 +109,7 @@ def test_cascading_encoder():
     x = torch.rand(1, 8, 64, 64)
     y = encoder(x)
 
-    assert y[8].shape == (1, 64, 8, 8)
+    assert y[Scale(8)].shape == (1, 64, 8, 8)
 
 
 def test_encoder_multiple_block_factories():
@@ -144,4 +145,59 @@ def test_encoder_multiple_block_factories():
     x = torch.rand(1, 8, 64, 64)
     y = encoder(x)
     assert isinstance(y, dict)
-    assert y[8].shape == (1, 64, 8, 8)
+    assert y[Scale(8)].shape == (1, 64, 8, 8)
+
+
+def test_heterogeneous_downsampling():
+    """
+    Create a multi-input parallel encoder and ensure that
+      - Forwarding a tensors through the encoder works and the output tensor
+        has the expected size.
+    """
+    stage_depths = [4, 4, 4, 4]
+    channels = [8, 16, 32, 64]
+
+    encoder = Encoder(
+        channels,
+        stage_depths,
+        downsampling_factors=[(2, 1), (1, 2), (2, 2)]
+    )
+
+    x = torch.rand(1, 8, 64, 64)
+    y = encoder(x)
+
+    assert y[Scale(4)].shape == (1, 64, 16, 16)
+
+
+def test_multiple_inputs_first_stage():
+    """
+    Test an encoder with multiple inputs at base scale and ensure that
+    first stage isn't skipped.
+    """
+    stage_depths = [4, 4, 4, 4]
+    channels = [8, 16, 32, 64]
+
+    encoder = MultiInputSharedEncoder(
+        inputs={
+            "x_1": Scale((1, 1, 1)),
+            "x_2": Scale((1, 1, 1)),
+        },
+        channels=channels,
+        stage_depths=stage_depths,
+        downsampling_factors=[(2, 1), (1, 2), (2, 2)],
+        input_channels = {
+            "x_1": 7,
+            "x_2": 9,
+        }
+    )
+
+    x = {
+        "x_1": torch.rand(1, 7, 64, 64),
+        "x_2": torch.rand(1, 9, 64, 64),
+    }
+    y = encoder(x)
+
+    y[Scale(4)].mean().backward()
+
+    for param in encoder.parameters():
+        assert param.grad is not None

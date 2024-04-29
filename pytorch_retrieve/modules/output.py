@@ -3,7 +3,7 @@ pytorch_retrieve.modules.output
 ===============================
 
 """
-from typing import Tuple, Union
+from typing import Optional, Union, Tuple
 
 import torch
 from torch import nn
@@ -21,7 +21,15 @@ class Mean(stats.StatsTracker, nn.Module):
             self,
             name,
             shape: Union[int, Tuple[int]],
+            transformation: Optional[nn.Module] = None
     ):
+        """
+        Args:
+            name: The name of the output produced by this output layer.
+            shape: The shape of the target quantity for a single input pixel.
+            transformation: An optional transformation module that will be applied to the
+                reference values prior to calculating the losses.
+        """
         self.name = name
         nn.Module.__init__(self)
         if isinstance(shape, int):
@@ -29,10 +37,14 @@ class Mean(stats.StatsTracker, nn.Module):
         else:
             n_features = shape[0]
         stats.StatsTracker.__init__(self, n_features)
+        self.transformation = transformation
 
 
     def forward(self, x):
-        return MeanTensor(x)
+        result = MeanTensor(x)
+        if self.transformation is not None:
+            result.__transformation__ = self.transformation
+        return result
 
 
 class Quantiles(stats.StatsTracker, nn.Module):
@@ -45,12 +57,17 @@ class Quantiles(stats.StatsTracker, nn.Module):
             name: str,
             shape: Union[int, Tuple[int]],
             tau: torch.Tensor,
+            transformation: Optional[nn.Module] = None
     ):
         """
         Create an output layer for quantile regression.
 
         Args:
-            tau: A vector containing the quantile fractions to predict.
+            name: The name of the output produced by this output layer.
+            shape: The shape of the target quantity for a single input pixel.
+            tau: An array containing the quantile fraction of the quantiles to predict.
+            transformation: An optional transformation module that will be applied to the
+                reference values prior to calculating the losses.
         """
         self.name = name
         nn.Module.__init__(self)
@@ -60,9 +77,13 @@ class Quantiles(stats.StatsTracker, nn.Module):
             n_features = shape[0]
         stats.StatsTracker.__init__(self, n_features)
         self.tau = torch.tensor(tau, dtype=torch.float32)
+        self.transformation = transformation
 
     def forward(self, x):
         """
         Produces a QuantileTensor from a model output.
         """
-        return QuantileTensor(x, tau=self.tau.to(device=x.device))
+        result = QuantileTensor(x, tau=self.tau.to(device=x.device))
+        if self.transformation is not None:
+            result.__transformation__ = self.transformation
+        return result

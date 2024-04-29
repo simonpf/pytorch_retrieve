@@ -7,6 +7,7 @@ Provides input modules to normalize inputs and record data statistics.
 from typing import Dict, Optional
 from logging import getLogger
 from pathlib import Path
+from typing import Union
 
 import numpy as np
 import torch
@@ -22,6 +23,22 @@ from .stats import StatsTracker, save_stats
 
 
 LOGGER = getLogger(__name__)
+
+
+def _ensure_loaded(tensor: Union[torch.Tensor, "_NotYetLoadedTensor"]) -> torch.Tensor:
+    """
+    Ensures that a given tensor is loaded and not a _NotYetLoadedTensor.
+
+    Args:
+        tensor: A tensor or '_NotYetLoadedTensor'.
+
+    Return:
+        A tensor containing the given input data.
+    """
+    if tensor.__class__.__name__ == "_NotYetLoadedTensor":
+        tensor = tensor._load_tensor()
+    return tensor
+
 
 
 class InputLayer(StatsTracker, nn.Module):
@@ -145,11 +162,11 @@ class InputLayer(StatsTracker, nn.Module):
         Args:
              state: A dictionary containing the extra state obtained from 'get_extra_state'.
         """
-        self.t_mean.set_(state["mean"])
-        self.t_std_dev.set_(state["std_dev"])
-        self.t_min.set_(state["min"])
-        self.t_max.set_(state["max"])
-        self.finalized.set_(state["finalized"])
+        self.t_mean.set_(_ensure_loaded(state["mean"]))
+        self.t_std_dev.set_(_ensure_loaded(state["std_dev"]))
+        self.t_min.set_(_ensure_loaded(state["min"]))
+        self.t_max.set_(_ensure_loaded(state["max"]))
+        self.finalized.set_(_ensure_loaded(state["finalized"]))
 
     def _load_stats_tensors(self, dataset: xr.Dataset) -> None:
         """

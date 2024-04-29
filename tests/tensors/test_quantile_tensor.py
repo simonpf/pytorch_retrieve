@@ -7,6 +7,7 @@ import torch
 from torch import nn
 
 from pytorch_retrieve.tensors import QuantileTensor, MaskedTensor
+from pytorch_retrieve.modules.transformations import SquareRoot
 
 
 def test_cat():
@@ -230,9 +231,15 @@ def test_quantile_loss():
     """
     tau = torch.tensor([0.5])
     y_pred = QuantileTensor(torch.ones(10, 1), tau=tau)
-    y_true = torch.zeros(10)
+    y_true = torch.rand(10)
     q_loss = y_pred.loss(y_true)
-    ref = torch.abs(y_pred.base - q_loss).mean()
+    ref = 0.5 * torch.abs(y_pred.base - y_true).mean()
+    assert torch.isclose(q_loss, ref)
+
+    transform = SquareRoot()
+    y_pred = QuantileTensor(torch.ones(10, 1), tau=tau)
+    y_pred.__transformation__ = transform
+    q_loss = y_pred.loss(transform.invert(y_true))
     assert torch.isclose(q_loss, ref)
 
     y_1 = torch.rand(10, 1, 10, 10)
@@ -279,7 +286,8 @@ def test_masked_quantile_loss():
 
     y_true = torch.zeros(100)
     q_loss = y_pred.loss(y_true)
-    ref = torch.abs(y_pred.base - q_loss).mean()
+    mask = torch.broadcast_to(y_pred.base.mask, (100, 100))
+    ref = 0.5 * torch.abs(y_pred.base - y_true)[~mask].mean()
     assert torch.isclose(q_loss, ref)
 
     y_true = torch.zeros(100)
@@ -288,7 +296,7 @@ def test_masked_quantile_loss():
     y_true = MaskedTensor(y_true, mask=mask)
 
     q_loss = y_pred.loss(y_true)
-    ref = torch.abs(y_pred.base - q_loss).mean()
+    ref = 0.5 * torch.abs(y_pred.base - y_true.base)[~(y_pred.base.mask + y_true.mask)].mean()
     assert torch.isclose(q_loss, ref)
 
     y_1 = torch.rand(10, 1, 10, 10)

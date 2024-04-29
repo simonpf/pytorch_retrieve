@@ -66,6 +66,8 @@ class MeanTensor(torch.Tensor):
         return "MeanTensor" + tensor_repr[6:]
 
     def expected_value(self) -> torch.Tensor:
+        if hasattr(self, "__transformation__"):
+            return self.invert(self.base)
         return self.base
 
     def loss(self, y_true):
@@ -76,6 +78,9 @@ class MeanTensor(torch.Tensor):
         Return:
             The means-squared error of this tensor and 'y_true.
         """
+        if hasattr(self, "__transformation__"):
+            y_true = self.__transformation__(y_true)
+
         if y_true.dim() < self.dim():
             y_true = y_true.unsqueeze(1)
         return ((self.base - y_true) ** 2).mean()

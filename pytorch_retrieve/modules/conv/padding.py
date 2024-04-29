@@ -174,7 +174,10 @@ class Global(nn.Module):
         Return:
             The padded tensor.
         """
-        x_1 = nn.functional.pad(x, self.pad[:2] + (0, 0), "circular")
+        x_1 = nn.functional.pad(
+            x, self.pad[:2] + (0,) * (len(self.pad) - 2),
+            "circular"
+        )
         return nn.functional.pad(x_1, (0, 0) + self.pad[2:], "reflect")
 
 

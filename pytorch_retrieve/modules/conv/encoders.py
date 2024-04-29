@@ -6,9 +6,11 @@ Generic encoder modules.
 """
 from typing import Optional, Callable, Union, Optional, List, Dict, Tuple
 
+import numpy as np
 import torch
 from torch import nn
 
+from .utils import Scale
 from pytorch_retrieve.modules.utils import ParamCount
 from pytorch_retrieve.modules.conv.blocks import BasicConv
 from pytorch_retrieve.modules.conv.stages import SequentialStage
@@ -22,15 +24,15 @@ DEFAULT_BLOCK_FACTORY = BasicConv(
 DEFAULT_AGGREGATOR_FACTORY = Linear
 
 
+
 def _calculate_output_scales(base_scale, downsampling_factors):
     """
     Calculate output scales for skip connections.
     """
+    base_scale = Scale(base_scale)
     scl = base_scale
     scales = []
     for f_d in downsampling_factors:
-        if not isinstance(f_d, (int, float)):
-            f_d = max(f_d)
         scl = f_d * scl
         scales.append(scl)
     return scales
@@ -61,7 +63,7 @@ class Encoder(nn.Module, ParamCount):
         block_factory: Optional[Callable[[int, int], nn.Module]] = None,
         stage_factory: Optional[Callable[[int, int], nn.Module]] = None,
         downsampler_factory: Callable[[int, int], nn.Module] = None,
-        base_scale: int = 1,
+        base_scale: Union[int, np.ndarray] = Scale(1),
         skip_connections: bool = True,
     ):
         """
@@ -84,7 +86,7 @@ class Encoder(nn.Module, ParamCount):
             downsampler_factory: Optional factory to create downsampling
                 layers. If not provided, the block factory must provide
                 downsampling functionality.
-            base_scale: An integer representing the scale of the input to
+            base_scale: An floating point number representing the scale of the input to
                 the encoder. Will be used to calculate the scales corresponding
                 to each stage of the encoder.
             skip_connections: If 'True', the encoder will return the outputs
@@ -192,7 +194,7 @@ class Encoder(nn.Module, ParamCount):
         """
         return {scl: chans for scl, chans in zip(self.scales, self.channels)}
 
-    def forward_with_skips(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+    def forward_with_skips(self, x: torch.Tensor) -> Dict[Tuple[int], torch.Tensor]:
         """
         Legacy implementation of the forward_with_skips function of the
         SpatialEncoder.
@@ -201,9 +203,8 @@ class Encoder(nn.Module, ParamCount):
             x: A ``torch.Tensor`` to feed into the encoder.
 
         Return:
-            A list containing the outputs of each encoder stage with the
-            last element in the list corresponding to the output of the
-            last encoder stage.
+            A dictionary mapping scale tuples to corresponding feature
+            tensors.
         """
         y = x
         skips = {}
@@ -243,15 +244,16 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
 
     def __init__(
         self,
-        inputs: Dict[str, int],
-        channels: Union[int],
+        inputs: Dict[str, Tuple[int]],
+        channels: List[int],
         stage_depths: List[int],
         downsampling_factors: List[int] = None,
+        input_channels: Dict[str, int] = None,
         block_factory: Optional[Callable[[int, int], nn.Module]] = None,
         aggregator_factory: Optional[Callable[[int], nn.Module]] = None,
         stage_factory: Optional[Callable[[int, int], nn.Module]] = None,
         downsampler_factory: Callable[[int, int, int], nn.Module] = None,
-        base_scale: int = 1,
+        base_scale: Union[int, Tuple[int]] = 1,
         skip_connections: bool = True,
     ):
         """
@@ -261,27 +263,48 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
             channels: A list specifying the channels in each stage of the
                  encoder.
             stage_depths: The depth of each stage in the encoder.
+            downsampling_factors: A list of integers, tuples or Scale objects
+                defining the degree of downsampling applied between consecutive
+                stages.
+            input_channels: An optional dictionary mapping input names to
+                the corresponding number of input channels.
             block_factory: Factory to create the blocks in each stage.
+            aggregator_factory: Factory object to use to create the aggregation
+                blocks.
             stage_factory: Optional stage factory to create the encoder
                 stages. Defaults to ``SequentialStageFactory``.
             downsampler_factory: Optional factory to create downsampling
                 layers. If not provided, the block factory must provide
                 downsampling functionality.
-            aggregator_factory: Factory to create block to merge inputs.
             base_scale: The scale of the input with the highest resolution.
             skip_connections: If 'True', the encoder will return the outputs
-                from the end of each stage, which can forward to a decoder
-                that expects skip connections.
+                from the end of each stage, to forward to a decoder that
+                expects skip connections.
         """
         # If input dict contain channels use that to determine
         # number of inputs to first stage.
+
+        base_scale = Scale(base_scale)
+        scale = base_scale
+
+        scale_chans = {scale: channels[0]}
+        for chans, f_d in zip(channels[1:], downsampling_factors):
+            scale *= f_d
+            if not scale in scale_chans:
+                scale_chans[scale] = chans
+
         input_chans = {}
-        for scale in inputs.values():
-            if isinstance(scale, tuple):
-                input_chans.setdefault(scale[0], []).append(scale[1])
+        for input_name, scl in inputs.items():
+            scl = Scale(scl)
+            if input_channels is None or input_name not in input_channels:
+                input_chans.setdefault(scl, []).append(scale_chans[scl])
+            else:
+                input_chans.setdefault(scl, []).append(input_channels[input_name])
+
+
         in_channels = None
         if len(input_chans) > 0:
-            min_scale = min(list(input_chans.keys()))
+            min_scale = min(input_chans.keys())
             in_channels = input_chans[min_scale]
             if len(in_channels) == 1:
                 in_channels = in_channels[0]
@@ -312,22 +335,10 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
 
         # Parse inputs into stage_inputs, which maps stage indices to
         # input names, and create stems.
-        self.stage_inputs = {scale: [] for scale in self.scales}
-
-        # Mapping of scales to corresponding channels numbers.
-        scale_channels = {}
-        for scl, chans in zip(self.scales, channels):
-            if not scl in scale_channels:
-                scale_channels[scl] = chans
-
-        input_channels = {}
+        self.stage_inputs = {}
         for input_name, scale in inputs.items():
-            if isinstance(scale, tuple):
-                scale, input_chans = scale
-                input_channels[input_name] = input_chans
-            else:
-                input_channels[input_name] = scale_channels[scale]
-            self.stage_inputs[scale].append(input_name)
+            scale = Scale(scale)
+            self.stage_inputs.setdefault(scale, []).append(input_name)
 
             if not scale in self.scales:
                 raise ValueError(
@@ -337,18 +348,18 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
 
         # Create aggregators for all inputs at each scale.
         for ind, (scale, names) in enumerate(self.stage_inputs.items()):
-            if scale > self.base_scale:
-                inpts = {name: input_channels[name] for name in names}
-                if len(inpts) > 0:
-                    inpts["__enc__"] = scale_channels[scale]
+            if scale != self.base_scale:
+                if scale in self.stage_inputs:
+                    inpts = dict(zip(self.stage_inputs[scale], input_chans[scale]))
+                    inpts["__enc__"] = scale_chans[scale]
                     self.aggregators[str(scale)] = aggregator_factory(
-                        inpts, scale_channels[scale]
+                        inpts, scale_chans[scale]
                     )
             # Multiple inputs at base scale.
             elif len(names) > 1:
-                inpts = {name: input_channels[name] for name in names}
+                inpts = dict(zip(self.stage_inputs[scale], input_chans[scale]))
                 self.aggregators[str(scale)] = aggregator_factory(
-                    inpts, scale_channels[scale]
+                    inpts, scale_chans[scale]
                 )
 
     def forward_with_skips(self, x: torch.Tensor) -> Dict[set, torch.Tensor]:
@@ -367,6 +378,7 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
         # Need to keep track of repeating scales to avoid aggregating inputs multiple
         # times.
         prev_scale = -1
+        first_stage = True
 
         for scale, down, stage in zip(self.scales, self.downsamplers, self.stages):
             # Apply downsampling
@@ -375,15 +387,17 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
 
             # Collect inputs
             agg_inputs = []
-            inputs = self.stage_inputs[scale] if scale != prev_scale else []
+            inputs = self.stage_inputs.get(scale, []) if scale != prev_scale else []
 
             # Aggregate and propagate through stage
             if y is not None:
                 if self.aggregate_after:
                     y = stage(y)
+                    first_stage = False
 
             if y is None and len(inputs) == 1:
                 y = stage(x[inputs[0]])
+                first_stage = False
             elif len(inputs) > 0:
                 agg_inputs = {inpt: x[inpt] for inpt in inputs}
                 if y is not None:
@@ -396,8 +410,10 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
                 else:
                     y = next(iter(agg_inputs.values()))
 
-            if not self.aggregate_after:
+            if first_stage or not self.aggregate_after:
+                first_stage = False
                 y = stage(y)
+
 
             prev_scale = scale
             skips[scale] = y
@@ -437,16 +453,19 @@ class MultiInputSharedEncoder(Encoder, ParamCount):
 
             # Collect inputs
             agg_inputs = []
-            inputs = self.stage_inputs[scale] if scale != prev_scale else []
+            inputs = self.stage_inputs.get(scale, []) if scale != prev_scale else []
 
             # Aggregate and propagate through stage
             if y is not None:
                 if self.aggregate_after:
                     y = stage(y)
 
+            if y is None and len(inputs) == 1:
+                y = stage(x[inputs[0]])
             if len(inputs) > 0:
                 agg_inputs = {inpt: x[inpt] for inpt in inputs}
-                agg_inputs["__enc__"] = y
+                if y is not None:
+                    agg_inputs["__enc__"] = y
 
                 scl = str(scale)
                 if scl in self.aggregators:

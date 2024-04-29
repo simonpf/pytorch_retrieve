@@ -18,6 +18,7 @@ from torch import nn
 import torch
 import yaml
 
+import pytorch_retrieve.modules.transformations
 from pytorch_retrieve.modules import output
 
 
@@ -142,13 +143,15 @@ class InputConfig:
     """
 
     n_features: int
-    scale: int = 1
+    scale: Tuple[int] = (1, 1)
     normalize: str = "none"
 
     @classmethod
     def parse(cls, name, cfg):
         n_features = get_config_attr("n_features", int, cfg, f"input.{name}")
-        scale = get_config_attr("scale", int, cfg, f"input.{name}", 1)
+        scale = get_config_attr("scale", None, cfg, f"input.{name}", 1)
+        if isinstance(scale, int):
+            scale = (scale, scale)
         normalize = get_config_attr("normalize", str, cfg, f"input.{name}", "none")
         return InputConfig(n_features, scale=scale, normalize=normalize)
 
@@ -169,6 +172,7 @@ class OutputConfig:
     kind: str
     shape: List[int]
     quantiles: Optional[Union[int, List[float]]] = None
+    transformation: Optional[str] = None
 
     @classmethod
     def parse(cls, name, cfg):
@@ -178,7 +182,8 @@ class OutputConfig:
 
         if isinstance(shape, int):
             shape = (shape,)
-        else:
+
+        if not isinstance(shape, int):
             try:
                 shape = tuple(shape)
             except ValueError:
@@ -189,12 +194,14 @@ class OutputConfig:
                 )
 
         quantiles = get_config_attr("quantiles", None, cfg, f"output.{name}")
+        transformation = get_config_attr("transformation", None, cfg, f"output.{name}")
 
         return OutputConfig(
             target=target,
             kind=kind,
             shape=shape,
-            quantiles=quantiles
+            quantiles=quantiles,
+            transformation=transformation
         )
 
 
@@ -231,16 +238,27 @@ class OutputConfig:
         """
         Get output layer for output.
         """
+        transformation = self.transformation
+        if transformation is not None:
+            try:
+                transformation = getattr(pytorch_retrieve.modules.transformations, transformation)()
+            except AttributeError:
+                raise ValueError(
+                    f"The transformation {transformation} is not known. Please refere to the "
+                    "'pytorch_retrieve.modules.transformations' module for available transformations."
+                )
+
+
         kind = self.kind
         if kind == "Mean":
-            return output.Mean(self.target, self.shape)
+            return output.Mean(self.target, self.shape, transformation=transformation)
         if kind == "Quantiles":
             quantiles = self.quantiles
             if isinstance(quantiles, int):
                 quantiles = np.linspace(0, 1, quantiles + 2)[1:-1]
             elif isinstance(quantiles, list):
                 quantiles = np.array(list)
-            return output.Quantiles(self.target, self.shape, tau=quantiles)
+            return output.Quantiles(self.target, self.shape, tau=quantiles, transformation=transformation)
         raise RuntimeError(
             f"The output kind '{kind}' is currently not supported. Refer to "
             "the documentation of the pytorch_retrieve.modules.output module "
