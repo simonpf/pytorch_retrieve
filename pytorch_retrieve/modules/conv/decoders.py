@@ -444,13 +444,11 @@ class MultiScalePropagator(nn.Module, ParamCount):
             scale_steps = ceil(n_steps / t_scale)
             preds = list(torch.unbind(inputs[scale][:, :, -self.order:], 2))
 
-
             for step in range(scale_steps):
                 if prev_preds is None:
                     inpt = torch.cat(preds[-self.order:], 1)
                 else:
                     inpt = torch.cat(preds[-self.order:] + [prev_preds[step]], 1)
-
                 pred_step = stage(inpt)
 
                 if self.residual and prev_preds is not None:

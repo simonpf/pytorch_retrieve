@@ -143,7 +143,6 @@ def test_multi_scale_propagator():
     }
     channels = [48, 24, 12]
     stage_depths = [4, 3, 2]
-
     block_factory = blocks.BasicConv()
 
     propagator = MultiScalePropagator(
@@ -174,7 +173,6 @@ def test_multi_scale_propagator():
     y = propagator(x, 3)
     assert len(y) == 3
     assert y[0].shape == (2, 16, 64, 64)
-
 
     # Synthetic case with deterministic output values.
     stage_depths = [1, 1, 1]
