@@ -72,12 +72,12 @@ class ScalarMetric:
         value = self.compute()
         name = self.name
         if output_name is not None:
-            name += f" ({output_name})"
+            name = f"{name} ({output_name})"
 
         sync_dist = lightning_module.device != torch.device("cpu")
 
         lightning_module.log(
-            self.name,
+            name,
             value,
             on_step=False,
             on_epoch=True,
