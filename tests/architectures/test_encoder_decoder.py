@@ -17,6 +17,28 @@ from pytorch_retrieve.architectures.encoder_decoder import (
 from conftest import data_loader_3d
 
 
+def test_stem_config():
+    """
+    Test that up- and down-sampling in stem are handled correctly.
+    """
+    stem_config = StemConfig(
+        "x", 4, (2, 2), "BasicConv",
+        out_channels=12,
+        depth=2,
+        downsampling=(4, 4),
+        upsampling=(2, 2),
+        normalize="none"
+    )
+    assert stem_config.out_scale == (1, 4, 4)
+
+    stem = stem_config.compile()
+
+    x = torch.rand(1, 4, 32, 32)
+    y = stem(x)
+    assert y.shape == (1, 12, 16, 16)
+
+
+
 def test_encoder_decoder_multiple_block_factories():
     """
     Ensure that passing multiple block factories to encoder results in an encoder with

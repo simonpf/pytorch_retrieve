@@ -225,6 +225,8 @@ class StemConfig:
     out_channels: int
     depth: int = (0,)
     downsampling: Union[int, Tuple[int]] = 1
+    upsampling: Union[int, Tuple[int]] = 1
+    upsampling_factory: str = "Bilinear"
     normalize: Optional[str] = None
 
     @classmethod
@@ -271,6 +273,12 @@ class StemConfig:
         downsampling = get_config_attr(
             "downsampling", None, config_dict, f"architecture.stem.{name}", 1
         )
+        upsampling = get_config_attr(
+            "upsampling", None, config_dict, f"architecture.stem.{name}", 1
+        )
+        upsampling_factory = get_config_attr(
+            "upsampling_factory", None, config_dict, f"architecture.stem.{name}", "Bilinear"
+        )
         if isinstance(downsampling, list):
             downsampling = tuple(downsampling)
 
@@ -283,12 +291,19 @@ class StemConfig:
             out_channels=out_channels,
             depth=depth,
             downsampling=downsampling,
+            upsampling=upsampling,
+            upsampling_factory=upsampling_factory,
             normalize=normalize,
         )
 
     @property
-    def out_scale(self):
-        return self.in_scale * self.downsampling
+    def out_scale(self) -> Scale:
+        scale = Scale(self.in_scale)
+        if self.upsampling is not None:
+            scale = scale // self.upsampling
+        if self.downsampling is not None:
+            scale = scale * self.downsampling
+        return scale
 
 
     def to_config_dict(self) -> Dict[str, object]:
@@ -310,6 +325,16 @@ class StemConfig:
         blocks = []
         if self.normalize != "none":
             blocks.append(StandardizationLayer(self.input_name, self.in_channels))
+
+        if self.upsampling is not None:
+            upsampling = Scale(self.upsampling)
+            if max(upsampling.scale) > 1:
+                upsampling_factory = get_upsampling_factory(self.upsampling_factory)()
+                blocks.append(
+                    upsampling_factory(
+                        self.in_channels, self.in_channels, self.upsampling
+                    )
+                )
 
         stem_factory = get_stem_factory(self.kind)
         blocks.append(
