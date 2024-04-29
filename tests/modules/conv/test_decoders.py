@@ -4,8 +4,6 @@ Tests for the pytorch_retrieve.modules.conv.decoders module.
 import torch
 from torch import nn
 
-
-
 from pytorch_retrieve.modules.conv import blocks
 from pytorch_retrieve.modules.conv.encoders import Encoder
 from pytorch_retrieve.modules.conv.decoders import Decoder, MultiScalePropagator
@@ -144,6 +142,7 @@ def test_multi_scale_propagator():
     }
     channels = [48, 24, 12]
     stage_depths = [4, 3, 2]
+
     block_factory = blocks.BasicConv()
 
     propagator = MultiScalePropagator(
