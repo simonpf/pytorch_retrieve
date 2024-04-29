@@ -364,7 +364,11 @@ class PropagatorConfig:
         """
 
         stem_config = encoder_decoder.StemConfig(
+<<<<<<< HEAD
             "latent", latent_dim, (1, 1), "none", order * latent_dim, 0, 1, upsampling=1
+=======
+            "latent", latent_dim, (1, 1), "none", order * latent_dim, 0, 1, "none"
+>>>>>>> 978c1f6 (Fix scale handling in encoder/decoder architecture.)
         )
         encoder_dict = get_config_attr("encoder", None, config_dict, "architecture.propagator", required=True)
         encoder_dict["channels"][0] = order * latent_dim

@@ -297,6 +297,7 @@ class StemConfig:
         )
 
     @property
+<<<<<<< HEAD
     def out_scale(self) -> Scale:
         scale = Scale(self.in_scale)
         if self.upsampling is not None:
@@ -304,6 +305,11 @@ class StemConfig:
         if self.downsampling is not None:
             scale = scale * self.downsampling
         return scale
+=======
+    def out_scale(self):
+        return self.in_scale * self.downsampling
+
+>>>>>>> 978c1f6 (Fix scale handling in encoder/decoder architecture.)
 
     def to_config_dict(self) -> Dict[str, object]:
         """
