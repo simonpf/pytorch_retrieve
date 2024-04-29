@@ -1,6 +1,7 @@
 """
 Tests for the pytorch_retrieve.inference module.
 """
+import toml
 import torch
 from torch import nn
 
@@ -8,7 +9,8 @@ from pytorch_retrieve.inference import (
     BatchProcessor,
     batch_size_rec,
     cat_n_rec,
-    to_rec
+    to_rec,
+    InferenceConfig
 )
 
 
@@ -124,3 +126,43 @@ def test_batch_processor_irregular(tmp_path):
     results = torch.cat(results, 0)
 
     assert torch.isclose(x, results).all()
+
+
+INFERENCE_CONFIG = """
+batch_size = 12
+tile_size = [32, 32]
+spatial_overlap = 8
+temporal_overlap = 0
+
+[output.surface_precip]
+surface_precip_mean = "ExpectedValue"
+surface_precip_median = {quantity="Quantiles", tau=[0.5]}
+surface_precip_heavy = {quantity="ExceedanceProbability", threshold=10.0}
+"""
+
+def test_inference_config():
+    """
+    Test parsing of inference configs.
+    """
+    inference_config = toml.loads(INFERENCE_CONFIG)
+    inference_config = InferenceConfig.parse(inference_config)
+
+    assert inference_config.batch_size == 12
+    assert inference_config.tile_size == (32, 32)
+    assert inference_config.spatial_overlap == 8
+    assert inference_config.temporal_overlap == 0
+
+    qty = inference_config.output["surface_precip"]["surface_precip_mean"]
+    assert qty.quantity == "ExpectedValue"
+
+    ic_saved = toml.dumps(inference_config.to_dict())
+    inference_config_loaded = toml.loads(ic_saved)
+    inference_config_loaded = InferenceConfig.parse(inference_config_loaded)
+
+    assert inference_config_loaded.batch_size == 12
+    assert inference_config_loaded.tile_size == (32, 32)
+    assert inference_config_loaded.spatial_overlap == 8
+    assert inference_config_loaded.temporal_overlap == 0
+
+    qty = inference_config_loaded.output["surface_precip"]["surface_precip_mean"]
+    assert qty.quantity == "ExpectedValue"

@@ -29,6 +29,7 @@ class RetrievalModel(ParamCount, nn.Module):
         """
         super().__init__()
         self.config_dict = config_dict
+        self.inference_config = None
 
     @classmethod
     def load(cls, path: Path) -> nn.Module:
@@ -41,7 +42,9 @@ class RetrievalModel(ParamCount, nn.Module):
         Return:
             The loaded model.
         """
+        from pytorch_retrieve.inference import InferenceConfig
         from . import compile_architecture
+
         path = Path(path)
         loaded = torch.load(path)
         model = compile_architecture(loaded["model_config"])
@@ -49,7 +52,14 @@ class RetrievalModel(ParamCount, nn.Module):
         if path.suffix == ".ckpt":
             state = {key[6:]: val for key, val in state.items()}
         model.load_state_dict(state)
+
+        inference_config = loaded.get("inference_config", None)
+        if inference_config is not None:
+            inference_config = InferenceConfig.parse(inference_config)
+        model.inference_config = inference_config
+
         return model
+
 
     def save(self, path: Path) -> Path:
         """
@@ -60,7 +70,18 @@ class RetrievalModel(ParamCount, nn.Module):
         """
         state = self.state_dict()
         model_config = self.config_dict
-        torch.save({"state_dict": state, "model_config": model_config}, path)
+        if hasattr(self, "inference_config"):
+            inference_config = self.inference_config
+            if inference_config is not None:
+                inference_config = inference_config.to_dict()
+        torch.save(
+            {
+                "state_dict": state,
+                "model_config": model_config,
+                "inference_config": inference_config
+            },
+            path
+        )
 
     def to_config_dict(self) -> Dict[str, object]:
         """

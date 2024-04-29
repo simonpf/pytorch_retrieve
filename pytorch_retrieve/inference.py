@@ -4,7 +4,7 @@ pytorch_retrieve.inference
 
 This module implements generic inference functionality for pytorch_retrieve retrievals.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 import logging
 import importlib
 from pathlib import Path
@@ -26,6 +26,7 @@ from pytorch_retrieve.tensors import (
 )
 from pytorch_retrieve.tiling import Tiler
 from pytorch_retrieve.architectures import load_model
+from pytorch_retrieve.config import get_config_attr
 
 
 LOGGER = logging.getLogger(__name__)
@@ -120,6 +121,37 @@ def to_rec(tensor, device=None, dtype=None) -> Any:
 
 
 @dataclass
+class InferenceOutput:
+    """
+    Describes inference output to be calculated from the model predictions.
+    """
+    quantity: str
+    parameters: Optional[Dict[str, Any]] = None
+
+    @staticmethod
+    def parse(name: str, config_dict: Union[str, Dict[str, Any]]) -> "InferenceOutput":
+
+        if isinstance(config_dict, str):
+            return InferenceOutput(config_dict)
+
+        quantity = config_dict.pop("quantity", None)
+        if quantity is None:
+            raise RuntimeError(
+                f"Inference output for quantity '{name}' lacks 'quantity' attribute."
+            )
+        return InferenceOutput(
+            quantity=quantity,
+            parameters=config_dict
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        dct = {"quantity": self.quantity}
+        if self.parameters is not None:
+            dct["parameters"] = self.parameters
+        return dct
+
+
+@dataclass
 class InferenceConfig:
     """
     Defines which output quantities to compute for a given output.
@@ -128,7 +160,99 @@ class InferenceConfig:
     tile_size: Optional[Tuple[int, int]] = None
     spatial_overlap: Optional[Tuple[int, int]] = None
     temporal_overlap: Optional[int] = None
+    input_loader: Optional[str] = None
+    input_loader_args: Optional[Dict[str, Any]] = None
+    output: Optional[Dict[str, Dict[str, InferenceOutput]]] = None
 
+    @staticmethod
+    def parse(config_dict: Dict[str, Any]) -> "InferenceConfig":
+
+        batch_size = get_config_attr(
+            "batch_size",
+            int,
+            config_dict,
+            "inference config",
+            default=8
+        )
+
+        tile_size = get_config_attr(
+            "tile_size",
+            None,
+            config_dict,
+            "inference config",
+            default=None
+        )
+        if tile_size is not None:
+            if isinstance(tile_size, int):
+                tile_size = (tile_size, tile_size)
+            else:
+                tile_size = tuple(tile_size)
+
+        spatial_overlap = get_config_attr(
+            "spatial_overlap",
+            None,
+            config_dict,
+            "inference config",
+            default=None
+        )
+
+        temporal_overlap = get_config_attr(
+            "temporal_overlap",
+            None,
+            config_dict,
+            "inference config",
+            default=None
+        )
+
+        input_loader = get_config_attr(
+            "input_loader",
+            None,
+            config_dict,
+            "inference config",
+            default=None
+        )
+        input_loader_args = get_config_attr(
+            "input_loader_args",
+            None,
+            config_dict,
+            "inference config",
+            default=None
+        )
+
+        output_config = config_dict.get("output", {})
+        output = {}
+        for name, quantities in output_config.items():
+            quantities = {
+                quantity_name: InferenceOutput.parse(
+                    f"{name}.{quantity_name}",
+                    quantity_descr
+                ) for
+                quantity_name, quantity_descr in quantities.items()
+            }
+            output[name] = quantities
+
+        return InferenceConfig(
+            batch_size=batch_size,
+            tile_size=tile_size,
+            spatial_overlap=spatial_overlap,
+            temporal_overlap=temporal_overlap,
+            input_loader=input_loader,
+            input_loader_args=input_loader_args,
+            output=output
+        )
+
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert InferenceConfig to dict for serialization.
+        """
+        dct = asdict(self)
+        output = {}
+        for name, inference_outputs in self.output.items():
+            output[name] = {
+                name: output.to_dict() for name, output in inference_outputs.items()
+            }
+        return dct
 
 
 def process(
@@ -308,6 +432,8 @@ def run_inference(
     outputs = []
     arg_stack = []
     cntr = 1
+
+    model = model.eval()
 
     with Progress() as progress:
 

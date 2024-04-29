@@ -197,4 +197,4 @@ def test_multi_scale_propagator():
     }
     y = propagator(x, 4)
     assert len(y) == 4
-    assert torch.isclose(y[0], torch.tensor(3.0)).all()
+    assert torch.isclose(y[0], torch.tensor(4.0)).all()

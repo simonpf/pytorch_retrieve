@@ -85,6 +85,9 @@ class QuantileTensor(torch.Tensor):
         Return:
             The quantile loss of this tensor with respect to 'y_true'.
         """
+        if hasattr(self, "__transformation__"):
+            y_true = self.__transformation__(y_true)
+
         tau = self.tau.to(self.device, self.dtype)
         # Pad dummy dimensions to make broadcasting work.
         tau = tau.__getitem__((...,) + (None,) * (self.ndim - self.quantile_dim - 1))
@@ -131,14 +134,19 @@ class QuantileTensor(torch.Tensor):
             InvalidDimensionException: When the provided predicted quantiles do
                 not match the provided number of quantiles.
         """
+        if hasattr(self, "__transformation__"):
+            base = self.__transformation__.invert(self.base)
+        else:
+            base = self.base
+
         qdim = self.quantile_dim
-        d_x = torch.diff(self.base, dim=qdim)
+        d_x = torch.diff(base, dim=qdim)
         pad_dims = self.dim() - qdim - 1
         y_cdf = nn.functional.pad(self.tau, (1, 1))
         y_cdf[0] = 0.0
         y_cdf[-1] = 1.0
 
-        x_cdf = self.base
+        x_cdf = base
 
         d_y = self.tau[1] - self.tau[0]
         x_0 = select(x_cdf, qdim, slice(0, 1))

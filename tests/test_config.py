@@ -14,6 +14,7 @@ from pytorch_retrieve.config import (
     InputConfig,
     OutputConfig,
 )
+from pytorch_retrieve.modules.output import (Mean, Quantiles)
 
 
 def test_replace_environment_variables():
@@ -111,12 +112,14 @@ def test_input_config():
 
 OUTPUT_CONFIGS = """
 [output.y_1]
-kind = "mean"
+kind = "Mean"
 shape = [1]
 
 [output.y_2]
-kind = "quantiles"
+kind = "Quantiles"
 shape = [32]
+quantiles = 32
+transformation = "SquareRoot"
 """
 
 
@@ -133,6 +136,13 @@ def test_output_config():
 
     assert "y_1" in output_cfgs
     output_cfgs["y_1"].shape == [1]
+    output_cfgs["y_1"].get_output_shape == (1,)
+    layer = output_cfgs["y_1"].get_output_layer()
+    assert isinstance(layer, Mean)
 
     assert "y_2" in output_cfgs
     output_cfgs["y_2"].shape == [32]
+    output_cfgs["y_2"].get_output_shape == (32,)
+    layer = output_cfgs["y_2"].get_output_layer()
+    assert isinstance(layer, Quantiles)
+    assert layer.transformation is not None
