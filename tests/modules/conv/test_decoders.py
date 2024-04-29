@@ -4,6 +4,7 @@ Tests for the pytorch_retrieve.modules.conv.decoders module.
 import torch
 from torch import nn
 
+
 from pytorch_retrieve.modules.conv import blocks
 from pytorch_retrieve.modules.conv.encoders import Encoder
 from pytorch_retrieve.modules.conv.decoders import Decoder, MultiScalePropagator

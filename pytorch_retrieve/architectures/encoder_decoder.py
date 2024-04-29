@@ -305,7 +305,6 @@ class StemConfig:
             scale = scale * self.downsampling
         return scale
 
-
     def to_config_dict(self) -> Dict[str, object]:
         """
         Convert configuration object to dict representation suitable for
