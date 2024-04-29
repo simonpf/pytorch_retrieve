@@ -228,6 +228,36 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
             self.counts += torch.numel(target)
         else:
 
+            coords = []
+            for cond in self.conditional:
+                if mask is not None:
+                    coords.append(conditional[cond].squeeze()[~mask].flatten())
+                else:
+                    coords.append(conditional[cond].squeeze().flatten())
+
+            coords = torch.stack(coords, -1)
+            bins = tuple([
+                bns.to(device=pred.device, dtype=pred.dtype) for bns in self.bins
+            ])
+
+            self.x += torch.histogramdd(coords, bins=bins, weight=pred)[0]
+            self.x2 += torch.histogramdd(coords, bins=bins, weight=pred ** 2)[0]
+            self.xy += torch.histogramdd(coords, bins=bins, weight=pred * target)[0]
+            self.y += torch.histogramdd(coords, bins=bins, weight=target)[0]
+            self.y2 += torch.histogramdd(coords, bins=bins, weight=target ** 2)[0]
+            self.counts += torch.histogramdd(coords, bins=bins)[0]
+
+    def compute(self) -> torch.Tensor:
+        """
+        Calculate the correlation coefficient.
+        """
+        x_mean = self.x / self.counts
+        y_mean = self.y / self.counts
+        x_var = self.x2 / self.counts - x_mean ** 2
+        y_var = self.y2 / self.counts - y_mean ** 2
+        corr = (self.xy / self.counts - x_mean * y_mean) / torch.sqrt(x_var * y_var)
+        return corr
+
             device = torch.device("cpu")
             self.to(device)
 
