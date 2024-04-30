@@ -136,9 +136,9 @@ class ProbabilityTensor(torch.Tensor):
         """
         probs = nn.functional.softmax(self.base, dim=self.bin_dim)
         bins = self.bins.to(dtype=self.base.dtype, device=self.base.device)
-        d_x = torch.diff(bins)
+        x_c = 0.5 * (bins[1:] + bins[:-1])
         dim_pad = (...,) + (None,) * (self.base.ndim - self.bin_dim - 1)
-        exp = torch.sum(probs * d_x[dim_pad], dim=self.bin_dim)
+        exp = torch.sum(probs * x_c[dim_pad], dim=self.bin_dim)
         return exp
 
 

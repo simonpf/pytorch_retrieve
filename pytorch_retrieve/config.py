@@ -8,7 +8,7 @@ The 'pytorch_retrieve.config' module implements functionality for
 from dataclasses import dataclass, asdict
 import os
 from pathlib import Path
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import lightning as L
 from lightning.pytorch import strategies
@@ -173,6 +173,7 @@ class OutputConfig:
     shape: List[int]
     quantiles: Optional[Union[int, List[float]]] = None
     transformation: Optional[str] = None
+    dimensions: Optional[List[str]] = None
 
     @classmethod
     def parse(cls, name, cfg):
@@ -181,7 +182,10 @@ class OutputConfig:
         shape = cfg.get("shape", 1)
 
         if isinstance(shape, int):
+            scalar = True
             shape = (shape,)
+        else:
+            scalar = False
 
         if not isinstance(shape, int):
             try:
@@ -196,12 +200,38 @@ class OutputConfig:
         quantiles = get_config_attr("quantiles", None, cfg, f"output.{name}")
         transformation = get_config_attr("transformation", None, cfg, f"output.{name}")
 
+        dimensions = get_config_attr("dimensions", None, cfg, f"output.{name}", default=None)
+        if dimensions is None:
+            if scalar:
+                dimensions = []
+            else:
+                dimensions = [f"{name}_dim_{ind + 1}" for ind in range(len(shape))]
+
+
         return OutputConfig(
             target=target,
             kind=kind,
             shape=shape,
             quantiles=quantiles,
-            transformation=transformation
+            transformation=transformation,
+            dimensions=dimensions
+        )
+
+    @property
+    def extra_dimensions(self) -> List[str]:
+        """
+        Return list of the names of 'extra' dimensions included due to the kind of output.
+        """
+        kind = self.kind
+        if kind == "Mean":
+            return []
+        if kind == "Quantiles":
+            return [f"tau_{self.target}"]
+
+        raise RuntimeError(
+            f"The output kind '{kind}' is currently not supported. Refer to "
+            "the documentation of the pytorch_retrieve.modules.output module "
+            "for available outputs."
         )
 
 
@@ -233,6 +263,32 @@ class OutputConfig:
             "for available outputs."
         )
 
+    def get_output_dimensions(self) -> List[str]:
+        """
+        Return the dimensions of a tensor of the output excluding batch and spatial
+        dimensions.
+        """
+        dims = self.dimensions
+        if dims is None:
+            dims = []
+        return self.extra_dimensions + dims
+
+    def get_output_coordinates(self) -> Dict[str, np.ndarray]:
+        """
+        Return a dictionary of output dimension names and corresponding coordinates.
+        """
+        if self.kind == "Mean":
+            return {}
+        if self.kind == "Quantiles":
+            quantiles = self.quantiles
+            if isinstance(quantiles, int):
+                quantiles = np.linspace(0, 1, quantiles + 2)[1:-1]
+            elif isinstance(quantiles, list):
+                quantiles = np.array(list)
+            return {f"tau_{self.target}": quantiles}
+        raise ValueError(
+            f"Output kind {self.kind} is not supported."
+        )
 
     def get_output_layer(self) -> nn.Module:
         """

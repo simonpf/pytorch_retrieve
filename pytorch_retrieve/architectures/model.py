@@ -12,6 +12,7 @@ from typing import Dict
 import torch
 from torch import nn
 
+from pytorch_retrieve.config import InputConfig, OutputConfig
 from pytorch_retrieve.modules.utils import ParamCount
 
 
@@ -46,7 +47,7 @@ class RetrievalModel(ParamCount, nn.Module):
         from . import compile_architecture
 
         path = Path(path)
-        loaded = torch.load(path)
+        loaded = torch.load(path, map_location=torch.device("cpu"))
         model = compile_architecture(loaded["model_config"])
         state = loaded["state_dict"]
         if path.suffix == ".ckpt":
@@ -82,6 +83,25 @@ class RetrievalModel(ParamCount, nn.Module):
             },
             path
         )
+
+    @property
+    def input_config(self) -> Dict[str, OutputConfig]:
+        """
+        A dictionary mapping names of the model inputs to corresponding InputConfig object.
+        """
+        return {
+            name: InputConfig.parse(name, cfg) for name, cfg in self.config_dict["input"].items()
+        }
+
+    @property
+    def output_config(self) -> Dict[str, OutputConfig]:
+        """
+        A dictionary mapping names of the model output to corresponding OutputConfig object.
+        """
+        return {
+            name: OutputConfig.parse(name, cfg) for name, cfg in self.config_dict["output"].items()
+        }
+
 
     def to_config_dict(self) -> Dict[str, object]:
         """

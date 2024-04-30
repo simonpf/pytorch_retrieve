@@ -279,7 +279,7 @@ def test_expected_value():
     probabilities[:, 0] = 100.0
     prob_tensor = ProbabilityTensor(probabilities, bins=bins, bin_dim=1)
     exp = prob_tensor.expected_value()
-    assert np.isclose(exp, torch.tensor(0.1)).all()
+    assert np.isclose(exp, torch.tensor(0.05)).all()
 
 
 def test_probability_less_and_greater_than():

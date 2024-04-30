@@ -24,9 +24,12 @@ from pytorch_retrieve.tensors import (
     MeanTensor,
     QuantileTensor,
 )
+import pytorch_retrieve
+from pytorch_retrieve.architectures import RetrievalModel
 from pytorch_retrieve.tiling import Tiler
 from pytorch_retrieve.architectures import load_model
-from pytorch_retrieve.config import get_config_attr
+from pytorch_retrieve.config import get_config_attr, OutputConfig
+from pytorch_retrieve.retrieval_output import RetrievalOutput
 
 
 LOGGER = logging.getLogger(__name__)
@@ -120,34 +123,116 @@ def to_rec(tensor, device=None, dtype=None) -> Any:
     )
 
 
+def get_dimensions(
+        result_name: str,
+        output_cfg: Optional[Dict[str, OutputConfig]],
+        inference_cfg: Optional["InferenceConfig"],
+
+) -> Tuple[str]:
+    """
+    Try and infer dimensions from inference and output config.
+
+    Args:
+        result_name: The name of the inference results.
+        output_cfg: A dictionary containing the output configuration of
+            the model.
+        inference_cfg: The inference configuration.
+
+    Return:
+        A tuple containing the dimensions name if 'result_name' is found in
+        either the retrieval results or the output config. Otherwise, 'None'.
+    """
+    retrieval_output_cfg = None
+    if inference_cfg is not None:
+        for name, outputs in inference_cfg.retrieval_output.items():
+            for output_name, output_cfg in outputs.items():
+                if output_name == result_name:
+                    retrieval_output_cfg = output_cfg
+    if retrieval_output_cfg is not None:
+        return tuple(retrieval_output_cfg.output.dimensions)
+
+    if result_name in output_cfg:
+        return tuple(output_cfg[results_name].dimensions)
+
+    return None
+
+
 @dataclass
-class InferenceOutput:
+class RetrievalOutputConfig:
     """
     Describes inference output to be calculated from the model predictions.
     """
-    quantity: str
-    parameters: Optional[Dict[str, Any]] = None
+    output_config: OutputConfig
+    retrieval_output: str
+    parameters: Optional[Dict[str, Any]]
+
+    def __init__(
+            self,
+            output_config: OutputConfig,
+            retrieval_output: str,
+            parameters: Optional[Dict[str, Any]] = None,
+    ):
+        self.output_config = output_config
+        self.retrieval_output = retrieval_output
+        self.parameters = parameters
+
+        try:
+            output_class = getattr(pytorch_retrieve.retrieval_output, retrieval_output)
+        except AttributeError:
+            raise RuntimeError(
+                f"Could not find a retrieval output class matching the name '{retrieval_output}'. Please "
+                "refer to the 'pytorch_retrieve.retrieval_output' module for available output classes."
+            )
+
+        try:
+            if parameters is None:
+                self.output = output_class(output_config)
+            else:
+                self.output = output_class(output_config, **parameters)
+        except ValueError:
+            raise RuntimeError(
+                f"Coud not instantiate retrieval output class '{retrieval_output}' with given parameters "
+                f"{parameters}. Plase refer to the 'pytorch_retrieve.retrieval_output' module for available "
+                " output classes."
+            )
+
 
     @staticmethod
-    def parse(name: str, config_dict: Union[str, Dict[str, Any]]) -> "InferenceOutput":
+    def parse(
+            name: str,
+            output_cfg: OutputConfig,
+            config_dict: Union[str, Dict[str, Any]]
+    ) -> "RetrievalOuputConfig":
+        """
+        Parse retrieval output config.
 
+        Args:
+            name: The name of the retrieval output.
+            output_cfg: The OutputConfig object describing the model output from which the retrieval
+                output is computed.
+            config_dict: The dictionary from which to parse the RetrievalOutputConfig.
+        """
         if isinstance(config_dict, str):
-            return InferenceOutput(config_dict)
+            return RetrievalOutputConfig(output_cfg, config_dict, None)
 
-        quantity = config_dict.pop("quantity", None)
-        if quantity is None:
+        retrieval_output = config_dict.pop("retrieval_output", None)
+        if retrieval_output is None:
             raise RuntimeError(
-                f"Inference output for quantity '{name}' lacks 'quantity' attribute."
+                f"Retrieval output entry for output '{name}' lacks '{retrieval_output}' attribute."
             )
-        return InferenceOutput(
-            quantity=quantity,
-            parameters=config_dict
+        return RetrievalOutputConfig(
+            output_config=output_cfg,
+            retrieval_output=retrieval_output,
+            parameters=config_dict,
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        dct = {"quantity": self.quantity}
+        """
+        Return dictionary representation of retrieval output.
+        """
+        dct = {"retrieval_output": self.retrieval_output}
         if self.parameters is not None:
-            dct["parameters"] = self.parameters
+            dct.update(self.parameters)
         return dct
 
 
@@ -162,11 +247,24 @@ class InferenceConfig:
     temporal_overlap: Optional[int] = None
     input_loader: Optional[str] = None
     input_loader_args: Optional[Dict[str, Any]] = None
-    output: Optional[Dict[str, Dict[str, InferenceOutput]]] = None
+    retrieval_output: Optional[Dict[str, Dict[str, RetrievalOutputConfig]]] = None
 
     @staticmethod
-    def parse(config_dict: Dict[str, Any]) -> "InferenceConfig":
+    def parse(
+        output_cfg: Dict[str, OutputConfig],
+        config_dict: Dict[str, Any],
+    ) -> "InferenceConfig":
+        """
+        Parse inference config.
 
+        Args:
+            config_dict: A dictionary describing the inference settings.
+            output_cfg: A dictionary mapping model output names to corresponding OutputConfig
+                objects.
+
+        Return:
+            An InferenceConfig object holding the inference configuration.
+        """
         batch_size = get_config_attr(
             "batch_size",
             int,
@@ -219,17 +317,25 @@ class InferenceConfig:
             default=None
         )
 
-        output_config = config_dict.get("output", {})
-        output = {}
-        for name, quantities in output_config.items():
-            quantities = {
-                quantity_name: InferenceOutput.parse(
-                    f"{name}.{quantity_name}",
-                    quantity_descr
+        retrieval_output_dct = config_dict.get("retrieval_output", {})
+        retrieval_output = {}
+        for model_output, outputs in retrieval_output_dct.items():
+
+            if model_output not in output_cfg:
+                raise ValueError(
+                    f"Found output name '{model_output}' in inference config but model has no "
+                    f"corresponding output."
+                )
+
+            outputs = {
+                output_name: RetrievalOutputConfig.parse(
+                    f"{model_output}.{output_name}",
+                    output_cfg[model_output],
+                    cfg_dict,
                 ) for
-                quantity_name, quantity_descr in quantities.items()
+                output_name, cfg_dict in outputs.items()
             }
-            output[name] = quantities
+            retrieval_output[model_output] = outputs
 
         return InferenceConfig(
             batch_size=batch_size,
@@ -238,7 +344,7 @@ class InferenceConfig:
             temporal_overlap=temporal_overlap,
             input_loader=input_loader,
             input_loader_args=input_loader_args,
-            output=output
+            retrieval_output=retrieval_output
         )
 
 
@@ -247,18 +353,20 @@ class InferenceConfig:
         Convert InferenceConfig to dict for serialization.
         """
         dct = asdict(self)
-        output = {}
-        for name, inference_outputs in self.output.items():
-            output[name] = {
-                name: output.to_dict() for name, output in inference_outputs.items()
+        retrieval_output = {}
+        for name, target_outputs in self.retrieval_output.items():
+            retrieval_output[name] = {
+                name: output.to_dict() for name, output in target_outputs.items()
             }
+        dct["retrieval_output"] = retrieval_output
         return dct
+
 
 
 def process(
         model: nn.Module,
-        inputs,
-        inference_config: Dict[str, InferenceConfig],
+        inputs: Dict[str, torch.Tensor],
+        inference_config: InferenceConfig,
         device: torch.device = torch.device("cpu"),
         dtype: torch.dtype = torch.float32
 ):
@@ -271,14 +379,35 @@ def process(
     results = {}
     with torch.no_grad():
         preds = model(inputs)
-        if isinstance(preds, torch.Tensor):
-            preds = {"retrieved": preds}
-        for key, tensor in preds.items():
-            if isinstance(tensor, (QuantileTensor, MeanTensor, ProbabilityTensor)):
-                results[key] = tensor.expected_value().cpu()
+        if isinstance(preds, dict):
+            for key, tensor in preds.items():
+                if inference_config is None:
+                    retrieval_output = None
+                else:
+                    retrieval_output = inference_config.retrieval_output.get(key, None)
+                if retrieval_output is None:
+                    results[key] = tensor
+                else:
+                    for output_name, output in retrieval_output.items():
+                        results[output_name] = output.output.compute(tensor)
+        else:
+            if inference_config is None:
+                results["retrieved"] = preds
+            elif len(inference_config.retrieval_output) > 1:
+                raise ValueError(
+                    "The model output is a single tensor but retrieval outputs "
+                    "for more than one output are provided."
+                )
+            elif len(inference_config.retrieval_output) == 1:
+                retrieval_output = next(
+                    iter(inference_config.retrieval_output.values())
+                )
+                for output_name, output in retrieval_output.items():
+                    results[output_name] = output.output.compute(preds)
             else:
-                results[key] = tensor.cpu()
+                results["retrieved"] = preds
     return results
+
 
 
 class BatchProcessor:
@@ -290,7 +419,7 @@ class BatchProcessor:
             self,
             model: nn.Module,
             batch_size: int,
-            inference_config: Dict[str, InferenceConfig] = None,
+            inference_config: InferenceConfig = None,
             device: str = "cuda",
             dtype: str = "float32"
     ):
@@ -299,9 +428,6 @@ class BatchProcessor:
         self.batch_size = batch_size
         self.input_queue = Queue(maxsize=batch_size)
         self.output_queue = Queue()
-
-        if inference_config is None:
-            inference_config = {}
         self.inference_config = inference_config
         if isinstance(device, str):
             device = torch.device(device)
@@ -434,6 +560,11 @@ def run_inference(
     cntr = 1
 
     model = model.eval()
+    if isinstance(model, RetrievalModel):
+        output_cfg = model.output_config
+    else:
+        output_cfg = None
+
 
     with Progress() as progress:
 
@@ -444,7 +575,10 @@ def run_inference(
         while True:
 
             try:
-                input_data, *args = next(input_iterator)
+                input_data = next(input_iterator)
+                args = []
+                if isinstance(input_data, tuple):
+                    input_data, *args = input_data
             except StopIteration:
                 break
             except Exception:
@@ -453,6 +587,7 @@ def run_inference(
                 )
                 continue
 
+
             tile_size = inference_config.tile_size
             overlap = inference_config.spatial_overlap
             batch_size = inference_config.batch_size
@@ -460,6 +595,7 @@ def run_inference(
             processor = BatchProcessor(
                 model,
                 batch_size=batch_size,
+                inference_config=inference_config,
                 device=device,
                 dtype=dtype
             )
@@ -475,14 +611,14 @@ def run_inference(
 
                 for row_ind in range(tiler.M):
                     for col_ind in range(tiler.N):
-                        outputs = processor.process(tiler.get_tile(row_ind, col_ind))
+                        results_s = processor.process(tiler.get_tile(row_ind, col_ind))
                         tile_stack.append((row_ind, col_ind))
-                        for output in outputs:
+                        for output in results_s:
                             tile_inds, *tile_stack = tile_stack
                             results_tiled.__setitem__(tile_inds, output)
 
-                outputs = processor.process(None)
-                for output in outputs:
+                results_s = processor.process(None)
+                for output in results_s:
                     tile_inds, *tile_stack = tile_stack
                     results_tiled.__setitem__(tile_inds, output)
 
@@ -494,13 +630,15 @@ def run_inference(
                     results = input_loader.finalize_results(results_ass, *args)
                 else:
                     results = {}
-                    dims = {}
                     for key, tensor in results_ass.items():
-                        dms = []
-                        for ind in range(tensor.ndim - 2):
-                            dms.append(
-                                dims.setdefault(tensor.shape[ind], f"dim_{len(dims) + 1}")
+                        dims = get_dimensions(key, output_cfg, inference_config)
+                        if dims is None:
+                            dims = tuple(
+                                [f"{key}_dim_{ind}" for ind in range(tensor.ndim - 2)]
                             )
+                        if len(dims) < tensor.ndim:
+                            tensor = torch.squeeze(tensor)
+
                         results[key] = (tuple(dims) + ("x", "y"), tensor)
                     results = xr.Dataset(results)
 
@@ -612,7 +750,8 @@ def cli(
     except ImportError:
         LOGGER.error(
             "Could not import the module '%s' containing the data loader. Please make sure "
-            "that the corresponding package and all of its dependencies are installed."
+            "that the corresponding package and all of its dependencies are installed.",
+            input_loader_module
         )
         return 1
 

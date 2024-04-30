@@ -115,9 +115,13 @@ OUTPUT_CONFIGS = """
 kind = "Mean"
 shape = [1]
 
+[output.y_1_scalar]
+kind = "Mean"
+shape = 1
+
 [output.y_2]
 kind = "Quantiles"
-shape = [32]
+shape = 32
 quantiles = 32
 transformation = "SquareRoot"
 """
@@ -146,3 +150,13 @@ def test_output_config():
     layer = output_cfgs["y_2"].get_output_layer()
     assert isinstance(layer, Quantiles)
     assert layer.transformation is not None
+
+    assert len(output_cfgs["y_1"].get_output_dimensions()) == 1
+    assert len(output_cfgs["y_1"].get_output_coordinates()) == 0
+    assert len(output_cfgs["y_1"].extra_dimensions) == 0
+    assert len(output_cfgs["y_1_scalar"].get_output_dimensions()) == 0
+    assert len(output_cfgs["y_1_scalar"].get_output_coordinates()) == 0
+
+    assert len(output_cfgs["y_2"].extra_dimensions) == 1
+    assert len(output_cfgs["y_2"].get_output_dimensions()) == 1
+    assert len(output_cfgs["y_2"].get_output_coordinates()) == 1

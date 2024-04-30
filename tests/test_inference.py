@@ -1,17 +1,25 @@
 """
 Tests for the pytorch_retrieve.inference module.
 """
+from conftest import MODEL_CONFIG_MLP
+
+import numpy as np
+from scipy.stats import norm
 import toml
 import torch
 from torch import nn
 
+
+from pytorch_retrieve.config import OutputConfig
 from pytorch_retrieve.inference import (
     BatchProcessor,
     batch_size_rec,
     cat_n_rec,
     to_rec,
-    InferenceConfig
+    InferenceConfig,
+    run_inference
 )
+from pytorch_retrieve.tensors import QuantileTensor
 
 
 def test_batch_size_rec():
@@ -130,41 +138,119 @@ def test_batch_processor_irregular(tmp_path):
     assert torch.isclose(x, results).all()
 
 
+
 INFERENCE_CONFIG = """
 batch_size = 12
 tile_size = [32, 32]
 spatial_overlap = 8
 temporal_overlap = 0
 
-[output.surface_precip]
+[retrieval_output.surface_precip]
+surface_precip_quantiles = {retrieval_output="Full"}
 surface_precip_mean = "ExpectedValue"
-surface_precip_median = {quantity="Quantiles", tau=[0.5]}
-surface_precip_heavy = {quantity="ExceedanceProbability", threshold=10.0}
+surface_precip_median = {retrieval_output="Quantiles", tau=[0.5]}
+surface_precip_heavy = {retrieval_output="ExceedanceProbability", threshold=10.0}
 """
 
 def test_inference_config():
     """
     Test parsing of inference configs.
     """
+    model_config = toml.loads(MODEL_CONFIG_MLP)
+    model_config["output"]["surface_precip"] = {"kind": "Mean"}
+    output_config = {
+        name: OutputConfig.parse(name, value) for name, value in model_config["output"].items()
+    }
     inference_config = toml.loads(INFERENCE_CONFIG)
-    inference_config = InferenceConfig.parse(inference_config)
+    inference_config = InferenceConfig.parse(output_config, inference_config)
 
     assert inference_config.batch_size == 12
     assert inference_config.tile_size == (32, 32)
     assert inference_config.spatial_overlap == 8
     assert inference_config.temporal_overlap == 0
 
-    qty = inference_config.output["surface_precip"]["surface_precip_mean"]
-    assert qty.quantity == "ExpectedValue"
+    qty = inference_config.retrieval_output["surface_precip"]["surface_precip_mean"]
+    assert qty.retrieval_output == "ExpectedValue"
 
     ic_saved = toml.dumps(inference_config.to_dict())
     inference_config_loaded = toml.loads(ic_saved)
-    inference_config_loaded = InferenceConfig.parse(inference_config_loaded)
+    inference_config_loaded = InferenceConfig.parse(output_config, inference_config_loaded)
 
     assert inference_config_loaded.batch_size == 12
     assert inference_config_loaded.tile_size == (32, 32)
     assert inference_config_loaded.spatial_overlap == 8
     assert inference_config_loaded.temporal_overlap == 0
 
-    qty = inference_config_loaded.output["surface_precip"]["surface_precip_mean"]
-    assert qty.quantity == "ExpectedValue"
+    qty = inference_config_loaded.retrieval_output["surface_precip"]["surface_precip_mean"]
+    assert qty.retrieval_output == "ExpectedValue"
+
+
+
+class QuantileTensorLoader:
+    """
+    An input data loader that loads a tensor containing quantile of a
+    normal distribution of a given size. To be used in conjunction with a
+    identiy retrieval to test the calculation of retrieval outputs.
+    """
+    def __init__(self, n_inputs: int, n_rows: int, n_cols: int):
+        self.n_inputs = n_inputs
+        self.n_rows = n_rows
+        self.n_cols = n_cols
+
+    def __len__(self) -> int:
+        return 1
+
+    def __iter__(self):
+        quantiles = np.linspace(0, 1, 33)[1:-1]
+        tensor = torch.tensor(norm.ppf(quantiles)).to(torch.float32)[..., None, None]
+        tensor = tensor.repeat((1, self.n_rows, self.n_cols))
+        offsets = torch.arange(self.n_rows)[None, :, None]
+        tensor = QuantileTensor(tensor + offsets, tau=quantiles)
+        for ind in range(self.n_inputs):
+            yield tensor[None]
+
+
+QUANTILE_INFERENCE_CONFIG = """
+tile_size = 128
+spatial_overlap = 32
+batch_size = 2
+
+[retrieval_output.surface_precip]
+surface_precip_terciles = {retrieval_output="Quantiles", tau=[0.33, 0.67]}
+surface_precip_mean = "ExpectedValue"
+pop = {retrieval_output="ExceedanceProbability", threshold=0}
+"""
+
+def test_run_inference_quantiles():
+    """
+    Test running inference with several derived outputs.
+    """
+    inference_config = toml.loads(QUANTILE_INFERENCE_CONFIG)
+    output_config = {
+        "surface_precip": OutputConfig("surface_precip", kind="Quantiles", shape=(32,))
+    }
+    inference_config = InferenceConfig.parse(output_config, inference_config)
+    model = nn.Identity()
+    input_loader = QuantileTensorLoader(4, 234, 453)
+
+    results = run_inference(
+        model,
+        input_loader,
+        inference_config=inference_config,
+        output_path = None,
+        device="cpu",
+        dtype=torch.float32
+    )
+
+
+    assert len(results) == 4
+    assert "surface_precip_terciles" in results
+    assert "surface_precip_mean" in results
+    assert "pop" in results
+
+    assert np.isclose(results[0]["pop"].data[0], 0.5).all()
+    assert np.isclose(results[0]["surface_precip_mean"].data[0], 0.0).all()
+    assert np.isclose(
+        results[0]["surface_precip_mean"].data[-1],
+        input_loader.n_rows - 1
+    ).all()
