@@ -6,7 +6,7 @@ Provides the QuantileTensor class, which is used to represent tensors
 containing predictions of distributions represented by a sequence of quantiles.
 """
 from collections.abc import Sequence, Mapping
-from typing import Union
+from typing import Union, List
 
 
 import torch
@@ -283,6 +283,39 @@ class QuantileTensor(torch.Tensor):
              than 'thresh'.
         """
         return 1.0 - self.probability_less_than(thresh)
+
+    def quantiles(self, tau: Union[List[float], torch.Tensor]) -> "QuantileTensor":
+        """
+        Calculate arbitrary quantiles by linear interpolation of existing
+        quantiles.
+
+        Args:
+            tau: A list or tensor containing the quantile fraction to which to
+                 interpolate the quantile tensor.
+
+        Return:
+            A new quantile tensor containing the quantile corresponding to the
+            desired quantile fractions.
+        """
+        new = []
+        for tau_i in tau:
+            ind_r = min(torch.bucketize(tau_i, self.tau), self.tau.numel() - 1)
+            tau_r = self.tau[ind_r]
+            if ind_r > 1:
+                tau_l = self.tau[ind_r - 1]
+                d_tau = tau_r - tau_l
+                w_r = (tau_i - tau_l) / d_tau
+                w_l = max((tau_r - tau_i) / d_tau, 0.0)
+                w_r = 1.0 - w_l
+                res = w_l * torch.select(self.base, self.quantile_dim, ind_r - 1)
+                res += w_r * torch.select(self.base, self.quantile_dim, ind_r)
+            else:
+                res = torch.select(self.base, self.quantile_dim, 0)
+            new.append(res)
+
+        new = torch.stack(new, self.quantile_dim)
+        return QuantileTensor(new, torch.tensor(tau))
+
 
 
 def get_base(arg):

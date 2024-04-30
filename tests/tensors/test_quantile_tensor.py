@@ -400,3 +400,23 @@ def test_probability_greater_than():
         p_less = quantile_tensor.probability_less_than(0.0)
         p_greater = quantile_tensor.probability_greater_than(0.0)
         assert np.all(np.isclose(p_less + p_greater, 1.0, rtol=0.01))
+
+
+def test_quantiles():
+    """
+    Ensure that interpolation of quantiles of a uniform distribution yields
+    the expected results.
+    """
+    tau = torch.tensor(np.linspace(0, 1, 34)[1:-1]).to(torch.float32)
+    quantiles = tau[None].repeat(16, 1)
+
+    quantile_tensor = QuantileTensor(quantiles, tau=tau, quantile_dim=1)
+
+    new_quantiles = quantile_tensor.quantiles([1e-6, 0.1, 0.5, 0.9, 1 - 1e-6])
+
+    assert new_quantiles.shape == (16, 5)
+    assert torch.isclose(new_quantiles[:, 0], torch.tensor(tau[0])).all()
+    assert torch.isclose(new_quantiles[:, 1], torch.tensor(0.1)).all()
+    assert torch.isclose(new_quantiles[:, 2], torch.tensor(0.5)).all()
+    assert torch.isclose(new_quantiles[:, 3], torch.tensor(0.9)).all()
+    assert torch.isclose(new_quantiles[:, 4], torch.tensor(tau[-1])).all()
