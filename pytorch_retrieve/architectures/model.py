@@ -7,12 +7,12 @@ models. A RetrievalModel is a 'torch.nn.Module' that is produced by instantiatin
 an architecture.
 """
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Union
 
 import torch
 from torch import nn
 
-from pytorch_retrieve.config import InputConfig, OutputConfig
+from pytorch_retrieve.config import InputConfig, OutputConfig, InferenceConfig
 from pytorch_retrieve.modules.utils import ParamCount
 
 
@@ -30,7 +30,8 @@ class RetrievalModel(ParamCount, nn.Module):
         """
         super().__init__()
         self.config_dict = config_dict
-        self.inference_config = None
+        self._inference_config = None
+
 
     @classmethod
     def load(cls, path: Path) -> nn.Module:
@@ -55,9 +56,7 @@ class RetrievalModel(ParamCount, nn.Module):
         model.load_state_dict(state)
 
         inference_config = loaded.get("inference_config", None)
-        if inference_config is not None:
-            inference_config = InferenceConfig.parse(inference_config)
-        model.inference_config = inference_config
+        model._inference_config = inference_config
 
         return model
 
@@ -71,18 +70,24 @@ class RetrievalModel(ParamCount, nn.Module):
         """
         state = self.state_dict()
         model_config = self.config_dict
-        if hasattr(self, "inference_config"):
-            inference_config = self.inference_config
-            if inference_config is not None:
-                inference_config = inference_config.to_dict()
         torch.save(
             {
                 "state_dict": state,
                 "model_config": model_config,
-                "inference_config": inference_config
+                "inference_config": self._inference_config
             },
             path
         )
+
+    @property
+    def inference_config(self) -> Union[InferenceConfig, None]:
+        if self._inference_config is None:
+            return None
+        return InferenceConfig.parse(self.output_config, self._inference_config)
+
+    @inference_config.setter
+    def inference_config(self, cfg: InferenceConfig) -> None:
+        self._inference_config = cfg.to_dict()
 
     @property
     def input_config(self) -> Dict[str, OutputConfig]:

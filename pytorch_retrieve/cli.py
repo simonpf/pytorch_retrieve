@@ -4,7 +4,15 @@ pytorch_retrieve.cli
 
 Defines the pytorch_retrieve command line interface.
 """
+import logging
+
 import click
+from rich.logging import RichHandler
+
+FORMAT = "%(message)s"
+logging.basicConfig(
+    level="NOTSET", format=FORMAT, datefmt="[%X]", handlers=[RichHandler()]
+)
 
 from pytorch_retrieve import eda
 from pytorch_retrieve import lr_search

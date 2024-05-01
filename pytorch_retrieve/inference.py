@@ -15,6 +15,7 @@ from queue import Queue
 import click
 import numpy as np
 import torch
+import toml
 from torch import nn
 from rich.progress import Progress
 import xarray as xr
@@ -25,10 +26,9 @@ from pytorch_retrieve.tensors import (
     QuantileTensor,
 )
 import pytorch_retrieve
-from pytorch_retrieve.architectures import RetrievalModel
 from pytorch_retrieve.tiling import Tiler
-from pytorch_retrieve.architectures import load_model
-from pytorch_retrieve.config import get_config_attr, OutputConfig
+from pytorch_retrieve.architectures import RetrievalModel, load_model
+from pytorch_retrieve.config import get_config_attr, OutputConfig, InferenceConfig
 from pytorch_retrieve.retrieval_output import RetrievalOutput
 
 
@@ -155,211 +155,6 @@ def get_dimensions(
         return tuple(output_cfg[results_name].dimensions)
 
     return None
-
-
-@dataclass
-class RetrievalOutputConfig:
-    """
-    Describes inference output to be calculated from the model predictions.
-    """
-    output_config: OutputConfig
-    retrieval_output: str
-    parameters: Optional[Dict[str, Any]]
-
-    def __init__(
-            self,
-            output_config: OutputConfig,
-            retrieval_output: str,
-            parameters: Optional[Dict[str, Any]] = None,
-    ):
-        self.output_config = output_config
-        self.retrieval_output = retrieval_output
-        self.parameters = parameters
-
-        try:
-            output_class = getattr(pytorch_retrieve.retrieval_output, retrieval_output)
-        except AttributeError:
-            raise RuntimeError(
-                f"Could not find a retrieval output class matching the name '{retrieval_output}'. Please "
-                "refer to the 'pytorch_retrieve.retrieval_output' module for available output classes."
-            )
-
-        try:
-            if parameters is None:
-                self.output = output_class(output_config)
-            else:
-                self.output = output_class(output_config, **parameters)
-        except ValueError:
-            raise RuntimeError(
-                f"Coud not instantiate retrieval output class '{retrieval_output}' with given parameters "
-                f"{parameters}. Plase refer to the 'pytorch_retrieve.retrieval_output' module for available "
-                " output classes."
-            )
-
-
-    @staticmethod
-    def parse(
-            name: str,
-            output_cfg: OutputConfig,
-            config_dict: Union[str, Dict[str, Any]]
-    ) -> "RetrievalOuputConfig":
-        """
-        Parse retrieval output config.
-
-        Args:
-            name: The name of the retrieval output.
-            output_cfg: The OutputConfig object describing the model output from which the retrieval
-                output is computed.
-            config_dict: The dictionary from which to parse the RetrievalOutputConfig.
-        """
-        if isinstance(config_dict, str):
-            return RetrievalOutputConfig(output_cfg, config_dict, None)
-
-        retrieval_output = config_dict.pop("retrieval_output", None)
-        if retrieval_output is None:
-            raise RuntimeError(
-                f"Retrieval output entry for output '{name}' lacks '{retrieval_output}' attribute."
-            )
-        return RetrievalOutputConfig(
-            output_config=output_cfg,
-            retrieval_output=retrieval_output,
-            parameters=config_dict,
-        )
-
-    def to_dict(self) -> Dict[str, Any]:
-        """
-        Return dictionary representation of retrieval output.
-        """
-        dct = {"retrieval_output": self.retrieval_output}
-        if self.parameters is not None:
-            dct.update(self.parameters)
-        return dct
-
-
-@dataclass
-class InferenceConfig:
-    """
-    Defines which output quantities to compute for a given output.
-    """
-    batch_size: int = 8
-    tile_size: Optional[Tuple[int, int]] = None
-    spatial_overlap: Optional[Tuple[int, int]] = None
-    temporal_overlap: Optional[int] = None
-    input_loader: Optional[str] = None
-    input_loader_args: Optional[Dict[str, Any]] = None
-    retrieval_output: Optional[Dict[str, Dict[str, RetrievalOutputConfig]]] = None
-
-    @staticmethod
-    def parse(
-        output_cfg: Dict[str, OutputConfig],
-        config_dict: Dict[str, Any],
-    ) -> "InferenceConfig":
-        """
-        Parse inference config.
-
-        Args:
-            config_dict: A dictionary describing the inference settings.
-            output_cfg: A dictionary mapping model output names to corresponding OutputConfig
-                objects.
-
-        Return:
-            An InferenceConfig object holding the inference configuration.
-        """
-        batch_size = get_config_attr(
-            "batch_size",
-            int,
-            config_dict,
-            "inference config",
-            default=8
-        )
-
-        tile_size = get_config_attr(
-            "tile_size",
-            None,
-            config_dict,
-            "inference config",
-            default=None
-        )
-        if tile_size is not None:
-            if isinstance(tile_size, int):
-                tile_size = (tile_size, tile_size)
-            else:
-                tile_size = tuple(tile_size)
-
-        spatial_overlap = get_config_attr(
-            "spatial_overlap",
-            None,
-            config_dict,
-            "inference config",
-            default=None
-        )
-
-        temporal_overlap = get_config_attr(
-            "temporal_overlap",
-            None,
-            config_dict,
-            "inference config",
-            default=None
-        )
-
-        input_loader = get_config_attr(
-            "input_loader",
-            None,
-            config_dict,
-            "inference config",
-            default=None
-        )
-        input_loader_args = get_config_attr(
-            "input_loader_args",
-            None,
-            config_dict,
-            "inference config",
-            default=None
-        )
-
-        retrieval_output_dct = config_dict.get("retrieval_output", {})
-        retrieval_output = {}
-        for model_output, outputs in retrieval_output_dct.items():
-
-            if model_output not in output_cfg:
-                raise ValueError(
-                    f"Found output name '{model_output}' in inference config but model has no "
-                    f"corresponding output."
-                )
-
-            outputs = {
-                output_name: RetrievalOutputConfig.parse(
-                    f"{model_output}.{output_name}",
-                    output_cfg[model_output],
-                    cfg_dict,
-                ) for
-                output_name, cfg_dict in outputs.items()
-            }
-            retrieval_output[model_output] = outputs
-
-        return InferenceConfig(
-            batch_size=batch_size,
-            tile_size=tile_size,
-            spatial_overlap=spatial_overlap,
-            temporal_overlap=temporal_overlap,
-            input_loader=input_loader,
-            input_loader_args=input_loader_args,
-            retrieval_output=retrieval_output
-        )
-
-
-    def to_dict(self) -> Dict[str, Any]:
-        """
-        Convert InferenceConfig to dict for serialization.
-        """
-        dct = asdict(self)
-        retrieval_output = {}
-        for name, target_outputs in self.retrieval_output.items():
-            retrieval_output[name] = {
-                name: output.to_dict() for name, output in target_outputs.items()
-            }
-        dct["retrieval_output"] = retrieval_output
-        return dct
 
 
 
@@ -682,8 +477,12 @@ def run_inference(
 
 
 @click.argument("model", type=str,)
-@click.argument("input_loader", type=str)
 @click.argument("input_path", type=str)
+@click.option(
+    "--input_loader",
+    type=str,
+    help="Name of the input loader class to use to load the input data."
+)
 @click.option(
     "--input_loader_args",
     type=str,
@@ -716,14 +515,23 @@ def run_inference(
         "The floating point type to use for inference."
     )
 )
+@click.option(
+    "--inference_config",
+    type=str,
+    default=None,
+    help=(
+        "Path of an inference config file to load."
+    )
+)
 def cli(
         model: str,
-        input_loader: Any,
         input_path: Path,
-        input_loader_args: Dict[str, Any],
+        input_loader: Optional[str] = None,
+        input_loader_args: Dict[str, Any] = {},
         output_path: Optional[Path] = None,
         device: str = "cpu",
-        dtype: str = "float32"
+        dtype: str = "float32",
+        inference_config: Optional[str] =  None
 ) -> None:
     """
     Run inference using MODEL on input files in INPUT_PATH.
@@ -743,6 +551,34 @@ def cli(
         )
         return 1
 
+    if inference_config is not None:
+        inference_config = Path(inference_config)
+        if not inference_config.exists():
+            raise ValueError(
+                "If given, 'inference_config' must point to an existing file."
+            )
+        inference_config = InferenceConfig.parse(
+            model.output_config,
+            toml.loads(open(inference_config).read())
+        )
+    else:
+        inference_config = model.inference_config
+        if inference_config is None:
+            inference_config = InferenceConfig()
+
+    if input_loader is None:
+        input_loader = inference_config.input_loader
+        input_loader_args = inference_config.input_loader_args
+
+    if input_loader is None:
+        LOGGER.error(
+            "The inference config (provided implicitly by the retrieval model or "
+            " explicitly using the '--inference_config' option ) doesn't contain an "
+            "'input loader'. In that case, the '--input_loader' (and, if required, "
+            " the '--input_loader_args') options must be provided."
+        )
+        return 1
+
     input_loader_parts = input_loader.split(".")
     input_loader_module = ".".join(input_loader_parts[:-1])
     try:
@@ -756,13 +592,14 @@ def cli(
         return 1
 
     if input_loader_args is not None:
-        try:
-            input_loader_args = eval(input_loader_args)
-        except Exception:
-            LOGGER.error(
-                "Encountered an error when trying to parse the 'input_loader_args' dict."
-            )
-            return 1
+        if isinstance(input_loader_args, str):
+            try:
+                input_loader_args = eval(input_loader_args)
+            except Exception:
+                LOGGER.error(
+                    "Encountered an error when trying to parse the 'input_loader_args' dict."
+                )
+                return 1
     else:
         input_loader_args = {}
 
@@ -785,8 +622,8 @@ def cli(
     run_inference(
         model,
         input_loader,
-        InferenceConfig(tile_size=(128, 64), spatial_overlap=16),
-        output_path,
+        inference_config=inference_config,
+        output_path=output_path,
         device=device,
         dtype=dtype,
     )
