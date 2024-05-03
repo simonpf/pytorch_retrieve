@@ -146,7 +146,9 @@ class Bias(ScalarMetric, tm.Metric):
                 if mask is None:
                     coords.append(conditional[cond].squeeze())
                 else:
-                    coords.append(conditional[cond].squeeze()[~mask])
+                    mask = mask.to(device=device)
+                    coords.append(conditional[cond].squeeze()[~mask.squeeze()])
+
             coords = torch.stack(coords, -1).to(device=device)
 
             wgts = (pred - target).to(device=device)
@@ -229,17 +231,24 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
             self.counts += torch.numel(target)
         else:
 
+            device = torch.device("cpu")
+            self.to(device=device)
+
             coords = []
             for cond in self.conditional:
-                if mask is not None:
-                    coords.append(conditional[cond].squeeze()[~mask].flatten())
-                else:
+                if mask is None:
                     coords.append(conditional[cond].squeeze().flatten())
+                else:
+                    mask = mask.to(device=device)
+                    coords.append(conditional[cond].squeeze()[~mask.squeeze()].flatten())
+            coords = torch.stack(coords, -1).to(device=device)
 
-            coords = torch.stack(coords, -1)
             bins = tuple([
-                bns.to(device=pred.device, dtype=pred.dtype) for bns in self.bins
+                bns.to(device=device, dtype=pred.dtype) for bns in self.bins
             ])
+
+            pred = pred.to(device=device)
+            target = target.to(device=device)
 
             self.x += torch.histogramdd(coords, bins=bins, weight=pred)[0]
             self.x2 += torch.histogramdd(coords, bins=bins, weight=pred ** 2)[0]
@@ -330,10 +339,11 @@ class MSE(ScalarMetric, tm.Metric):
 
             coords = []
             for cond in self.conditional:
-                if mask is not None:
-                    coords.append(conditional[cond].squeeze()[~mask].flatten())
-                else:
+                if mask is None:
                     coords.append(conditional[cond].squeeze().flatten())
+                else:
+                    mask = mask.to(device=device)
+                    coords.append(conditional[cond].squeeze()[~mask.squeeze()].flatten())
 
             coords = torch.stack(coords, -1).to(device=device)
             bins = tuple([
