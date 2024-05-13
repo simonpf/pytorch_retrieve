@@ -241,6 +241,7 @@ class LightningRetrieval(L.LightningModule):
             dtype = inputs.dtype
 
         tot_loss = torch.tensor(0.0, requires_grad=True, device=device, dtype=dtype)
+        tot_samples = 0
 
         for name in pred:
             key = name.split("::")[-1]
@@ -253,7 +254,6 @@ class LightningRetrieval(L.LightningModule):
                     raise RuntimeError(
                         "Model predicts a sequence but the reference data is not."
                     )
-                tot_samples = 0
                 losses[key] = 0.0
                 for pred_k_s, target_k_s in zip(pred_k, target_k):
                     mask = torch.isnan(target_k_s)
@@ -274,10 +274,6 @@ class LightningRetrieval(L.LightningModule):
                     tot_loss = tot_loss + n_samples * loss_k_s
                     losses[name] += loss_k_s.item()
 
-                if tot_samples > 0:
-                    tot_loss = tot_loss / tot_samples
-                else:
-                    tot_loss = tot_loss + 0.0 * pred_k_s.sum()
 
             else:
                 mask = torch.isnan(target_k)
@@ -285,9 +281,16 @@ class LightningRetrieval(L.LightningModule):
                     target_k = torch.nan_to_num(target_k, 0.0)
                     target_k = MaskedTensor(target_k, mask=mask)
 
+                n_samples = (~mask).sum()
                 loss_k = pred[name].loss(target_k)
-                tot_loss = tot_loss + loss_k
+                tot_loss = tot_loss + n_samples * loss_k
                 losses[name] = loss_k.item()
+                pred_k_s = pred[name]
+
+        if tot_samples > 0:
+            tot_loss = tot_loss / tot_samples
+        else:
+            tot_loss = tot_loss + 0.0 * pred_k_s.sum()
 
         log_dict = {}
         for name, loss in losses.items():
