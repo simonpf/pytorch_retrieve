@@ -2,6 +2,7 @@
 Tests for the pytorch_retrieve.tensors.masked_tensor module.
 """
 import numpy as np
+import pytest
 import torch
 from torch import nn
 
@@ -337,6 +338,9 @@ def test_any_all():
     assert (masked_tensor_1 <= 0.5).all()
     assert not (masked_tensor_1 > 0.5).any()
 
+    assert torch.all(masked_tensor_1 <= 0.5)
+    assert not torch.any(masked_tensor_1 > 0.5)
+
 
 def test_transpose():
     """
@@ -491,3 +495,35 @@ def test_clone_tensor():
     masked_tensor2 = masked_tensor.clone()
     masked_tensor2.mask[:] = True
     assert not masked_tensor.mask.all()
+
+
+def test_to():
+    """
+    Test .to method.
+    """
+    tensor = 100 * torch.rand(100, 3, 100)
+    mask = torch.rand(100, 3, 100) - 0.5 > 0
+    masked_tensor = MaskedTensor(tensor, mask=mask)
+
+    assert not masked_tensor.dtype == torch.bfloat16
+
+    masked_tensor = masked_tensor.to(device="cpu", dtype=torch.bfloat16)
+    assert masked_tensor.dtype == torch.bfloat16
+
+
+pytest.mark.skipif(not torch.cuda.is_available(), reason="Needs GPU.")
+def test_cpu():
+    """
+    Test .cpu method.
+    """
+    tensor = 100 * torch.rand(100, 3, 100)
+    mask = torch.rand(100, 3, 100) - 0.5 > 0
+    tensor = MaskedTensor(tensor, mask=mask)
+
+    tensor = tensor.to("cuda:0")
+    assert tensor.device == torch.device('cuda:0')
+    assert tensor.mask.device == torch.device('cuda:0')
+
+    tensor = tensor.cpu()
+    assert tensor.device == torch.device('cpu')
+    assert tensor.mask.device == torch.device('cpu')

@@ -259,3 +259,17 @@ def test_unbind():
     assert isinstance(tensors[0], MeanTensor)
     tensors = torch.unbind(y_pred, 1)
     assert isinstance(tensors[0], MeanTensor)
+
+
+def test_any_all():
+    """
+    Test any and all operations.
+    """
+    tensor_1 = torch.rand(4, 4, 4)
+    tensor_1 = MeanTensor(tensor_1)
+
+    assert (tensor_1 <= 1.0).all()
+    assert not (tensor_1 > 1.0).any()
+
+    assert torch.all(tensor_1 <= 1.0)
+    assert not torch.any(tensor_1 > 1.0)

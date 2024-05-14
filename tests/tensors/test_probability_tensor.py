@@ -2,9 +2,11 @@
 Tests for the 'pytorch_retrieve.tensors' module.
 """
 import numpy as np
+import pytest
 from scipy.stats import norm
 import torch
 from torch import nn
+
 
 from pytorch_retrieve.tensors import ProbabilityTensor, MaskedTensor
 
@@ -293,3 +295,54 @@ def test_probability_less_and_greater_than():
         assert np.isclose(p_less.numpy(), prob / 10.0).all()
         p_greater = prob_tensor.probability_greater_than(prob)
         assert np.isclose(p_less.numpy() + p_greater.numpy(), 1.0).all()
+
+
+def test_any_all():
+    """
+    Test any and all operations.
+    """
+    bins = np.linspace(0, 10, 11)
+    tensor_1 = torch.rand(4, 32, 4)
+    tensor_1 = ProbabilityTensor(tensor_1, bins=bins, bin_dim=1)
+
+    assert (tensor_1 <= 1.0).all()
+    assert not (tensor_1 > 1.0).any()
+
+    assert torch.all(tensor_1 <= 1.0)
+    assert not torch.any(tensor_1 > 1.0)
+
+
+pytest.mark.skipif(not torch.cuda.is_available(), reason="Needs GPU.")
+def test_to():
+    """
+    Test .to method.
+    """
+    tensor = 100 * torch.rand(100, 3, 100)
+    bins = np.linspace(0, 10, 4)
+    tensor = ProbabilityTensor(tensor, bins=bins)
+
+    tensor = tensor.to(dtype=torch.bfloat16)
+    assert tensor.dtype == torch.bfloat16
+    assert tensor.bins.dtype == torch.bfloat16
+
+    tensor = tensor.to(dtype=torch.float32)
+    assert tensor.dtype == torch.float32
+    assert tensor.bins.dtype == torch.float32
+
+
+pytest.mark.skipif(not torch.cuda.is_available(), reason="Needs GPU.")
+def test_cpu():
+    """
+    Test .cpu method.
+    """
+    tensor = 100 * torch.rand(100, 3, 100)
+    bins = np.linspace(0, 10, 4)
+    tensor = ProbabilityTensor(tensor, bins=bins)
+
+    tensor = tensor.to("cuda:0")
+    assert tensor.device == torch.device('cuda:0')
+    assert tensor.bins.device == torch.device('cuda:0')
+
+    tensor = tensor.cpu()
+    assert tensor.device == torch.device('cpu')
+    assert tensor.bins.device == torch.device('cpu')

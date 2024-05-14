@@ -9,28 +9,9 @@ import functools
 import numpy as np
 import torch
 
-HANDLED_FUNCTIONS = {}
+from .utils import implements
 
-MASK_HANDLERS = {
-    torch.cat: torch.cat,
-    torch.stack: torch.stack,
-    torch.add: torch.logical_or,
-    torch.Tensor.add: torch.logical_or,
-    torch.Tensor.add_: torch.logical_or,
-    torch.mul: torch.logical_or,
-    torch.permute: torch.permute,
-    torch.Tensor.reshape: torch.reshape,
-    torch.Tensor.view: torch.Tensor.view,
-    torch.sum: torch.any,
-    torch.Tensor.sum: torch.any,
-    torch.mean: torch.any,
-    torch.Tensor.mean: torch.any,
-    torch.unsqueeze: torch.unsqueeze,
-    torch.Tensor.unsqueeze: torch.unsqueeze,
-    torch.squeeze: torch.squeeze,
-    torch.Tensor.squeeze: torch.squeeze,
-    torch.gather: torch.gather,
-}
+HANDLED_FUNCTIONS = {}
 
 
 def implements(torch_function):
@@ -512,7 +493,7 @@ def eq(inpt, other, **kwargs):
 @implements(torch.Tensor.to)
 def to(inpt, *args, **kwargs):
     """
-    Implementation of element-wise comparison.
+    Implementation of .to method.
     """
     other = inpt.base.to(*args, **kwargs)
     kwargs.pop("dtype", None)
@@ -865,7 +846,7 @@ def select(inpt, dim, index):
 
 
 @implements(torch.all)
-def all(inpt, dim, keepdim=False, *args, out=None):
+def all(inpt, dim=None, keepdim=False, *args, out=None):
     """
     All function.
     """
@@ -885,7 +866,7 @@ def all(inpt, dim=None, keepdim=False, *args):
 
 
 @implements(torch.any)
-def any(inpt, dim, keepdim=False, *args, out=None):
+def any(inpt, dim=None, keepdim=False, *args, out=None):
     """
     All function.
     """

@@ -7,6 +7,7 @@ containing predictions of distributions of scalar quantities represented
  using distributions over a discretized range of values.
 """
 from collections.abc import Sequence, Mapping
+import functools
 from typing import Union
 
 
@@ -19,6 +20,17 @@ from .utils import select
 
 
 HANDLED_FUNCTIONS = {}
+
+
+def implements(torch_function):
+    """Register a torch function override for ScalarTensor"""
+
+    def decorator(func):
+        functools.update_wrapper(func, torch_function)
+        HANDLED_FUNCTIONS[torch_function] = func
+        return func
+
+    return decorator
 
 
 class ProbabilityTensor(torch.Tensor):
@@ -48,6 +60,10 @@ class ProbabilityTensor(torch.Tensor):
         """ """
         if kwargs is None:
             kwargs = {}
+
+        if func in HANDLED_FUNCTIONS:
+            return HANDLED_FUNCTIONS[func](*args, **kwargs)
+
         base_args = [get_base(arg) for arg in args]
         base_kwargs = {key: get_base(val) for key, val in kwargs.items()}
         result = func(*base_args, **base_kwargs)
@@ -212,3 +228,23 @@ def get_prob_attrs(arg):
     elif isinstance(arg, ProbabilityTensor):
         return arg.bins, arg.bin_dim
     return None
+
+
+@implements(torch.Tensor.to)
+def to(inpt, *args, **kwargs):
+    """
+    Implementation of .to method.
+    """
+    other = inpt.base.to(*args, **kwargs)
+    bins = inpt.bins.to(*args, **kwargs)
+    return ProbabilityTensor(other, bins=bins, bin_dim=inpt.bin_dim)
+
+
+@implements(torch.Tensor.cpu)
+def cpu(inpt, *args, **kwargs):
+    """
+    Implementation of .cpu method.
+    """
+    other = inpt.base.cpu(*args, **kwargs)
+    bins = inpt.bins.cpu(*args, **kwargs)
+    return ProbabilityTensor(other, bins=bins, bin_dim=inpt.bin_dim)

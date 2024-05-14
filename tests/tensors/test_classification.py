@@ -47,3 +47,25 @@ def test_classification_tensor():
     probs = tensor.probability()
     assert (probs >= 0.0).all()
     assert (probs <= 1.0).all()
+
+
+def test_any_all():
+    """
+    Test any and all operations.
+    """
+    tensor_1 = torch.rand(4, 32, 4)
+    tensor_1 = ClassificationTensor(tensor_1)
+
+    assert (tensor_1 <= 1.0).all()
+    assert not (tensor_1 > 1.0).any()
+
+    assert torch.all(tensor_1 <= 1.0)
+    assert not torch.any(tensor_1 > 1.0)
+
+    tensor_1 = DetectionTensor(tensor_1.base)
+
+    assert (tensor_1 <= 1.0).all()
+    assert not (tensor_1 > 1.0).any()
+
+    assert torch.all(tensor_1 <= 1.0)
+    assert not torch.any(tensor_1 > 1.0)

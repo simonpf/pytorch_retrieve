@@ -379,7 +379,7 @@ class PlotSamples(tm.Metric):
         Reset metric.
         """
         if self.sample_indices is None:
-            permutation = np.random.permutation(len(self.indices))[: self.n_samples]
+            permutation = np.random.permutation(len(self.indices))[:self.n_samples]
             permutation = sorted(permutation)
             self.sample_indices = [self.indices[ind] for ind in permutation]
         self.batch_start = 0
@@ -406,11 +406,11 @@ class PlotSamples(tm.Metric):
             sample_ind = self.batch_start + ind
             self.indices.append(sample_ind)
             if isinstance(target, list):
-                self.targets.append([elem[ind : ind + 1] for elem in target])
-                self.preds.append([elem[ind : ind + 1] for elem in pred])
+                self.targets.append([elem[ind : ind + 1].cpu() for elem in target])
+                self.preds.append([elem[ind : ind + 1].cpu() for elem in pred])
             else:
-                self.targets.append(target[ind : ind + 1])
-                self.preds.append(pred[ind : ind + 1])
+                self.targets.append(target[ind : ind + 1].cpu())
+                self.preds.append(pred[ind : ind + 1].cpu())
         else:
             batch_indices = [
                 ind - self.batch_start

@@ -2,6 +2,7 @@
 Tests for the 'pytorch_retrieve.tensors' module.
 """
 import numpy as np
+import pytest
 from scipy.stats import norm
 import torch
 from torch import nn
@@ -420,3 +421,51 @@ def test_quantiles():
     assert torch.isclose(new_quantiles[:, 2], torch.tensor(0.5)).all()
     assert torch.isclose(new_quantiles[:, 3], torch.tensor(0.9)).all()
     assert torch.isclose(new_quantiles[:, 4], torch.tensor(tau[-1])).all()
+
+
+def test_any_all():
+    """
+    Test any and all operations.
+    """
+    tensor_1 = torch.rand(4, 32, 4)
+    tau = torch.linspace(0, 1, 34)[1:-1]
+    tensor_1 = QuantileTensor(tensor_1, tau=tau)
+
+    assert (tensor_1 <= 1.0).all()
+    assert not (tensor_1 > 1.0).any()
+
+    assert torch.all(tensor_1 <= 1.0)
+    assert not torch.any(tensor_1 > 1.0)
+
+
+def test_to():
+    """
+    Test .to method.
+    """
+    tensor = 100 * torch.rand(100, 3, 100)
+    tau = torch.tensor(np.linspace(0, 1, 34)[1:-1]).to(torch.float32)
+    tensor = QuantileTensor(tensor, tau=tau)
+
+    assert not tensor.dtype == torch.bfloat16
+
+    tensor = tensor.to(device="cpu", dtype=torch.bfloat16)
+    assert tensor.dtype == torch.bfloat16
+    assert tensor.tau.dtype == torch.bfloat16
+
+
+pytest.mark.skipif(not torch.cuda.is_available(), reason="Needs GPU.")
+def test_cpu():
+    """
+    Test .cpu method.
+    """
+    tensor = 100 * torch.rand(100, 3, 100)
+    tau = torch.tensor(np.linspace(0, 1, 34)[1:-1]).to(torch.float32)
+    tensor = QuantileTensor(tensor, tau=tau)
+
+    tensor = tensor.to("cuda:0")
+    assert tensor.device == torch.device('cuda:0')
+    assert tensor.tau.device == torch.device('cuda:0')
+
+    tensor = tensor.cpu()
+    assert tensor.device == torch.device('cpu')
+    assert tensor.tau.device == torch.device('cpu')
