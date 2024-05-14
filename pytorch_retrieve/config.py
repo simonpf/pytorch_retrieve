@@ -411,6 +411,7 @@ class RetrievalOutputConfig:
         self.parameters = parameters
 
         try:
+            import pytorch_retrieve.retrieval_output
             output_class = getattr(pytorch_retrieve.retrieval_output, retrieval_output)
         except AttributeError:
             raise RuntimeError(

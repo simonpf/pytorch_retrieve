@@ -7,6 +7,8 @@ import os
 import yaml
 import toml
 
+from conftest import MODEL_CONFIG_MLP
+
 from pytorch_retrieve.config import (
     replace_environment_variables,
     get_config_attr,
