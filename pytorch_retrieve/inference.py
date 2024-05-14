@@ -455,12 +455,27 @@ def run_inference(
                 for results in results_stack:
                     args, *arg_stack = arg_stack
 
-                    results = xr.Dataset({
-                        key: (("samples",), tensor.numpy().flatten()) for key, tensor in results.items()
-                    })
-                    filename = f"results_{cntr}.nc"
                     if hasattr(input_loader, "finalize_results"):
-                        results = input_loader.finalize_results(results, *args)
+                        results = input_loader.finalize_results(results_ass, *args)
+                    else:
+                        results = {}
+                        for key, tensor in results_ass.items():
+                            dims = get_dimensions(key, output_cfg, inference_config)
+                            if dims is None:
+                                dims = tuple(
+                                    [f"{key}_dim_{ind}" for ind in range(tensor.ndim - 2)]
+                                )
+                            if len(dims) < tensor.ndim:
+                                tensor = torch.squeeze(tensor)
+
+                            results[key] = (tuple(dims) + ("x", "y"), tensor)
+                        results = xr.Dataset(results)
+
+                        results = xr.Dataset({
+                            key: (("samples",), tensor.numpy().flatten()) for key, tensor in results.items()
+                        })
+
+                    filename = f"results_{cntr}.nc"
                     if results is not None:
                         if isinstance(results, tuple):
                             results, filename = results
