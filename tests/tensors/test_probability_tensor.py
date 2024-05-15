@@ -330,7 +330,7 @@ def test_to():
     assert tensor.bins.dtype == torch.float32
 
 
-pytest.mark.skipif(not torch.cuda.is_available(), reason="Needs GPU.")
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Needs GPU.")
 def test_cpu():
     """
     Test .cpu method.

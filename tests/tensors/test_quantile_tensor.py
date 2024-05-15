@@ -453,7 +453,7 @@ def test_to():
     assert tensor.tau.dtype == torch.bfloat16
 
 
-pytest.mark.skipif(not torch.cuda.is_available(), reason="Needs GPU.")
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Needs GPU.")
 def test_cpu():
     """
     Test .cpu method.
