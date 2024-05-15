@@ -10,6 +10,7 @@ from typing import Dict, Optional, Tuple, Union
 
 from lightning import LightningModule
 from lightning.pytorch.utilities import rank_zero_only
+from lightning.pytorch import loggers
 import numpy as np
 import torch
 import torchmetrics as tm
@@ -454,7 +455,12 @@ class PlotSamples(tm.Metric):
         name = self.name + f" ({output_name}, {self.sample_indices})"
         if hasattr(lightning_module.logger.experiment, "log_image"):
             lightning_module.logger.experiment.log_image(name, img)
-        if hasattr(lightning_module.logger.experiment, "add_image"):
+        elif isinstance(lightning_module.logger, loggers.wandb.WandbLogger):
+            lightning_module.logger.log_image(
+                key=name,
+                images=[(255 * img[:3]).to(dtype=torch.uint8)]
+            )
+        elif hasattr(lightning_module.logger.experiment, "add_image"):
             lightning_module.logger.experiment.add_image(name, img, self.step)
         else:
             LOGGER.warning(
