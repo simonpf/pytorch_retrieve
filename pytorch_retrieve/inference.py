@@ -181,10 +181,10 @@ def process(
                 else:
                     retrieval_output = inference_config.retrieval_output.get(key, None)
                 if retrieval_output is None:
-                    results[key] = tensor
+                    results[key] = tensor.cpu()
                 else:
                     for output_name, output in retrieval_output.items():
-                        results[output_name] = output.output.compute(tensor)
+                        results[output_name] = output.output.compute(tensor).cpu()
         else:
             if inference_config is None:
                 results["retrieved"] = preds
@@ -198,9 +198,9 @@ def process(
                     iter(inference_config.retrieval_output.values())
                 )
                 for output_name, output in retrieval_output.items():
-                    results[output_name] = output.output.compute(preds)
+                    results[output_name] = output.output.compute(preds).cpu()
             else:
-                results["retrieved"] = preds
+                results["retrieved"] = preds.cpu()
     return results
 
 
@@ -456,10 +456,10 @@ def run_inference(
                     args, *arg_stack = arg_stack
 
                     if hasattr(input_loader, "finalize_results"):
-                        results = input_loader.finalize_results(results_ass, *args)
+                        results = input_loader.finalize_results(results, *args)
                     else:
                         results = {}
-                        for key, tensor in results_ass.items():
+                        for key, tensor in results.items():
                             dims = get_dimensions(key, output_cfg, inference_config)
                             if dims is None:
                                 dims = tuple(
@@ -468,14 +468,12 @@ def run_inference(
                             if len(dims) < tensor.ndim:
                                 tensor = torch.squeeze(tensor)
 
-                            results[key] = (tuple(dims) + ("x", "y"), tensor)
+                            results[key] = (("samples",) + tuple(dims), tensor)
                         results = xr.Dataset(results)
 
-                        results = xr.Dataset({
-                            key: (("samples",), tensor.numpy().flatten()) for key, tensor in results.items()
-                        })
 
                     filename = f"results_{cntr}.nc"
+
                     if results is not None:
                         if isinstance(results, tuple):
                             results, filename = results
