@@ -540,7 +540,7 @@ shape = 1
 """
 
 
-PRESETS = ["unet", "resnet_s", "resnext_s"]
+PRESETS = ["UNet", "resnet_s", "resnext_s"]
 
 
 @pytest.mark.parametrize("name", PRESETS)

@@ -24,7 +24,7 @@ def test_unet():
 
         [architecture]
         name = "EncoderDecoder"
-        preset = "unet"
+        preset = "UNet"
         """
     )
 
