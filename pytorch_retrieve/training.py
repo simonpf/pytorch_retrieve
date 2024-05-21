@@ -437,7 +437,23 @@ def run_training(
     module: "pytorch_retrieve.lightning.LightningRetrieval",
     compute_config: Optional[ComputeConfig] = None,
     checkpoint: Optional[Path] = None,
-) -> None:
+) -> Path:
+    """
+    Train a pytorch_retrieve retrieval module.
+
+    Args:
+        model_dir: A path object pointing to the directory to use to store
+            training artifacts.
+        module: The retrieval module to train.
+        compute_config: A ComputeConfig object specfiying the compute
+            configuration for the training.
+        checkpoint: An optional path object pointing to a checkpoint path
+            from which to continue the training.
+
+    Return:
+        A path object pointing to the file to which the trained model was
+        written.
+    """
     if model_dir is None:
         model_dir = Path(".")
     if compute_config is None:
@@ -497,8 +513,9 @@ def run_training(
             ckpt_path=checkpoint
         )
         module = module.to(torch.device("cpu"))
-        module.save_model(model_dir)
+        model_path = module.save_model(model_dir)
         checkpoint = None
+    return model_path
 
 
 @click.option(

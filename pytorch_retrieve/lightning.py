@@ -89,9 +89,16 @@ class LightningRetrieval(L.LightningModule):
         """
         return self._stage
 
-    def save_model(self, path: Optional[Path] = None) -> None:
+    def save_model(self, path: Optional[Path] = None) -> Path:
         """
         Save retrieval module as a PyTorch state dict.
+
+        Args:
+            path: A path pointing to a folder or file to which to write
+                the retrieval module.
+
+        Return:
+            A Path object pointing to the path to which the model was written.
         """
         if path is None:
             path = Path(".")
@@ -104,7 +111,7 @@ class LightningRetrieval(L.LightningModule):
                 name = "retrieval_model"
             path = path / (name + ".pt")
         self.model.save(path)
-
+        return path
 
     @stage.setter
     def stage(self, stage: int) -> None:
