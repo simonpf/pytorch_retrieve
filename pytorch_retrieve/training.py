@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import importlib
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import click
 import lightning as L
@@ -112,7 +112,7 @@ class TrainingConfigBase:
         )
         return data_loader
 
-    def get_validation_dataset(self) -> Dataset | None:
+    def get_validation_dataset(self) -> Union[Dataset, None]:
         """
         If 'validation_dataset_args' is not None, this method instantiates the dataset module
         with those arguments and returns the resulting dataset. If this is not the case, but
