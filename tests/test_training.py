@@ -132,6 +132,42 @@ def test_get_metrics_dict(model_config_file, training_config_file):
     assert len(metrics) == 1
     assert len(metrics["y"]) == 2
 
+TRAINING_CONFIG_VAL_SPLIT = """
+[warm_up]
+dataset_module = "pytorch_retrieve.data.synthetic"
+training_dataset = "Synthetic1d"
+training_dataset_args = {"n_samples"=256}
+validation_split = 0.25
+n_epochs = 2
+batch_size = 64
+optimizer = "SGD"
+optimizer_args = {"lr"= 1e-3}
+metrics = ["Bias", "CorrelationCoef"]
+"""
+
+
+@pytest.fixture
+def training_config_file_val_split(tmp_path):
+    """
+    Provides a path to a training config file with a the 'validation_split' set in a temporary directory.
+    """
+    output_path = tmp_path / "training.toml"
+    with open(output_path, "w") as output:
+        output.write(TRAINING_CONFIG_VAL_SPLIT)
+    return output_path
+
+
+def test_get_training_and_validation_dataset_from_split(training_config_file_val_split):
+    """
+    Ensure that create of training and validation datsets from a validation split works.
+    """
+    schedule = parse_training_config(read_config_file(training_config_file_val_split))
+    training_data = schedule["warm_up"].get_training_dataset()
+    validation_data = schedule["warm_up"].get_validation_dataset()
+
+    assert validation_data is not None
+    assert len(training_data) // 3 == len(validation_data)
+
 
 def test_training(
         model_config_file,

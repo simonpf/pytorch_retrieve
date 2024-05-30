@@ -9,13 +9,19 @@ from dataclasses import dataclass
 import importlib
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import click
 import lightning as L
 import torch
 from torch import nn
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import (
+    Dataset,
+    DataLoader,
+    IterableDataset,
+    Subset,
+    random_split
+)
 from torch.optim.lr_scheduler import SequentialLR
 from lightning.pytorch import callbacks
 
@@ -44,23 +50,53 @@ class TrainingConfigBase:
     Base functionality for training configuration objects.
     """
 
-    def get_training_dataset(self):
+    def get_training_and_validation_splits(self) -> Tuple[Subset, Subset]:
         """
-        Imports and instantiates the training dataset class using the provided
-        training_dataset_args.
+        Get training and validation datasets by splitting the training dataset using
+        the given validation split.
+
+        Return:
+             A tuple ``(train, val)`` containing the training and validation datasets.
         """
         try:
             module = importlib.import_module(self.dataset_module)
             dataset_class = getattr(module, self.training_dataset)
-            return dataset_class(**self.training_dataset_args)
+            dataset = dataset_class(**self.training_dataset_args)
         except ImportError:
             raise RuntimeError(
                 "An error was encountered when trying to import the dataset "
                 f" module '{self.dataset_module}'. Please make sure that the "
                 " provided dataset is actually importable."
             )
+        generator = torch.Generator().manual_seed(42)
+        train, val = random_split(dataset, [1.0 - self.validation_split, self.validation_split])
+        return train, val
 
-    def get_training_data_loader(self):
+
+    def get_training_dataset(self):
+        """
+        Imports and instantiates the training dataset class using the provided
+        training_dataset_args.
+        """
+        if self.validation_dataset_args is None and self.validation_split is not None:
+            return self.get_training_and_validation_splits()[0]
+
+        try:
+            module = importlib.import_module(self.dataset_module)
+            dataset_class = getattr(module, self.training_dataset)
+            dataset = dataset_class(**self.training_dataset_args)
+        except ImportError:
+            raise RuntimeError(
+                "An error was encountered when trying to import the dataset "
+                f" module '{self.dataset_module}'. Please make sure that the "
+                " provided dataset is actually importable."
+            )
+        return dataset
+
+    def get_training_data_loader(self) -> DataLoader:
+        """
+        Returns the training data loader for the training.
+        """
         dataset = self.get_training_dataset()
         shuffle = not isinstance(dataset, IterableDataset)
         worker_init_fn = None
@@ -76,13 +112,17 @@ class TrainingConfigBase:
         )
         return data_loader
 
-    def get_validation_dataset(self):
+    def get_validation_dataset(self) -> Dataset | None:
         """
-        Imports and instantiates the validation dataset class using the provided
-        training_dataset_args.
+        If 'validation_dataset_args' is not None, this method instantiates the dataset module
+        with those arguments and returns the resulting dataset. If this is not the case, but
+        'validation_split' is not None, the validation dataset is created as a random split from
+        the training dataset. Otherwise None is returned.
         """
         if self.validation_dataset_args is None:
-            return None
+            if self.validation_split is  None:
+                return None
+            return self.get_training_and_validation_splits()[1]
         try:
             module = importlib.import_module(self.dataset_module)
             dataset_class = getattr(module, self.training_dataset)
@@ -258,6 +298,7 @@ class TrainingConfig(TrainingConfigBase):
     training_dataset_args: Dict[str, object]
     validation_dataset: str
     validation_dataset_args: Optional[Dict[str, object]]
+    validation_split: Optional[float]
 
     n_epochs: int
     batch_size: int
@@ -328,6 +369,9 @@ class TrainingConfig(TrainingConfigBase):
                 name: replace_environment_variables(val)
                 for name, val in validation_dataset_args.items()
             }
+        validation_split = get_config_attr(
+            "validation_split", None, config_dict, f"training stage {name}", required=False, default=None
+        )
 
         n_epochs = get_config_attr(
             "n_epochs", int, config_dict, f"training stage {name}", required=True
@@ -397,6 +441,7 @@ class TrainingConfig(TrainingConfigBase):
             training_dataset_args=training_dataset_args,
             validation_dataset=validation_dataset,
             validation_dataset_args=validation_dataset_args,
+            validation_split=validation_split,
             n_epochs=n_epochs,
             optimizer=optimizer,
             optimizer_args=optimizer_args,
