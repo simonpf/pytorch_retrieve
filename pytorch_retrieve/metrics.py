@@ -490,7 +490,7 @@ class PlotSamples(tm.Metric):
             the highest validation loss.
         """
         try:
-            from matplotlib.cm import ScalarMappable, get_cmap
+            from matplotlib.cm import ScalarMappable, colormaps
             from matplotlib.colors import LogNorm, Normalize
         except ImportError:
             LOGGER.warning(
@@ -516,7 +516,7 @@ class PlotSamples(tm.Metric):
                 torch.stack(self.targets).to(dtype=torch.float32).cpu().numpy()
             )
             target_max *= 0.2
-            cmap = get_cmap("magma")
+            cmap = colormaps["magma"]
             cmap.set_bad("grey")
 
             for pred, target in zip(self.preds, self.targets):
@@ -555,7 +555,7 @@ class PlotSamples(tm.Metric):
             target_min = np.nanmin(torch.stack(target).cpu().numpy())
             target_max = np.nanmax(torch.stack(target).cpu().numpy())
             target_max *= 0.2
-            cmap = get_cmap("magma")
+            cmap = colormaps["magma"]
             cmap.set_bad("grey")
 
             for pred_s, target_s in zip(pred, target):
