@@ -29,7 +29,7 @@ def data_loader_3d(n_samples: int, batch_size: int) -> DataLoader:
 
 CPU_COMPUTE_CONFIG = """
 accelerator="cpu"
-precision="16"
+precision="bf16-mixed"
 strategy="auto"
 """
 
