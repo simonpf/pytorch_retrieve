@@ -379,6 +379,8 @@ class TrainingConfig(TrainingConfigBase):
         batch_size = get_config_attr(
             "batch_size", int, config_dict, f"training stage {name}", 8, required=True
         )
+        if batch_size == 0:
+            batch_size = None
 
         optimizer = get_config_attr(
             "optimizer", str, config_dict, f"training stage {name}", "AdamW"
