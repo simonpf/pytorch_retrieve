@@ -84,6 +84,17 @@ class InputLayer(StatsTracker, nn.Module):
             with xr.open_dataset(stats_file) as dataset:
                 self._load_stats_tensors(dataset)
 
+    def load_stats(self, stats_file: Path | str) -> None:
+        """
+        Load input data statistics from stats file.
+
+        Args:
+            stats_file: A path object pointing to a stats file.
+        """
+        with xr.open_dataset(stats_file) as dataset:
+            self._load_stats_tensors(dataset)
+
+
     def initialize(self) -> None:
         """
         Initializes attributes used to track input data statistics.

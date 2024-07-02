@@ -266,3 +266,28 @@ def test_load_input_modules(
     assert (model_loaded.stems["x"][0].t_min == model.stems["x"][0].t_min).all()
     assert (model_loaded.stems["x"][0].t_max == model.stems["x"][0].t_max).all()
     assert (model_loaded.stems["x"][0].t_mean == model.stems["x"][0].t_mean).all()
+
+
+def test_load_stats(tmp_path):
+    """
+    Test explicit loading of stats.
+    """
+    data_loader = data_loader_1d(2048, 64)
+
+    input_layer_1 = InputLayer("x", n_features=1, stats_path=tmp_path / "stats")
+    for x, y in data_loader:
+        input_layer_1(x)
+    input_layer_1.epoch_finished()
+
+    for x, y in data_loader:
+        input_layer_1(x)
+    input_layer_1.epoch_finished()
+
+    stats = input_layer_1.compute_stats()
+    save_stats(stats, tmp_path / "hidden_stats" / "input", "x")
+    assert (tmp_path / "hidden_stats" / "input" / "x.nc").exists()
+
+    input_layer_2 = InputLayer("x", n_features=1, stats_path=tmp_path / "stats")
+    assert not input_layer_2.finalized
+    input_layer_2.load_stats(tmp_path / "hidden_stats" / "input" / "x.nc")
+    assert input_layer_2.finalized
