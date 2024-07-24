@@ -30,10 +30,8 @@ class ScalarMetric:
     Dummy class to identify metrics that evaluate scalar predictions,
     i.e., predictions that consists of a single value.
     """
-    def __init__(
-        self,
-        conditional: Optional[Dict[str, BinSpec]] = None
-    ):
+
+    def __init__(self, conditional: Optional[Dict[str, BinSpec]] = None):
         conds = []
         bins = []
         shape = []
@@ -59,7 +57,6 @@ class ScalarMetric:
         self.bins = bins
         self.shape = shape
 
-
     def log(
         self, lightning_module: LightningModule, output_name: Optional[str] = None
     ) -> None:
@@ -78,11 +75,7 @@ class ScalarMetric:
         sync_dist = lightning_module.device != torch.device("cpu")
 
         lightning_module.log(
-            name,
-            value,
-            on_step=False,
-            on_epoch=True,
-            sync_dist=sync_dist
+            name, value, on_step=False, on_epoch=True, sync_dist=sync_dist
         )
 
 
@@ -93,11 +86,7 @@ class Bias(ScalarMetric, tm.Metric):
 
     name = "Bias"
 
-    def __init__(
-            self,
-            conditional: Optional[Dict[str, BinSpec]] = None,
-            **kwargs
-    ):
+    def __init__(self, conditional: Optional[Dict[str, BinSpec]] = None, **kwargs):
         ScalarMetric.__init__(self, conditional)
         tm.Metric.__init__(self, **kwargs)
         error = torch.zeros(self.shape)
@@ -106,10 +95,10 @@ class Bias(ScalarMetric, tm.Metric):
         self.add_state("counts", default=counts, dist_reduce_fx="sum")
 
     def update(
-            self,
-            pred: torch.Tensor,
-            target: torch.Tensor,
-            conditional: Dict[str, torch.Tensor] = None
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        conditional: Dict[str, torch.Tensor] = None,
     ) -> None:
         """
         Args:
@@ -137,7 +126,6 @@ class Bias(ScalarMetric, tm.Metric):
             self.error += (pred - target).sum()
             self.counts += pred.numel()
         else:
-
             device = torch.device("cpu")
             self.to(device=device)
 
@@ -152,12 +140,9 @@ class Bias(ScalarMetric, tm.Metric):
             coords = torch.stack(coords, -1).to(device=device)
 
             wgts = (pred - target).to(device=device)
-            bins = tuple([
-                bns.to(device=device, dtype=pred.dtype) for bns in self.bins
-            ])
+            bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
             self.error += torch.histogramdd(coords, bins=bins, weight=wgts)[0]
             self.counts += torch.histogramdd(coords, bins=bins)[0]
-
 
     def compute(self) -> torch.Tensor:
         """
@@ -173,12 +158,10 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
     """
     Linear correlation coefficient.
     """
+
     name = "CorrelationCoef"
 
-    def __init__(
-            self,
-            conditional: Optional[Dict[str, BinSpec]] = None
-    ):
+    def __init__(self, conditional: Optional[Dict[str, BinSpec]] = None):
         ScalarMetric.__init__(self, conditional)
         tm.regression.PearsonCorrCoef.__init__(self)
 
@@ -191,10 +174,10 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
         self.add_state("counts", default=torch.zeros(self.shape), dist_reduce_fx="sum")
 
     def update(
-            self,
-            pred: torch.Tensor,
-            target: torch.Tensor,
-            conditional: Optional[Dict[str, torch.Tensor]] = None
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        conditional: Optional[Dict[str, torch.Tensor]] = None,
     ):
         """
         Args:
@@ -224,13 +207,12 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
 
         if self.conditional is None:
             self.x += pred.sum()
-            self.x2 += (pred ** 2).sum()
+            self.x2 += (pred**2).sum()
             self.xy += (pred * target).sum()
             self.y += target.sum()
-            self.y2 += (target ** 2).sum()
+            self.y2 += (target**2).sum()
             self.counts += torch.numel(target)
         else:
-
             device = torch.device("cpu")
             self.to(device=device)
 
@@ -240,21 +222,21 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
                     coords.append(conditional[cond].squeeze().flatten())
                 else:
                     mask = mask.to(device=device)
-                    coords.append(conditional[cond].squeeze()[~mask.squeeze()].flatten())
+                    coords.append(
+                        conditional[cond].squeeze()[~mask.squeeze()].flatten()
+                    )
             coords = torch.stack(coords, -1).to(device=device)
 
-            bins = tuple([
-                bns.to(device=device, dtype=pred.dtype) for bns in self.bins
-            ])
+            bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
 
             pred = pred.to(device=device)
             target = target.to(device=device)
 
             self.x += torch.histogramdd(coords, bins=bins, weight=pred)[0]
-            self.x2 += torch.histogramdd(coords, bins=bins, weight=pred ** 2)[0]
+            self.x2 += torch.histogramdd(coords, bins=bins, weight=pred**2)[0]
             self.xy += torch.histogramdd(coords, bins=bins, weight=pred * target)[0]
             self.y += torch.histogramdd(coords, bins=bins, weight=target)[0]
-            self.y2 += torch.histogramdd(coords, bins=bins, weight=target ** 2)[0]
+            self.y2 += torch.histogramdd(coords, bins=bins, weight=target**2)[0]
             self.counts += torch.histogramdd(coords, bins=bins)[0]
 
     def compute(self) -> torch.Tensor:
@@ -263,8 +245,8 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
         """
         x_mean = self.x / self.counts
         y_mean = self.y / self.counts
-        x_var = self.x2 / self.counts - x_mean ** 2
-        y_var = self.y2 / self.counts - y_mean ** 2
+        x_var = self.x2 / self.counts - x_mean**2
+        y_var = self.y2 / self.counts - y_mean**2
         corr = (self.xy / self.counts - x_mean * y_mean) / torch.sqrt(x_var * y_var)
         return corr
 
@@ -274,8 +256,8 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
         """
         x_mean = self.x / self.counts
         y_mean = self.y / self.counts
-        x_var = self.x2 / self.counts - x_mean ** 2
-        y_var = self.y2 / self.counts - y_mean ** 2
+        x_var = self.x2 / self.counts - x_mean**2
+        y_var = self.y2 / self.counts - y_mean**2
         corr = (self.xy / self.counts - x_mean * y_mean) / torch.sqrt(x_var * y_var)
         return corr
 
@@ -287,10 +269,7 @@ class MSE(ScalarMetric, tm.Metric):
 
     name = "MSE"
 
-    def __init__(
-            self,
-            conditional: Optional[Dict[str, BinSpec]] = None
-    ):
+    def __init__(self, conditional: Optional[Dict[str, BinSpec]] = None):
         ScalarMetric.__init__(self, conditional=conditional)
         tm.Metric.__init__(self)
         error = torch.zeros(self.shape)
@@ -299,10 +278,10 @@ class MSE(ScalarMetric, tm.Metric):
         self.add_state("counts", default=counts, dist_reduce_fx="sum")
 
     def update(
-            self,
-            pred: torch.Tensor,
-            target: torch.Tensor,
-            conditional: Optional[Dict[str, torch.Tensor]] = None
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        conditional: Optional[Dict[str, torch.Tensor]] = None,
     ) -> None:
         """
         Args:
@@ -333,7 +312,6 @@ class MSE(ScalarMetric, tm.Metric):
             self.error += ((pred - target) ** 2).sum()
             self.counts += torch.numel(pred)
         else:
-
             device = torch.device("cpu")
             self.to(device)
 
@@ -343,15 +321,17 @@ class MSE(ScalarMetric, tm.Metric):
                     coords.append(conditional[cond].squeeze().flatten())
                 else:
                     mask = mask.to(device=device)
-                    coords.append(conditional[cond].squeeze()[~mask.squeeze()].flatten())
+                    coords.append(
+                        conditional[cond].squeeze()[~mask.squeeze()].flatten()
+                    )
 
             coords = torch.stack(coords, -1).to(device=device)
-            bins = tuple([
-                bns.to(device=device, dtype=pred.dtype) for bns in self.bins
-            ])
+            bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
             pred = pred.to(device=device)
             target = target.to(device=device)
-            self.error += torch.histogramdd(coords, bins=bins, weight=(pred - target) ** 2)[0]
+            self.error += torch.histogramdd(
+                coords, bins=bins, weight=(pred - target) ** 2
+            )[0]
             self.counts += torch.histogramdd(coords, bins=bins)[0]
 
     def compute(self) -> torch.Tensor:
@@ -390,7 +370,7 @@ class PlotSamples(tm.Metric):
         Reset metric.
         """
         if self.sample_indices is None:
-            permutation = np.random.permutation(len(self.indices))[:self.n_samples]
+            permutation = np.random.permutation(len(self.indices))[: self.n_samples]
             permutation = sorted(permutation)
             self.sample_indices = [self.indices[ind] for ind in permutation]
         self.batch_start = 0
@@ -449,7 +429,7 @@ class PlotSamples(tm.Metric):
         if len(sequences) == 0:
             LOGGER.warning(
                 "PlotSamples metric did not return any images for output '%s'.",
-                output_name
+                output_name,
             )
             return None
 
@@ -467,8 +447,7 @@ class PlotSamples(tm.Metric):
             lightning_module.logger.experiment.log_image(name, img)
         elif isinstance(lightning_module.logger, loggers.wandb.WandbLogger):
             lightning_module.logger.log_image(
-                key=name,
-                images=[(255 * img[:3]).to(dtype=torch.uint8)]
+                key=name, images=[(255 * img[:3]).to(dtype=torch.uint8)]
             )
         elif hasattr(lightning_module.logger.experiment, "add_image"):
             lightning_module.logger.experiment.add_image(name, img, self.step)
@@ -490,7 +469,8 @@ class PlotSamples(tm.Metric):
             the highest validation loss.
         """
         try:
-            from matplotlib.cm import ScalarMappable, colormaps
+            from matplotlib import colormaps
+            from matplotlib.cm import ScalarMappable
             from matplotlib.colors import LogNorm, Normalize
         except ImportError:
             LOGGER.warning(
@@ -572,7 +552,6 @@ class PlotSamples(tm.Metric):
                 target_s = target_s[0]
                 if target_s.dim() == 3:
                     target_s = target_s[0]
-
 
                 pred_s = pred_s.to(dtype=torch.float32).cpu().numpy()
                 target_s = target_s.to(dtype=torch.float32).cpu().numpy()
