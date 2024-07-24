@@ -19,11 +19,7 @@ class RetrievalOutput(ABC):
     Abstract base class for retrieval outputs.
     """
 
-    def __init__(
-        self,
-        dimensions: List[str],
-        coordinates: Dict[str, np.ndarray]
-    ):
+    def __init__(self, dimensions: List[str], coordinates: Dict[str, np.ndarray]):
         """
         Args:
             model_output: The OutputConfig describing the original model output.
@@ -50,6 +46,7 @@ class Full(RetrievalOutput):
     """
     The full model output.
     """
+
     def __init__(
         self,
         model_output: OutputConfig,
@@ -92,7 +89,9 @@ class ExpectedValue(RetrievalOutput):
         coordinates = model_output.get_output_coordinates()
         extra_dims = model_output.extra_dimensions
         coodinates = {
-            name: coords for name, coords in coordinates.items() if name not in extra_dims
+            name: coords
+            for name, coords in coordinates.items()
+            if name not in extra_dims
         }
         super().__init__(dimensions[1:], coordinates)
 
@@ -116,11 +115,7 @@ class ExceedanceProbability(RetrievalOutput):
     Calculates the probability of the output exceeding a given threshold.
     """
 
-    def __init__(
-            self,
-            model_output: OutputConfig,
-            threshold: float
-    ):
+    def __init__(self, model_output: OutputConfig, threshold: float):
         """
         Args:
             model_output: The output config describing the model output.
@@ -131,7 +126,9 @@ class ExceedanceProbability(RetrievalOutput):
         coordinates = model_output.get_output_coordinates()
         extra_dims = model_output.extra_dimensions
         coodinates = {
-            name: coords for name, coords in coordinates.items() if name not in extra_dims
+            name: coords
+            for name, coords in coordinates.items()
+            if name not in extra_dims
         }
         super().__init__(dimensions[1:], coordinates)
         self.threshold = threshold
@@ -152,12 +149,16 @@ class ExceedanceProbability(RetrievalOutput):
 
 
 class Quantiles(RetrievalOutput):
+    """
+    Output class representing quantiles of the posterior distribution
+    as retrieval output.
+    """
 
     def __init__(
-            self,
-            model_output: OutputConfig,
-            tau: List[float],
-            dim_name: Optional[str] = None
+        self,
+        model_output: OutputConfig,
+        tau: List[float],
+        dim_name: Optional[str] = None,
     ):
         """
         Args:
@@ -170,7 +171,9 @@ class Quantiles(RetrievalOutput):
         coordinates = model_output.get_output_coordinates()
         extra_dims = model_output.extra_dimensions
         coodinates = {
-            name: coords for name, coords in coordinates.items() if name not in extra_dims
+            name: coords
+            for name, coords in coordinates.items()
+            if name not in extra_dims
         }
         if dim_name is None:
             dim_name = f"tau_{model_output.target}"
@@ -192,7 +195,5 @@ class Quantiles(RetrievalOutput):
             return [self.compute(pred) for pred in preds]
         quantiles = []
         for qf in self.tau:
-            quantiles.append(
-                1.0 - preds.probability_greater_than(qf)
-            )
+            quantiles.append(1.0 - preds.probability_greater_than(qf))
         return torch.stack(quantiles, 1)
