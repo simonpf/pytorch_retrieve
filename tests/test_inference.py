@@ -5,19 +5,22 @@ from conftest import MODEL_CONFIG_MLP
 
 import numpy as np
 from scipy.stats import norm
+import pytest
 import toml
 import torch
 from torch import nn
 
 
-from pytorch_retrieve.config import OutputConfig
+from pytorch_retrieve.config import OutputConfig, read_config_file
+from pytorch_retrieve.architectures import compile_architecture
+
 from pytorch_retrieve.inference import (
     BatchProcessor,
     batch_size_rec,
     cat_n_rec,
     to_rec,
     InferenceConfig,
-    run_inference
+    run_inference,
 )
 from pytorch_retrieve.tensors import QuantileTensor
 
@@ -47,7 +50,6 @@ def test_cat_n_rec():
     assert x_c.shape[0] == 4
     assert y_r.shape[0] == 8
     assert y_r.shape[0] == 8
-
 
     x = {
         "x_1": [torch.rand(6, 10, 10) for _ in range(4)],
@@ -88,11 +90,7 @@ def test_batch_processor(tmp_path):
         torch.arange(20, 30).reshape((10, 1)).to(torch.float32),
     ]
 
-    processor = BatchProcessor(
-        model=model,
-        batch_size=4,
-        device="cpu"
-    )
+    processor = BatchProcessor(model=model, batch_size=4, device="cpu")
 
     results = []
     for inpt in x:
@@ -116,11 +114,7 @@ def test_batch_processor_irregular(tmp_path):
         torch.arange(10, 30).reshape((20, 1, 1, 1)).to(torch.float32),
     ]
 
-    processor = BatchProcessor(
-        model=model,
-        batch_size=4,
-        device="cpu"
-    )
+    processor = BatchProcessor(model=model, batch_size=4, device="cpu")
 
     results = []
     for inpt in x:
@@ -137,12 +131,14 @@ def test_batch_processor_irregular(tmp_path):
 
     assert torch.isclose(x, results).all()
 
+
 class QuantileTensorLoader:
     """
     An input data loader that loads a tensor containing quantile of a
     normal distribution of a given size. To be used in conjunction with a
     identiy retrieval to test the calculation of retrieval outputs.
     """
+
     def __init__(self, n_inputs: int, n_rows: int, n_cols: int):
         self.n_inputs = n_inputs
         self.n_rows = n_rows
@@ -172,6 +168,7 @@ surface_precip_mean = "ExpectedValue"
 pop = {retrieval_output="ExceedanceProbability", threshold=0}
 """
 
+
 def test_run_inference_quantiles():
     """
     Test running inference with several derived outputs.
@@ -188,11 +185,10 @@ def test_run_inference_quantiles():
         model,
         input_loader,
         inference_config=inference_config,
-        output_path = None,
+        output_path=None,
         device="cpu",
-        dtype=torch.float32
+        dtype=torch.float32,
     )
-
 
     assert len(results) == 4
     assert "surface_precip_terciles" in results
@@ -201,7 +197,56 @@ def test_run_inference_quantiles():
 
     assert np.isclose(results[0]["pop"].data[0], 0.5).all()
     assert np.isclose(
-        results[0]["surface_precip_mean"].data[-1],
-        input_loader.n_rows - 1,
-        atol=1e-3
+        results[0]["surface_precip_mean"].data[-1], input_loader.n_rows - 1, atol=1e-3
     ).all()
+
+
+MLP_INFERENCE_CFG = """
+[architecture]
+name = "MLP"
+
+[architecture.body]
+hidden_channels = 128
+n_layers = 4
+activation_factory = "GELU"
+normalization_factory = "LayerNorm"
+
+[input.x]
+n_features = 1
+
+[output.y]
+shape = [1,]
+kind = "Mean"
+
+[inference]
+batch_size = 2048
+
+[inference.retrieval_output.y]
+surface_precip_terciles = {retrieval_output="Quantiles", tau=[0.33, 0.67]}
+surface_precip_mean = "ExpectedValue"
+pop = {retrieval_output="ExceedanceProbability", threshold=0}
+"""
+
+
+@pytest.fixture
+def mlp_inference_config(tmp_path):
+    """
+    A config file defining a MLP retrieval model with inference config.
+    """
+    cfg_path = tmp_path / "model.toml"
+
+    with open(cfg_path, "w") as output:
+        output.write(MLP_INFERENCE_CFG)
+    return cfg_path
+
+
+def test_mlp_inference_config(mlp_inference_config):
+    """
+    Instantiate the MLP model with inference config.
+    """
+    cfg_dict = read_config_file(mlp_inference_config)
+    model = compile_architecture(cfg_dict)
+    inference_config = model.inference_config
+    assert inference_config is not None
+    assert inference_config.batch_size == 2048
+    assert len(inference_config.retrieval_output["y"]) == 3

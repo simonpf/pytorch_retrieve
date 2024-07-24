@@ -28,6 +28,8 @@ def compile_architecture(config_dict) -> nn.Module:
     Args:
         config_dict: A dictionary containing the configuration of the model to compile.
     """
+    from ..inference import InferenceConfig
+
     arch = config_dict.get("architecture", None)
     if arch is None:
         raise RuntimeError("The model configuration lacks a 'architecture' section.")
@@ -55,10 +57,17 @@ def compile_architecture(config_dict) -> nn.Module:
     elif arch_name == "MetNet":
         model = MetNet.from_config_dict(config_dict)
     else:
-        raise RuntimeError(f"The architecture '{arch_name}' is currently not supported.")
+        raise RuntimeError(
+            f"The architecture '{arch_name}' is currently not supported."
+        )
 
     if "name" in config_dict:
         model.config_dict["name"] = config_dict["name"]
+
+    inference_config = config_dict.get("inference", None)
+    if inference_config is not None:
+        inference_config = InferenceConfig.parse(model.output_config, inference_config)
+        model.inference_config = inference_config
 
     return model
 

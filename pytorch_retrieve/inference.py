@@ -4,11 +4,9 @@ pytorch_retrieve.inference
 
 This module implements generic inference functionality for pytorch_retrieve retrievals.
 """
-from dataclasses import dataclass, asdict
 import logging
 import importlib
 from pathlib import Path
-from threading import Thread
 from typing import Any, Dict, List, Optional, Tuple, Union
 from queue import Queue
 
@@ -49,9 +47,7 @@ def batch_size_rec(inputs) -> int:
         return batch_size_rec(inputs[0])
     elif isinstance(inputs, dict):
         return batch_size_rec(next(iter(inputs.values())))
-    raise RuntimeError(
-        f"Encountered unsupported type {type(inputs)} in inputs."
-    )
+    raise RuntimeError(f"Encountered unsupported type {type(inputs)} in inputs.")
 
 
 def cat_n_rec(inputs: List[Any], batch_size: int) -> Tuple[Any]:
@@ -63,9 +59,7 @@ def cat_n_rec(inputs: List[Any], batch_size: int) -> Tuple[Any]:
              of those to process.
     """
     if not isinstance(inputs, (list, tuple)):
-        raise RuntimeError(
-            "Input 'inputs' to 'cat_n_rec' must be a list."
-        )
+        raise RuntimeError("Input 'inputs' to 'cat_n_rec' must be a list.")
 
     if isinstance(inputs[0], torch.Tensor):
         flat = torch.cat(inputs, 0)
@@ -124,10 +118,9 @@ def to_rec(tensor, device=None, dtype=None) -> Any:
 
 
 def get_dimensions(
-        result_name: str,
-        output_cfg: Optional[Dict[str, OutputConfig]],
-        inference_cfg: Optional["InferenceConfig"],
-
+    result_name: str,
+    output_cfg: Optional[Dict[str, OutputConfig]],
+    inference_cfg: Optional["InferenceConfig"],
 ) -> Tuple[str]:
     """
     Try and infer dimensions from inference and output config.
@@ -157,13 +150,12 @@ def get_dimensions(
     return None
 
 
-
 def process(
-        model: nn.Module,
-        inputs: Dict[str, torch.Tensor],
-        inference_config: InferenceConfig,
-        device: torch.device = torch.device("cpu"),
-        dtype: torch.dtype = torch.float32
+    model: nn.Module,
+    inputs: Dict[str, torch.Tensor],
+    inference_config: InferenceConfig,
+    device: torch.device = torch.device("cpu"),
+    dtype: torch.dtype = torch.float32,
 ):
     """
     Process batch of inputs.
@@ -204,19 +196,19 @@ def process(
     return results
 
 
-
 class BatchProcessor:
     """
     The batch processor implements performs buffered processing of retrieval inputs by combining
     inputs into batches of a given size.
     """
+
     def __init__(
-            self,
-            model: nn.Module,
-            batch_size: int,
-            inference_config: InferenceConfig = None,
-            device: str = "cuda",
-            dtype: str = "float32"
+        self,
+        model: nn.Module,
+        batch_size: int,
+        inference_config: InferenceConfig = None,
+        device: str = "cuda",
+        dtype: str = "float32",
     ):
         super().__init__()
         self.model = model
@@ -259,7 +251,6 @@ class BatchProcessor:
         """
 
         if inpt is None:
-
             if self.input_buffer is None or len(self.input_buffer) == 0:
                 return []
 
@@ -275,10 +266,15 @@ class BatchProcessor:
             if self.output_buffer is None:
                 self.output_buffer = res
             else:
-                self.output_buffer, _ = cat_n_rec([self.output_buffer, res], self.output_buffer_size)
+                self.output_buffer, _ = cat_n_rec(
+                    [self.output_buffer, res], self.output_buffer_size
+                )
 
             results = []
-            while len(self.output_splits) > 0  and self.output_buffer_size >= self.output_splits[0]:
+            while (
+                len(self.output_splits) > 0
+                and self.output_buffer_size >= self.output_splits[0]
+            ):
                 curr_split, *self.output_splits = self.output_splits
                 output, self.output_buffer = cat_n_rec([self.output_buffer], curr_split)
                 self.output_buffer_size -= curr_split
@@ -288,24 +284,30 @@ class BatchProcessor:
             assert self.output_buffer_size == 0
             return results
 
-
         isize = batch_size_rec(inpt)
         self.output_splits.append(isize)
 
         if self.input_buffer is None:
             self.input_buffer = inpt
         else:
-            self.input_buffer, _ = cat_n_rec([self.input_buffer, inpt], self.input_buffer_size + isize)
+            self.input_buffer, _ = cat_n_rec(
+                [self.input_buffer, inpt], self.input_buffer_size + isize
+            )
         self.input_buffer_size += isize
 
         results = []
 
         while self.input_buffer_size > self.batch_size:
-
             batch, self.input_buffer = cat_n_rec([self.input_buffer], self.batch_size)
             self.input_buffer_size -= self.batch_size
 
-            res = process(self.model, batch, self.inference_config, device=self.device, dtype=self.dtype)
+            res = process(
+                self.model,
+                batch,
+                self.inference_config,
+                device=self.device,
+                dtype=self.dtype,
+            )
 
             self.output_buffer_size += self.batch_size
             if self.output_buffer is None:
@@ -315,23 +317,25 @@ class BatchProcessor:
                     [self.output_buffer, res], self.output_buffer_size
                 )
 
-        while len(self.output_splits) > 0 and self.output_buffer_size >= self.output_splits[0]:
+        while (
+            len(self.output_splits) > 0
+            and self.output_buffer_size >= self.output_splits[0]
+        ):
             curr_split, *self.output_splits = self.output_splits
             output, self.output_buffer = cat_n_rec([self.output_buffer], curr_split)
             self.output_buffer_size -= curr_split
             results.append(output)
 
-
         return results
 
 
 def run_inference(
-        model: nn.Module,
-        input_loader: Any,
-        inference_config: InferenceConfig,
-        output_path: Optional[Path] = None,
-        device: torch.device = torch.device("cpu"),
-        dtype: torch.dtype = torch.float32
+    model: nn.Module,
+    input_loader: Any,
+    inference_config: InferenceConfig,
+    output_path: Optional[Path] = None,
+    device: torch.device = torch.device("cpu"),
+    dtype: torch.dtype = torch.float32,
 ) -> Union[List[Path], List[xr.Dataset]]:
     """
     Run inference using the given model on a sequence of inputs provided by an
@@ -360,15 +364,12 @@ def run_inference(
     else:
         output_cfg = None
 
-
     with Progress() as progress:
-
         task = progress.add_task("Processing input:", total=len(input_loader))
 
         input_iterator = iter(input_loader)
 
         while True:
-
             try:
                 input_data = next(input_iterator)
                 args = []
@@ -382,7 +383,6 @@ def run_inference(
                 )
                 continue
 
-
             tile_size = inference_config.tile_size
             overlap = inference_config.spatial_overlap
             batch_size = inference_config.batch_size
@@ -392,7 +392,7 @@ def run_inference(
                 batch_size=batch_size,
                 inference_config=inference_config,
                 device=device,
-                dtype=dtype
+                dtype=dtype,
             )
 
             if tile_size is not None:
@@ -463,14 +463,16 @@ def run_inference(
                             dims = get_dimensions(key, output_cfg, inference_config)
                             if dims is None:
                                 dims = tuple(
-                                    [f"{key}_dim_{ind}" for ind in range(tensor.ndim - 2)]
+                                    [
+                                        f"{key}_dim_{ind}"
+                                        for ind in range(tensor.ndim - 2)
+                                    ]
                                 )
                             if len(dims) < tensor.ndim:
                                 tensor = torch.squeeze(tensor)
 
                             results[key] = (("samples",) + tuple(dims), tensor)
                         results = xr.Dataset(results)
-
 
                     filename = f"results_{cntr}.nc"
 
@@ -489,12 +491,15 @@ def run_inference(
     return outputs
 
 
-@click.argument("model", type=str,)
+@click.argument(
+    "model",
+    type=str,
+)
 @click.argument("input_path", type=str)
 @click.option(
     "--input_loader",
     type=str,
-    help="Name of the input loader class to use to load the input data."
+    help="Name of the input loader class to use to load the input data.",
 )
 @click.option(
     "--input_loader_args",
@@ -502,49 +507,41 @@ def run_inference(
     help=(
         "A string specifying a Python dictionary that will be passed as additional "
         "arguments to the __init__ call of the input loader."
-    )
+    ),
 )
 @click.option(
     "--output_path",
     type=str,
     default=None,
-    help=(
-        "An optional destination to which to write the inference results."
-    )
+    help=("An optional destination to which to write the inference results."),
 )
 @click.option(
     "--device",
     type=str,
     default="cpu",
-    help=(
-        "The device on which to perform inference."
-    )
+    help=("The device on which to perform inference."),
 )
 @click.option(
     "--dtype",
     type=str,
     default="float32",
-    help=(
-        "The floating point type to use for inference."
-    )
+    help=("The floating point type to use for inference."),
 )
 @click.option(
     "--inference_config",
     type=str,
     default=None,
-    help=(
-        "Path of an inference config file to load."
-    )
+    help=("Path of an inference config file to load."),
 )
 def cli(
-        model: str,
-        input_path: Path,
-        input_loader: Optional[str] = None,
-        input_loader_args: Dict[str, Any] = {},
-        output_path: Optional[Path] = None,
-        device: str = "cpu",
-        dtype: str = "float32",
-        inference_config: Optional[str] =  None
+    model: str,
+    input_path: Path,
+    input_loader: Optional[str] = None,
+    input_loader_args: Dict[str, Any] = {},
+    output_path: Optional[Path] = None,
+    device: str = "cpu",
+    dtype: str = "float32",
+    inference_config: Optional[str] = None,
 ) -> None:
     """
     Run inference using MODEL on input files in INPUT_PATH.
@@ -560,7 +557,7 @@ def cli(
         LOGGER.exception(
             "Encountered the following error when trying to load the model from "
             " file '%s'.",
-            model
+            model,
         )
         return 1
 
@@ -571,8 +568,7 @@ def cli(
                 "If given, 'inference_config' must point to an existing file."
             )
         inference_config = InferenceConfig.parse(
-            model.output_config,
-            toml.loads(open(inference_config).read())
+            model.output_config, toml.loads(open(inference_config).read())
         )
     else:
         inference_config = model.inference_config
@@ -600,7 +596,7 @@ def cli(
         LOGGER.error(
             "Could not import the module '%s' containing the data loader. Please make sure "
             "that the corresponding package and all of its dependencies are installed.",
-            input_loader_module
+            input_loader_module,
         )
         return 1
 
@@ -617,7 +613,9 @@ def cli(
         input_loader_args = {}
 
     try:
-        input_loader = getattr(module, input_loader_parts[-1])(input_path, **input_loader_args)
+        input_loader = getattr(module, input_loader_parts[-1])(
+            input_path, **input_loader_args
+        )
     except Exception:
         LOGGER.exception(
             "Encountered the following error when trying to instantiate the input loader."
