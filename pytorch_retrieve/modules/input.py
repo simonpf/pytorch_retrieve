@@ -40,7 +40,6 @@ def _ensure_loaded(tensor: Union[torch.Tensor, "_NotYetLoadedTensor"]) -> torch.
     return tensor
 
 
-
 class InputLayer(StatsTracker, nn.Module):
     """
     Base class for input layers. Input layers track input-data statistics
@@ -84,7 +83,7 @@ class InputLayer(StatsTracker, nn.Module):
             with xr.open_dataset(stats_file) as dataset:
                 self._load_stats_tensors(dataset)
 
-    def load_stats(self, stats_file: Path | str) -> None:
+    def load_stats(self, stats_file: Union[Path, str]) -> None:
         """
         Load input data statistics from stats file.
 
@@ -93,7 +92,6 @@ class InputLayer(StatsTracker, nn.Module):
         """
         with xr.open_dataset(stats_file) as dataset:
             self._load_stats_tensors(dataset)
-
 
     def initialize(self) -> None:
         """
@@ -107,7 +105,6 @@ class InputLayer(StatsTracker, nn.Module):
         self.t_std_dev = torch.zeros(self.n_features, dtype=torch.float32)
         self.t_min = torch.zeros(self.n_features, dtype=torch.float32)
         self.t_max = torch.zeros(self.n_features, dtype=torch.float32)
-
 
     def forward(self, x: torch.Tensor) -> Optional[torch.Tensor]:
         """
@@ -129,7 +126,6 @@ class InputLayer(StatsTracker, nn.Module):
             return x
 
         StatsTracker.track_stats(self, x)
-
 
     def finalize(self, lightning_module: Optional[LightningModule] = None) -> None:
         """
@@ -163,7 +159,7 @@ class InputLayer(StatsTracker, nn.Module):
             "std_dev": self.t_std_dev,
             "min": self.t_min,
             "max": self.t_max,
-            "finalized": self.finalized
+            "finalized": self.finalized,
         }
 
     def set_extra_state(self, state) -> None:
@@ -239,12 +235,20 @@ class StandardizationLayer(InputLayer):
 
         if self.finalized.item() > 0.0:
             if self.kind == "standardize":
-                mean = self.t_mean.to(device=x.device).__getitem__((...,) + (None,) * pad_dims)
-                std_dev = self.t_std_dev.to(device=x.device).__getitem__((...,) + (None,) * pad_dims)
+                mean = self.t_mean.to(device=x.device).__getitem__(
+                    (...,) + (None,) * pad_dims
+                )
+                std_dev = self.t_std_dev.to(device=x.device).__getitem__(
+                    (...,) + (None,) * pad_dims
+                )
                 x_n = (x - mean) / std_dev
             elif self.kind == "minmax":
-                mins = self.t_min.to(device=x.device).__getitem__((...,) + (None,) * pad_dims)
-                maxs = self.t_max.to(device=x.device).__getitem__((...,) + (None,) * pad_dims)
+                mins = self.t_min.to(device=x.device).__getitem__(
+                    (...,) + (None,) * pad_dims
+                )
+                maxs = self.t_max.to(device=x.device).__getitem__(
+                    (...,) + (None,) * pad_dims
+                )
                 x_n = -1.0 + 2.0 * (x - mins) / (maxs - mins)
 
             # Replace NANs
