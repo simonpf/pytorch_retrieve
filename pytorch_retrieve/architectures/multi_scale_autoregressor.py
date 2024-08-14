@@ -6,6 +6,7 @@ Implements the MultiScaleRegressor architecture for the simultaneous retrieval a
 forecasts of physical quantities from satellite observations.
 """
 from dataclasses import dataclass, asdict
+from pathlib import Path
 from typing import Any, Dict, List, Union
 from math import ceil
 
@@ -23,8 +24,9 @@ from .encoder_decoder import (
     StemConfig
 )
 from pytorch_retrieve.config import get_config_attr
-from pytorch_retrieve.config import InputConfig, OutputConfig
+from pytorch_retrieve.config import InputConfig, OutputConfig, read_config_file
 from pytorch_retrieve.modules.conv.decoders import MultiScalePropagator
+from pytorch_retrieve.utils import update_recursive
 
 
 @dataclass

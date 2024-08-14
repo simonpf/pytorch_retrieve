@@ -90,7 +90,7 @@ class RetrievalModel(ParamCount, nn.Module):
         self._inference_config = cfg.to_dict()
 
     @property
-    def input_config(self) -> Dict[str, OutputConfig]:
+    def input_config(self) -> Dict[str, InputConfig]:
         """
         A dictionary mapping names of the model inputs to corresponding InputConfig object.
         """

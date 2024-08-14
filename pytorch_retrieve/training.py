@@ -45,6 +45,65 @@ from pytorch_retrieve.lightning import LightningRetrieval
 LOGGER = logging.getLogger(__name__)
 
 
+def load_weights(
+        path: Path,
+        model: nn.Module
+) -> None:
+    """
+    Load model weights from existing model file.
+
+    This function first removes mis-matching tensors from the state dict of the
+    model and the tries loads the tensors from the state dict in non-strict manner,
+    i.e., not requiring all keys to be present..
+
+    Args:
+        path: A path pointing to the model file or checkpoint containing the weights to load.
+        model: The pytorch Module object into which to load the pre-trained weights.
+    """
+    path = Path(path)
+    if path.exists():
+        data = torch.load(path)
+        state = data["state_dict"]
+        if path.suffix == ".ckpt":
+            state = {key[6:]: val for key, val in state.items()}
+
+        model_state = model.state_dict()
+        matched_state = {}
+        mismatch = []
+        ignored = []
+        for key, tensor in state.items():
+            if key in model_state:
+                if not isinstance(tensor, torch.Tensor):
+                    continue
+
+                if model_state[key].shape == tensor.shape:
+                    matched_state[key] = tensor
+                else:
+                    mismatch.append(key)
+            else:
+                ignored.append(key)
+
+        model.load_state_dict(matched_state, strict=False)
+        if len(mismatch) > 0:
+            LOGGER.warning(
+                "The following layers loaded from the model at %s were discarded "
+                "due to shape mis-match: %s",
+                path, mismatch
+            )
+        if len(ignored) > 0:
+            LOGGER.warning(
+                "The following layers loaded from the model at %s were ignored "
+                "because the current model contains no matching layer: %s",
+                path, ignored
+            )
+    else:
+        LOGGER.error(
+            "Path provided as 'load_weights' argument does not point "
+            "to an existing file."
+        )
+
+
+
 class TrainingConfigBase:
     """
     Base functionality for training configuration objects.
@@ -520,18 +579,7 @@ def run_training(
 
         # Try to load weights, if 'load_weight' argument is set.
         if training_config.load_weights is not None:
-            weight_path = Path(training_config.load_weights)
-            if weight_path.exists():
-                data = torch.load(weight_path)
-                state = data["state_dict"]
-                if weight_path.suffix == ".ckpt":
-                    state = {key[6:]: val for key, val in state.items()}
-                module.model.load_state_dict(state)
-            else:
-                LOGGER.error(
-                    "Path provided as 'load_weights' argument does not point "
-                    "to an existing file."
-                )
+            load_weights(training_config.load_weights, module.model)
 
         ckpt_path = model_dir / "checkpoints"
         ckpt_path.mkdir(exist_ok=True)

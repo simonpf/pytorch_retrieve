@@ -8,6 +8,9 @@ import torch
 import toml
 from typing import List
 
+from pytorch_retrieve.eda import (
+    run_eda
+)
 from pytorch_retrieve.training import (
     TrainingConfig,
     parse_training_config,
@@ -27,8 +30,9 @@ n_layers = 2
 activation_factory = "GELU"
 normalization_factory = "LayerNorm"
 
-[input.x]
+[input.x_1]
 n_features = 1
+normalize = "minmax"
 
 [output.y]
 kind = "Mean"
@@ -181,6 +185,9 @@ def test_training(
     model = load_and_compile_model(model_config_file)
     schedule = parse_training_config(read_config_file(training_config_file))
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+    run_eda(tmp_path / "stats", model.input_config, model.output_config, schedule["warm_up"])
+
+    model = load_and_compile_model(model_config_file)
     run_training(tmp_path, module, compute_config=cpu_compute_config)
 
     # Assert that checkpoint files are created.
@@ -200,6 +207,7 @@ def test_training_encoder_decoder(
     model = load_and_compile_model(encoder_decoder_model_config_file)
     schedule = parse_training_config(read_config_file(encoder_decoder_training_config_file))
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+    run_eda(tmp_path / "stats", model.input_config, model.output_config, schedule["warm_up"])
     run_training(tmp_path, module, compute_config=cpu_compute_config)
 
     # Assert that checkpoint files are created.
@@ -215,7 +223,7 @@ def test_load_weights(
         cpu_compute_config
 ):
     """
-    Run training on synthetic data.
+    Test that loading of weights from a pre-trained model works.
     """
     model = load_and_compile_model(model_config_file)
     schedule = parse_training_config(read_config_file(training_config_file))
@@ -233,4 +241,95 @@ def test_load_weights(
     # Check loading weights from checkpoint.
     schedule["warm_up"].load_weights = str(ckpts[0])
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+    run_training(tmp_path, module, compute_config=cpu_compute_config)
+
+
+MODEL_CONFIG_EXTRA_INPUTS = """
+[architecture]
+name = "MLP"
+
+[architecture.body]
+hidden_channels = 64
+n_layers = 2
+activation_factory = "GELU"
+normalization_factory = "LayerNorm"
+
+[input.x_1]
+n_features = 1
+normalize = "minmax"
+
+[input.x_2]
+n_features = 1
+
+[output.y]
+kind = "Mean"
+shape = [1,]
+"""
+
+@pytest.fixture
+def model_config_file_extra_inputs(tmp_path):
+    """
+    Provides a path to a training config file in a temporary directory.
+    """
+    output_path = tmp_path / "model_extra_inputs.toml"
+    with open(output_path, "w") as output:
+        output.write(MODEL_CONFIG_EXTRA_INPUTS)
+    return output_path
+
+
+TRAINING_CONFIG_EXTRA_INPUTS = """
+[warm_up]
+dataset_module = "pytorch_retrieve.data.synthetic"
+training_dataset = "Synthetic1dMultiInput"
+training_dataset_args = {"n_samples"=256}
+validation_dataset_args = {"n_samples"=128}
+n_epochs = 2
+batch_size = 64
+optimizer = "SGD"
+optimizer_args = {"lr"= 1e-3}
+metrics = ["Bias", "CorrelationCoef"]
+"""
+
+
+@pytest.fixture
+def training_config_file_extra_inputs(tmp_path):
+    """
+    Provides a path to a trainign config file in a temporary directory.
+    """
+    output_path = tmp_path / "training_extra_inputs.toml"
+    with open(output_path, "w") as output:
+        output.write(TRAINING_CONFIG_EXTRA_INPUTS)
+    return output_path
+
+
+
+def test_load_weights_non_strict(
+        model_config_file,
+        model_config_file_extra_inputs,
+        training_config_file,
+        training_config_file_extra_inputs,
+        tmp_path,
+        cpu_compute_config
+):
+    """
+    Test that loading of weights works even for slightly difference architectures.
+    """
+    model = load_and_compile_model(model_config_file)
+    schedule = parse_training_config(read_config_file(training_config_file))
+    module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+    run_training(tmp_path, module, compute_config=cpu_compute_config)
+
+    schedule["warm_up"].load_weights = str(tmp_path / "retrieval_model.pt")
+    module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+    run_training(tmp_path, module, compute_config=cpu_compute_config)
+
+    # Assert that checkpoint files are created.
+    ckpts = list((tmp_path / "checkpoints").glob("*.ckpt"))
+    assert len(ckpts) > 0
+
+    # Check loading weights from checkpoint.
+    model_new = load_and_compile_model(model_config_file_extra_inputs)
+    schedule = parse_training_config(read_config_file(training_config_file_extra_inputs))
+    schedule["warm_up"].load_weights = str(ckpts[0])
+    module = LightningRetrieval(model_new, training_schedule=schedule, model_dir=tmp_path)
     run_training(tmp_path, module, compute_config=cpu_compute_config)

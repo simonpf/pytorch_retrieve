@@ -104,6 +104,36 @@ class Synthetic1d:
         return (torch.tensor(self.x[index, None]), torch.tensor(self.y[index, None]))
 
 
+class Synthetic1dMultiInput(Synthetic1d):
+    """
+    An extension of the Synthetic1d dataset that provides two input features
+    named "x_1" and "x_2".
+    """
+
+    def __init__(self, n_samples=2045):
+        """
+        Args:
+            n_samples: The number of samples in the training data.
+        """
+        super().__init__(n_samples=n_samples)
+
+    def __getitem__(self, index):
+        """
+        Return a sample from the dataset.
+
+        Args:
+            index: The index of the sample in the dataset.
+
+        Return:
+            A tuple ``(x, ys)`` containing the input ``x`` and corresponding
+            prediction target ``ys``, where ``ys`` is a dictionary mapping the
+            output names ``y`` and ``-y`` to corresponding outputs.
+        """
+        x = torch.tensor(self.x[index, None])
+        y = torch.tensor(self.y[index, None])
+        return ({"x_1": x, "x_2": x}, y)
+
+
 class Synthetic1dMultiOutput(Synthetic1d):
     """
     An extension of the Synthetic1d dataset that provides two output targets

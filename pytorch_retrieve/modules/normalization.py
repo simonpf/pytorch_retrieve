@@ -54,7 +54,7 @@ class RMSNorm(nn.Module):
         """
         super().__init__()
         self.n_channels = n_channels
-        self.scaling = nn.Parameter(torch.ones(n_channels), requires_grad=True)
+        self.weight = nn.Parameter(torch.ones(n_channels), requires_grad=True)
         self.bias = nn.Parameter(torch.zeros(n_channels), requires_grad=True)
         self.eps = eps
 
@@ -67,7 +67,7 @@ class RMSNorm(nn.Module):
         var = (x - mu).to(dtype=torch.float32).pow(2).mean(1, keepdim=True)
         x_n = (x.to(dtype=torch.float32) / torch.sqrt(var + self.eps)).to(dtype=dtype)
         shape_ext = (self.n_channels,) + (1,) * (x_n.dim() - 2)
-        x = self.scaling.reshape(shape_ext) * x_n + self.bias.reshape(shape_ext)
+        x = self.weight.reshape(shape_ext) * x_n + self.bias.reshape(shape_ext)
         return x
 
 

@@ -970,7 +970,6 @@ class InvertedBottleneckBlock(nn.Module, ParamCount):
         if padding is None:
             padding = calculate_padding(kernel_size)
 
-
         blocks = []
         if not fused:
             blocks += [
@@ -1059,7 +1058,7 @@ class InvertedBottleneck:
         expansion_factor: int = 4,
         excitation_ratio: float = 0.0,
         anti_aliasing: bool = False,
-        fused: bool =False
+        fused: bool = False
     ):
         """
         Args:
