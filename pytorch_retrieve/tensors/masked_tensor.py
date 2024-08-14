@@ -477,6 +477,7 @@ def repr(inpt, **kwargs):
 
 
 @implements(torch.Tensor.eq)
+@implements(torch.eq)
 def eq(inpt, other, **kwargs):
     """
     Implementation of element-wise comparison.

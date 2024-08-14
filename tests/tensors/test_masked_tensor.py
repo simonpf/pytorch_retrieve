@@ -324,7 +324,7 @@ def test_select():
 
     masked_tensor_2 = torch.select(masked_tensor_1, 1, 0)
 
-    assert (masked_tensor_1[:, 0, :] == masked_tensor_2).all()
+    assert (masked_tensor_1[:, 0, :].eq(masked_tensor_2)).all()
 
 
 def test_any_all():
