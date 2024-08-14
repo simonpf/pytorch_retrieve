@@ -1,0 +1,40 @@
+[encoder]
+channels = [35, 70, 92, 184, 230, 368]
+downsampling_factors = [1, 2, 2, 2, 2]
+stage_depths = [2, 4, 4, 6, 8, 29]
+block_factory = [
+    "InvertedBottleneck",
+    "InvertedBottleneck",
+    "InvertedBottleneck",
+    "InvertedBottleneck",
+    "InvertedBottleneck",
+    "InvertedBottleneck",
+]
+block_factory_args = [
+    {expansion_factor=1, excitation_ratio=0.0, fused=true, anti_aliasing=false},
+    {expansion_factor=4, excitation_ratio=0.0, fused=true, anti_aliasing=false},
+    {expansion_factor=4, excitation_ratio=0.0, fused=true, anti_aliasing=false},
+    {expansion_factor=4, excitation_ratio=0.25, anti_aliasing=false},
+    {expansion_factor=6, excitation_ratio=0.25, anti_aliasing=false},
+    {expansion_factor=6, excitation_ratio=0.25, anti_aliasing=false},
+]
+
+[decoder]
+channels = [230, 184, 92, 70, 35]
+upsampling_factors = [2, 2, 2, 2, 1]
+stage_depths = [8, 6, 4, 4, 2]
+block_factory = [
+    "InvertedBottleneck",
+    "InvertedBottleneck",
+    "InvertedBottleneck",
+    "InvertedBottleneck",
+    "InvertedBottleneck",
+]
+block_factory_args = [
+    {expansion_factor=6, excitation_ratio=0.25, anti_aliasing=false},
+    {expansion_factor=4, excitation_ratio=0.25, anti_aliasing=false},
+    {expansion_factor=4, excitation_ratio=0.0, fused=true, anti_aliasing=false},
+    {expansion_factor=4, excitation_ratio=0.0, fused=true, anti_aliasing=false},
+    {expansion_factor=1, excitation_ratio=0.0, fused=true, anti_aliasing=false},
+]
+skip_connections=true
