@@ -291,6 +291,7 @@ class LightningRetrieval(L.LightningModule):
                 n_samples = (~mask).sum()
                 loss_k = pred[name].loss(target_k)
                 tot_loss = tot_loss + n_samples * loss_k
+                tot_samples += n_samples
                 losses[name] = loss_k.item()
                 pred_k_s = pred[name]
 

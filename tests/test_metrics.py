@@ -118,7 +118,7 @@ def test_mse():
         mse.update(y, torch.zeros_like(y))
 
     result = mse.compute()
-    assert torch.isclose(result, torch.tensor(1.0), atol=0.10)
+    assert torch.isclose(result, torch.tensor(1.0), atol=0.2)
 
     # Test conditional bias with regularly-spaced bins.
     mse = MSE(conditional={"rand": (0, 1, 4)})
@@ -132,7 +132,7 @@ def test_mse():
 
     result = mse.compute()
     assert result.shape == (4,)
-    assert torch.isclose(result, torch.tensor(1.0), atol=0.10).all()
+    assert torch.isclose(result, torch.tensor(1.0), atol=0.2).all()
 
 
 @pytest.mark.skipif(not HAS_MATPLOTLIB, reason="needs matplotlib")

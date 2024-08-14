@@ -60,6 +60,7 @@ def test_hist_1d(tmp_path):
 
     stats_layer = StatsTracker(n_features=1)
     for x, y in data_loader:
+        x = x.to(dtype=torch.float32)
         stats_layer.track_stats(x)
     stats_1 = stats_layer.compute_stats()
 
@@ -87,7 +88,7 @@ def test_hist_1d_nan(tmp_path):
     data_loader = data_loader_1d_nan(2048, 64)
     stats_layer = StatsTracker(n_features=1)
     for x, y in data_loader:
-        x = x.to(torch.bfloat16)
+        x = x.to(dtype=torch.float32)
         stats_layer.track_stats(x)
     stats_1 = stats_layer.compute_stats()
 

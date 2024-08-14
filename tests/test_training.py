@@ -174,6 +174,7 @@ def test_get_training_and_validation_dataset_from_split(training_config_file_val
 
 
 def test_training(
+        monkeypatch,
         model_config_file,
         training_config_file,
         tmp_path,
@@ -182,12 +183,14 @@ def test_training(
     """
     Run training on synthetic data.
     """
+    monkeypatch.chdir(tmp_path)
     model = load_and_compile_model(model_config_file)
     schedule = parse_training_config(read_config_file(training_config_file))
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
     run_eda(tmp_path / "stats", model.input_config, model.output_config, schedule["warm_up"])
 
     model = load_and_compile_model(model_config_file)
+    module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
     run_training(tmp_path, module, compute_config=cpu_compute_config)
 
     # Assert that checkpoint files are created.
@@ -217,6 +220,7 @@ def test_training_encoder_decoder(
 
 
 def test_load_weights(
+        monkeypatch,
         model_config_file,
         training_config_file,
         tmp_path,
@@ -225,9 +229,15 @@ def test_load_weights(
     """
     Test that loading of weights from a pre-trained model works.
     """
+    monkeypatch.chdir(tmp_path)
     model = load_and_compile_model(model_config_file)
     schedule = parse_training_config(read_config_file(training_config_file))
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+    run_eda(tmp_path / "stats", model.input_config, model.output_config, schedule["warm_up"])
+
+    model = load_and_compile_model(model_config_file)
+    module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+
     run_training(tmp_path, module, compute_config=cpu_compute_config)
 
     schedule["warm_up"].load_weights = str(tmp_path / "retrieval_model.pt")
@@ -304,6 +314,7 @@ def training_config_file_extra_inputs(tmp_path):
 
 
 def test_load_weights_non_strict(
+        monkeypatch,
         model_config_file,
         model_config_file_extra_inputs,
         training_config_file,
@@ -314,10 +325,17 @@ def test_load_weights_non_strict(
     """
     Test that loading of weights works even for slightly difference architectures.
     """
+    monkeypatch.chdir(tmp_path)
     model = load_and_compile_model(model_config_file)
     schedule = parse_training_config(read_config_file(training_config_file))
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+    run_eda(tmp_path / "stats", model.input_config, model.output_config, schedule["warm_up"])
+
+    model = load_and_compile_model(model_config_file)
+    module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+
     run_training(tmp_path, module, compute_config=cpu_compute_config)
+
 
     schedule["warm_up"].load_weights = str(tmp_path / "retrieval_model.pt")
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
