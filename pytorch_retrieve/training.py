@@ -697,7 +697,6 @@ def cli(
 
     checkpoint = None
     if resume:
-        print("Module name:", module.name)
         checkpoint = find_most_recent_checkpoint(
             model_path / "checkpoints", module.name
         )

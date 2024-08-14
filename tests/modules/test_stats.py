@@ -13,7 +13,7 @@ from pytorch_retrieve.architectures import load_model, load_and_compile_model
 
 def data_loader_1d(n_samples: int, batch_size: int) -> DataLoader:
     """
-    A DataLoader providing batch of Synthetic1D data.
+    A DataLoader providing batches of Synthetic1D data.
     """
     data = Synthetic1d(n_samples)
     return DataLoader(data, batch_size=batch_size, shuffle=True)
@@ -71,3 +71,28 @@ def test_hist_1d(tmp_path):
     assert len(stats_layer.bins) == stats_layer.n_features
 
 
+def data_loader_1d_nan(n_samples: int, batch_size: int) -> DataLoader:
+    """
+    A DataLoader providing batches of Synthetic1D data.
+    """
+    data = Synthetic1d(n_samples)
+    data.x[:] = np.nan
+    return DataLoader(data, batch_size=batch_size, shuffle=True)
+
+
+def test_hist_1d_nan(tmp_path):
+    """
+    Test calculation of histograms for 1D data.
+    """
+    data_loader = data_loader_1d_nan(2048, 64)
+    stats_layer = StatsTracker(n_features=1)
+    for x, y in data_loader:
+        x = x.to(torch.bfloat16)
+        stats_layer.track_stats(x)
+    stats_1 = stats_layer.compute_stats()
+
+    stats_layer.epoch_finished()
+
+    for x, y in data_loader:
+        x = x.to(torch.bfloat16)
+        stats_layer.track_stats(x)

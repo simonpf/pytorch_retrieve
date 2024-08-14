@@ -193,6 +193,7 @@ class StatsTracker:
         }
 
         dims = ("features", "features_")
+        print(mean.shape, cov.shape, corr.shape, min_vals.shape)
         dataset = xr.Dataset(
             {name: (dims[: data.ndim], data) for name, data in stats.items()}
         )

@@ -135,7 +135,13 @@ class Bias(ScalarMetric, tm.Metric):
                     coords.append(conditional[cond].squeeze())
                 else:
                     mask = mask.to(device=device)
-                    coords.append(conditional[cond].squeeze()[~mask.squeeze()])
+                    cond_s = conditional[cond].squeeze()
+                    mask_s = mask.squeeze()
+                    # Expand channel dimension if necessary
+                    if cond_s.ndim < mask_s.ndim:
+                        cond_s = cond_s[:, None]
+                        cond_s = torch.broadcast_to(cond_s, mask_s.shape)
+                    coords.append(cond_s[~mask_s])
 
             coords = torch.stack(coords, -1).to(device=device)
 
@@ -222,9 +228,14 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
                     coords.append(conditional[cond].squeeze().flatten())
                 else:
                     mask = mask.to(device=device)
-                    coords.append(
-                        conditional[cond].squeeze()[~mask.squeeze()].flatten()
-                    )
+                    cond_s = conditional[cond].squeeze()
+                    mask_s = mask.squeeze()
+                    # Expand channel dimension if necessary
+                    if cond_s.ndim < mask_s.ndim:
+                        cond_s = cond_s[:, None]
+                        cond_s = torch.broadcast_to(cond_s, mask_s.shape)
+                    coords.append(cond_s[~mask_s])
+
             coords = torch.stack(coords, -1).to(device=device)
 
             bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
@@ -321,9 +332,19 @@ class MSE(ScalarMetric, tm.Metric):
                     coords.append(conditional[cond].squeeze().flatten())
                 else:
                     mask = mask.to(device=device)
+<<<<<<< Updated upstream
                     coords.append(
                         conditional[cond].squeeze()[~mask.squeeze()].flatten()
                     )
+=======
+                    cond_s = conditional[cond].squeeze()
+                    mask_s = mask.squeeze()
+                    # Expand channel dimension if necessary
+                    if cond_s.ndim < mask_s.ndim:
+                        cond_s = cond_s[:, None]
+                        cond_s = torch.broadcast_to(cond_s, mask_s.shape)
+                    coords.append(cond_s[~mask_s])
+>>>>>>> Stashed changes
 
             coords = torch.stack(coords, -1).to(device=device)
             bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
