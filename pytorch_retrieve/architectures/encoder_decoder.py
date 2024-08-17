@@ -759,6 +759,7 @@ class HeadConfig:
         head = head_factory(
             in_channels=self.in_channels,
             out_shape=shape,
+            depth=self.depth,
             activation_factory=activation_factory,
             normalization_factory=normalization_factory,
         )
@@ -1042,7 +1043,7 @@ class EncoderDecoder(RetrievalModel):
             if is_sequence:
                 output[name] = list(torch.unbind(tensor, -3))
 
-        if not isinstance(x, dict):
+        if len(output) == 1 and not isinstance(x, dict):
             return next(iter(output.values()))
 
         return output

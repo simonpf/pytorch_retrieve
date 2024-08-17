@@ -241,6 +241,7 @@ depth = 1
 out_channels = 64
 
 [architecture.decoder.head]
+individual = false
 depth = 3
 
 [input.seviri]

@@ -939,7 +939,7 @@ def cross_entropy(pred, target, *args, **kwargs):
     valid = ~mask
     return torch.nn.functional.cross_entropy(
         get_base(pred)[valid],
-        get_base(target)[valid],
+        get_base(target)[valid].to(dtype=torch.int64),
         *args,
         **kwargs
     )

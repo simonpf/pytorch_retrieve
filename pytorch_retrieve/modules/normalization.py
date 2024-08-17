@@ -41,7 +41,7 @@ class LayerNormFirst(nn.Module):
         return x
 
 
-class RMSNorm(nn.Module):
+class RMSNormFirst(nn.Module):
     """
     Root-mean-square normalization
     """
@@ -69,6 +69,10 @@ class RMSNorm(nn.Module):
         shape_ext = (self.n_channels,) + (1,) * (x_n.dim() - 2)
         x = self.weight.reshape(shape_ext) * x_n + self.bias.reshape(shape_ext)
         return x
+
+
+# Keep old name for PyTorch versions that don't have an RMSNorm layer.
+RMSNorm = RMSNormFirst
 
 
 def get_normalization_factory(name: str) -> Callable:

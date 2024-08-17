@@ -9,6 +9,8 @@ from collections.abc import Sequence, Iterable, Mapping
 
 import torch
 
+from .base import RegressionTensor
+
 
 HANDLED_FUNCTIONS = {}
 
@@ -25,7 +27,7 @@ def implements(torch_function):
     return decorator
 
 
-class MeanTensor(torch.Tensor):
+class MeanTensor(torch.Tensor, RegressionTensor):
     """
     A MeanTensor is a tensor that holds predictions corresponding to the
     mean of the posterior distribution.

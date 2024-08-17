@@ -4,11 +4,15 @@ pytorch_retrieve.modules.output
 
 """
 from typing import Optional, Union, Tuple
-
 import torch
 from torch import nn
 
-from pytorch_retrieve.tensors import MeanTensor, QuantileTensor
+from pytorch_retrieve.tensors import (
+    MeanTensor,
+    QuantileTensor,
+    ClassificationTensor,
+    DetectionTensor
+)
 from . import stats
 
 
@@ -86,4 +90,70 @@ class Quantiles(stats.StatsTracker, nn.Module):
         result = QuantileTensor(x, tau=self.tau.to(device=x.device))
         if self.transformation is not None:
             result.__transformation__ = self.transformation
+        return result
+
+
+class Classification(stats.StatsTracker, nn.Module):
+    """
+    The Classification layer produces tensors that represent a classficiation.
+    """
+    def __init__(
+            self,
+            name: str,
+            shape: Union[int, Tuple[int]],
+    ):
+        """
+        Create an output layer for a classficiation task.
+
+        Args:
+            name: The name of the output produced by this output layer.
+            shape: The shape of the target quantity for a single input pixel.
+            n_classes: The number of classes to distinguish.
+        """
+        self.name = name
+        nn.Module.__init__(self)
+        if isinstance(shape, int):
+            n_features = shape
+        else:
+            n_features = shape[0]
+        stats.StatsTracker.__init__(self, n_features)
+
+    def forward(self, x):
+        """
+        Produces a QuantileTensor from a model output.
+        """
+        result = ClassificationTensor(x)
+        return result
+
+
+class Detection(stats.StatsTracker, nn.Module):
+    """
+    The Detection layer produces tensors that represent a binary
+    classficiation.
+    """
+    def __init__(
+            self,
+            name: str,
+            shape: Union[int, Tuple[int]],
+    ):
+        """
+        Create an output layer for a detection task.
+
+        Args:
+            name: The name of the output produced by this output layer.
+            shape: The shape of the target quantity for a single input pixel.
+        """
+        self.name = name
+        nn.Module.__init__(self)
+        if isinstance(shape, int):
+            n_features = shape
+        else:
+            n_features = shape[0]
+        stats.StatsTracker.__init__(self, n_features)
+
+    def forward(self, x):
+        """
+        Produces a QuantileTensor from a model output.
+        """
+        result = DetectionTensor(x)
         return result

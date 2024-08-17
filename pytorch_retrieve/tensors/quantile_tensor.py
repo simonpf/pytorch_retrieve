@@ -13,6 +13,8 @@ from typing import Union, List
 import torch
 from torch import nn
 
+from .base import RegressionTensor
+
 
 HANDLED_FUNCTIONS = {}
 
@@ -43,7 +45,7 @@ def select(tensor: torch.Tensor, dim: int, ind: Union[int, slice]):
     return tensor.__getitem__((slice(None),) * dim + (ind,))
 
 
-class QuantileTensor(torch.Tensor):
+class QuantileTensor(torch.Tensor, RegressionTensor):
     """
     A QuantileTensor is a tensor that holds probabilitis estimates
     of scalar quantities represented using a squence of quantiles.

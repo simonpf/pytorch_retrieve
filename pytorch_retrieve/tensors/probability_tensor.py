@@ -17,6 +17,7 @@ from torch import nn
 
 from .masked_tensor import MaskedTensor
 from .utils import select
+from .base import RegressionTensor
 
 
 HANDLED_FUNCTIONS = {}
@@ -33,7 +34,7 @@ def implements(torch_function):
     return decorator
 
 
-class ProbabilityTensor(torch.Tensor):
+class ProbabilityTensor(torch.Tensor, RegressionTensor):
     """
     A Probability is a tensor that holds probabilistic estimates of
     scalar quantities represented using a sequence of probabilities

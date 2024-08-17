@@ -175,6 +175,7 @@ class OutputConfig:
     quantiles: Optional[Union[int, List[float]]] = None
     transformation: Optional[str] = None
     dimensions: Optional[List[str]] = None
+    n_classes: Optional[int] = None
 
     @classmethod
     def parse(cls, name, cfg):
@@ -208,6 +209,7 @@ class OutputConfig:
             else:
                 dimensions = [f"{name}_dim_{ind + 1}" for ind in range(len(shape))]
 
+        n_classes = get_config_attr("n_classes", None, cfg, f"output.{name}")
 
         return OutputConfig(
             target=target,
@@ -215,7 +217,8 @@ class OutputConfig:
             shape=shape,
             quantiles=quantiles,
             transformation=transformation,
-            dimensions=dimensions
+            dimensions=dimensions,
+            n_classes=n_classes
         )
 
     @property
@@ -257,6 +260,19 @@ class OutputConfig:
             if isinstance(quantiles, int):
                 return (quantiles,) + shape
             return (len(quantiles),) + shape
+
+        if kind == "Detection":
+            return shape
+
+        if kind == "Classification":
+            if self.n_classes is None:
+                raise RuntimeError(
+                    f"The output for target {self.target} has kind 'Classification' "
+                    "but the 'n_classes' attribute is not set."
+                )
+            if sum(shape) == 1:
+                return (self.n_classes,)
+            return (self.n_classes,) + shape
 
         raise RuntimeError(
             f"The output kind '{kind}' is currently not supported. Refer to "
@@ -316,6 +332,15 @@ class OutputConfig:
             elif isinstance(quantiles, list):
                 quantiles = np.array(list)
             return output.Quantiles(self.target, self.shape, tau=quantiles, transformation=transformation)
+        if kind == "Detection":
+            return output.Detection(self.target, self.shape)
+        if kind == "Classification":
+            if self.n_classes is None:
+                raise RuntimeError(
+                    f"The output for target {self.target} has kind 'Classification' "
+                    "but the 'n_classes' attribute is not set."
+                )
+            return output.Classification(self.target, self.shape)
         raise RuntimeError(
             f"The output kind '{kind}' is currently not supported. Refer to "
             "the documentation of the pytorch_retrieve.modules.output module "

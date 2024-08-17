@@ -497,14 +497,14 @@ class DecoderConfig:
         )
 
         head_config_dict = get_config_attr("head", dict, decoder_config_dict, "architecture.decoder", {})
-
-        if "base" in head_config_dict:
+        individual = head_config_dict.get("individual", True)
+        if individual:
             head_configs = {}
             for name, output_config in output_configs.items():
                 if name in head_config_dict:
                     config_dict = head_config_dict[name]
                 else:
-                    config_dict = head_config_dict["base"]
+                    config_dict = head_config_dict.get("default", {})
                 head_configs[name] = encoder_decoder.HeadConfig.parse(
                     channels[-1], output_config, name, config_dict
                 )
@@ -539,6 +539,7 @@ class DecoderConfig:
         head_configs["individual"] = True
         config = asdict(self)
         config["head"] = head_configs
+
         config["channels"] = config["channels"][1:]
         return config
 

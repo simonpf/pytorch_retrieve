@@ -373,10 +373,11 @@ class LightningRetrieval(L.LightningModule):
         for pred_s, loss_s in zip(pred, target):
             loss += pred_s.loss(target_)
 
-            scalar_pred = pred_s.expected_value()
-            for metric in scalar_metrics:
-                metric = metric.to(device=scalar_pred.device)
-                metric.update(scalar_pred, target_s)
+            if hasattr(pred_s, "expected_value"):
+                scalar_pred = pred_s.expected_value()
+                for metric in scalar_metrics:
+                    metric = metric.to(device=scalar_pred.device)
+                    metric.update(scalar_pred, target_s)
 
         return loss
 
@@ -422,10 +423,12 @@ class LightningRetrieval(L.LightningModule):
         scalar_metrics = [
             metric for metric in metrics if isinstance(metric, ScalarMetric)
         ]
-        scalar_pred = pred.expected_value()
-        for metric in scalar_metrics:
-            metric = metric.to(device=scalar_pred.device)
-            metric.update(scalar_pred, target)
+
+        if hasattr(pred, "expected_value"):
+            scalar_pred = pred.expected_value()
+            for metric in scalar_metrics:
+                metric = metric.to(device=scalar_pred.device)
+                metric.update(scalar_pred, target)
 
         other_metrics = [
             metric for metric in metrics if not isinstance(metric, ScalarMetric)
@@ -512,7 +515,7 @@ class LightningRetrieval(L.LightningModule):
                     tot_loss = tot_loss + loss_k_s * n_samples
                     losses[name] += loss_k_s.item()
 
-                    if len(scalar_metrics) > 0:
+                    if hasattr(pred_k_s, "expected_value") and len(scalar_metrics) > 0:
                         pred_k_s = pred_k_s.expected_value()
                         for metric in scalar_metrics:
                             metric = metric.to(device=pred_k_s.device)
@@ -529,16 +532,19 @@ class LightningRetrieval(L.LightningModule):
                 mask = torch.isnan(target_k)
                 if mask.any():
                     target_k = MaskedTensor(target_k, mask=mask)
+                    n_samples = (~mask).sum()
+                else:
+                    n_samples = target_k.size()
 
                 loss_k = pred_k.loss(target_k)
-                tot_loss += loss_k
-                losses[name] += loss_k.item()
+                tot_loss += loss_k if n_samples > 0 else 0
+                losses[name] += loss_k.item() if n_samples > 0 else 0
 
                 for metric in other_metrics:
                     metric = metric.to(device=pred_k.device)
                     metric.update(pred_k, target_k)
 
-                if len(scalar_metrics) > 0:
+                if hasattr(pred_k, "expected_value") and len(scalar_metrics) > 0:
                     pred_k = pred_k.expected_value()
                     for metric in scalar_metrics:
                         metric = metric.to(device=pred_k.device)

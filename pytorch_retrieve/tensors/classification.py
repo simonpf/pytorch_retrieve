@@ -80,8 +80,8 @@ class DetectionTensor(torch.Tensor):
 
         """
         return nn.functional.binary_cross_entropy_with_logits(
-            self.base,
-            y_true,
+            self.base.squeeze(),
+            y_true.squeeze(),
         )
 
     def probability(self):
@@ -169,3 +169,11 @@ class ClassificationTensor(torch.Tensor):
         Return class probabilities.
         """
         return torch.softmax(self.base, 1)
+
+    def most_likely_class(self) -> torch.Tensor:
+        """
+        Calculate most likely class.
+        """
+        probs = self.probability()
+        inds = torch.argmax(probs, 1).to(dtype=self.dtype)
+        return inds

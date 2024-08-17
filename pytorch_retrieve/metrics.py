@@ -16,7 +16,13 @@ import torch
 import torchmetrics as tm
 from torchvision.utils import make_grid
 
-from pytorch_retrieve.tensors import MaskedTensor
+from pytorch_retrieve.tensors import (
+    MaskedTensor,
+    RegressionTensor,
+    ClassificationTensor,
+    DetectionTensor
+)
+
 
 
 LOGGER = logging.getLogger(__name__)
@@ -515,7 +521,21 @@ class PlotSamples(tm.Metric):
             cmap.set_bad("grey")
 
             for pred, target in zip(self.preds, self.targets):
-                pred = pred.expected_value()[0]
+                if isinstance(pred, RegressionTensor):
+                    pred = pred.expected_value()[0]
+                elif isinstance(pred, ClassificationTensor):
+                    target_min = 0
+                    target_max = pred.shape[1] - 1
+                    pred = pred.most_likely_class()[0]
+                    cmap = colormaps["Set1"]
+                elif isinstance(pred, DetectionTensor):
+                    target_min = 0
+                    target_max = 1
+                    cmap = colormaps["Pastel1"]
+                    pred = (pred.probability() > 0.5).to(dtype=torch.float32)[0]
+                else:
+                    continue
+
                 if pred.dim() == 3:
                     pred = pred[0]
                 if pred.dim() != 2:
@@ -528,6 +548,7 @@ class PlotSamples(tm.Metric):
                 target = target[0]
                 if target.dim() == 3:
                     target = target[0]
+
 
                 pred = pred.to(dtype=torch.float32).cpu().numpy()
                 target = target.to(dtype=torch.float32).cpu().numpy()
