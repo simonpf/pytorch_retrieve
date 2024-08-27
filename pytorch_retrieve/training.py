@@ -566,6 +566,7 @@ def run_training(
         compute_config = ComputeConfig()
 
     if checkpoint is not None:
+        LOGGER.info("Resuming training from checkpoint %s.", checkpoint)
         module = LightningRetrieval.load_from_checkpoint(
             checkpoint,
             model=module.model,
