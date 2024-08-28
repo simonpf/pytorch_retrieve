@@ -11,7 +11,9 @@ import torch
 from pytorch_retrieve.metrics import (
     Bias,
     CorrelationCoef,
+    MAE,
     MSE,
+    SMAPE,
     PlotSamples,
 )
 from pytorch_retrieve.tensors import MaskedTensor, MeanTensor
@@ -120,7 +122,7 @@ def test_mse():
     result = mse.compute()
     assert torch.isclose(result, torch.tensor(1.0), atol=0.2)
 
-    # Test conditional bias with regularly-spaced bins.
+    # Test conditional MSE with regularly-spaced bins.
     mse = MSE(conditional={"rand": (0, 1, 4)})
     for x, y in data_loader:
         mask = torch.rand(y.shape) > 0.5
@@ -133,6 +135,70 @@ def test_mse():
     result = mse.compute()
     assert result.shape == (4,)
     assert torch.isclose(result, torch.tensor(1.0), atol=0.2).all()
+
+
+def test_mae():
+    """
+    Test that calculating the MAE works with masked tensors.
+    """
+    mae = MAE()
+    data_loader = data_loader_1d(10 * 1024, 128)
+
+    for x, y in data_loader:
+        mask = torch.rand(y.shape) > 0.5
+        y.set_(torch.normal(torch.zeros_like(y), torch.ones_like(y)))
+        y[mask] = torch.nan
+        y = MaskedTensor(y, mask=mask)
+        mae.update(y, torch.zeros_like(y))
+
+    result = mae.compute()
+    assert torch.isclose(result, torch.tensor(0.798), atol=0.2)
+
+    # Test conditional MAE with regularly-spaced bins.
+    mae = MAE(conditional={"rand": (0, 1, 4)})
+    for x, y in data_loader:
+        mask = torch.rand(y.shape) > 0.5
+        y.set_(torch.normal(torch.zeros_like(y), torch.ones_like(y)))
+        y[mask] = torch.nan
+        y = MaskedTensor(y, mask=mask)
+        rand = torch.rand(y.shape)
+        mae.update(y, torch.zeros_like(y), conditional={"rand": rand})
+
+    result = mae.compute()
+    assert result.shape == (4,)
+    assert torch.isclose(result, torch.tensor(0.798), atol=0.2).all()
+
+
+def test_smape():
+    """
+    Test that calculating the SMAPE works with masked tensors.
+    """
+    smape = SMAPE()
+    data_loader = data_loader_1d(10 * 1024, 128)
+
+    for x, y in data_loader:
+        mask = torch.rand(y.shape) > 0.5
+        y.set_(torch.normal(torch.zeros_like(y), torch.ones_like(y)))
+        y[mask] = torch.nan
+        y = MaskedTensor(y, mask=mask)
+        smape.update(torch.zeros_like(y), y)
+
+    result_ref = smape.compute()
+    assert torch.isfinite(result_ref)
+
+    # Test conditional SMAPE with regularly-spaced bins.
+    smape = SMAPE(conditional={"rand": (0, 1, 4)})
+    for x, y in data_loader:
+        mask = torch.rand(y.shape) > 0.5
+        y.set_(torch.normal(torch.zeros_like(y), torch.ones_like(y)))
+        y[mask] = torch.nan
+        y = MaskedTensor(y, mask=mask)
+        rand = torch.rand(y.shape)
+        smape.update(torch.zeros_like(y), y, conditional={"rand": rand})
+
+    result = smape.compute()
+    assert result.shape == (4,)
+    assert torch.isclose(result, result_ref, atol=0.2).all()
 
 
 @pytest.mark.skipif(not HAS_MATPLOTLIB, reason="needs matplotlib")

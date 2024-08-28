@@ -362,6 +362,187 @@ class MSE(ScalarMetric, tm.Metric):
         return self.error / self.counts
 
 
+class MAE(ScalarMetric, tm.Metric):
+    """
+    The mean absolute error.
+    """
+
+    name = "MAE"
+
+    def __init__(self, conditional: Optional[Dict[str, BinSpec]] = None):
+        ScalarMetric.__init__(self, conditional=conditional)
+        tm.Metric.__init__(self)
+        error = torch.zeros(self.shape)
+        counts = torch.zeros(self.shape)
+        self.add_state("error", default=error, dist_reduce_fx="sum")
+        self.add_state("counts", default=counts, dist_reduce_fx="sum")
+
+    def update(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        conditional: Optional[Dict[str, torch.Tensor]] = None,
+    ) -> None:
+        """
+        Args:
+            pred: A tensor containing the point predictions from the
+                retrieval model.
+            target: A tensor containing the reference values corresponding
+                to 'pred'.
+            conditional: An optional dictionary containing values to
+                condition the calculation of the bias onto.
+        """
+        pred = pred.squeeze()
+        target = target.squeeze()
+
+        if isinstance(target, MaskedTensor):
+            mask = target.mask
+            target = target.base
+            if isinstance(pred, MaskedTensor):
+                mask = mask | pred.mask
+                pred = pred.base
+            pred = pred[~mask]
+            target = target[~mask]
+
+        if pred.dim() > 2:
+            pred = pred.flatten()
+            target = target.flatten()
+
+        if self.conditional is None:
+            self.error += torch.abs(pred - target).sum()
+            self.counts += torch.numel(pred)
+        else:
+            device = torch.device("cpu")
+            self.to(device)
+
+            coords = []
+            for cond in self.conditional:
+                if mask is None:
+                    coords.append(conditional[cond].squeeze().flatten())
+                else:
+                    mask = mask.to(device=device)
+                    cond_s = conditional[cond].squeeze()
+                    mask_s = mask.squeeze()
+                    # Expand channel dimension if necessary
+                    if cond_s.ndim < mask_s.ndim:
+                        cond_s = cond_s[:, None]
+                        cond_s = torch.broadcast_to(cond_s, mask_s.shape)
+                    coords.append(cond_s[~mask_s])
+
+            coords = torch.stack(coords, -1).to(device=device)
+            bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
+            pred = pred.to(device=device)
+            target = target.to(device=device)
+            self.error += torch.histogramdd(
+                coords, bins=bins, weight=torch.abs(pred - target)
+            )[0]
+            self.counts += torch.histogramdd(coords, bins=bins)[0]
+
+    def compute(self) -> torch.Tensor:
+        """
+        Calculate the MAE.
+        """
+        return self.error / self.counts
+
+
+class SMAPE(ScalarMetric, tm.Metric):
+    """
+    The mean absolute error.
+    """
+
+    name = "SMAPE"
+
+    def __init__(
+            self,
+            threshold: float = 1e-3,
+            conditional: Optional[Dict[str, BinSpec]] = None
+    ):
+        ScalarMetric.__init__(self, conditional=conditional)
+        tm.Metric.__init__(self)
+        self.threshold = threshold
+        error = torch.zeros(self.shape)
+        counts = torch.zeros(self.shape)
+        self.add_state("error", default=error, dist_reduce_fx="sum")
+        self.add_state("counts", default=counts, dist_reduce_fx="sum")
+
+    def update(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        conditional: Optional[Dict[str, torch.Tensor]] = None,
+    ) -> None:
+        """
+        Args:
+            pred: A tensor containing the point predictions from the
+                retrieval model.
+            target: A tensor containing the reference values corresponding
+                to 'pred'.
+            conditional: An optional dictionary containing values to
+                condition the calculation of the bias onto.
+        """
+        pred = pred.squeeze()
+        target = target.squeeze()
+
+        if isinstance(target, MaskedTensor):
+            mask = target.mask
+            target = target.base
+            if isinstance(pred, MaskedTensor):
+                mask = mask | pred.mask
+                pred = pred.base
+            pred = pred[~mask]
+            target = target[~mask]
+
+        if pred.dim() > 2:
+            pred = pred.flatten()
+            target = target.flatten()
+
+        if self.conditional is None:
+            valid = target >= self.threshold
+            pred = pred[valid]
+            target = target[valid]
+            smape = torch.abs(pred - target) / (0.5 * (torch.abs(pred) + torch.abs(target)))
+            self.error += smape.sum()
+            self.counts += torch.numel(pred)
+        else:
+            device = torch.device("cpu")
+            self.to(device)
+
+            coords = []
+            for cond in self.conditional:
+                if mask is None:
+                    coords.append(conditional[cond].squeeze().flatten())
+                else:
+                    mask = mask.to(device=device)
+                    cond_s = conditional[cond].squeeze()
+                    mask_s = mask.squeeze()
+                    # Expand channel dimension if necessary
+                    if cond_s.ndim < mask_s.ndim:
+                        cond_s = cond_s[:, None]
+                        cond_s = torch.broadcast_to(cond_s, mask_s.shape)
+                    coords.append(cond_s[~mask_s])
+
+            coords = torch.stack(coords, -1).to(device=device)
+            bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
+            pred = pred.to(device=device)
+            target = target.to(device=device)
+
+            valid = target >= self.threshold
+            pred = pred[valid]
+            target = target[valid]
+            coords = coords[valid]
+            smape = torch.abs(pred - target) / (0.5 * (torch.abs(pred) + torch.abs(target)))
+            self.error += torch.histogramdd(
+                coords, bins=bins, weight=smape
+            )[0]
+            self.counts += torch.histogramdd(coords, bins=bins)[0]
+
+    def compute(self) -> torch.Tensor:
+        """
+        Calculate the SMAPE.
+        """
+        return self.error / self.counts
+
+
 class PlotSamples(tm.Metric):
     """
     Plots images of retrieved 2D fields for the n samples with the highest validation
@@ -526,13 +707,13 @@ class PlotSamples(tm.Metric):
                 elif isinstance(pred, ClassificationTensor):
                     target_min = 0
                     target_max = pred.shape[1] - 1
-                    pred = pred.most_likely_class()[0]
+                    pred = pred.to(dtype=torch.float32).most_likely_class()[0]
                     cmap = colormaps["Set1"]
                 elif isinstance(pred, DetectionTensor):
                     target_min = 0
                     target_max = 1
                     cmap = colormaps["Pastel1"]
-                    pred = (pred.probability() > 0.5).to(dtype=torch.float32)[0]
+                    pred = (pred.to(dtype=torch.float32).probability() > 0.5).to(dtype=torch.float32)[0]
                 else:
                     continue
 
