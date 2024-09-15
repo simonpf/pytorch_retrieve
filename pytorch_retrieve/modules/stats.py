@@ -5,6 +5,7 @@ pytorch_retrieve.modules.stats
 Defines modules for tracking basic statistics of model input and
 output data.
 """
+
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -39,6 +40,7 @@ class StatsTracker:
     A StatsTracker is used to track the statistics of specific tensor during
     EDA.
     """
+
     def __init__(
         self,
         n_features: int,
@@ -144,7 +146,6 @@ class StatsTracker:
                 )
                 hist += torch.histogram(torch.select(x_nan, -1, ind), self.bins[ind])[0]
 
-
     def compute_stats(
         self, lightning_module: Optional[LightningModule] = None
     ) -> xr.Dataset:
@@ -165,7 +166,9 @@ class StatsTracker:
                 f"The input layer '{self.name}' has not yet processed any input data."
             )
 
-        if lightning_module is not None and lightning_module.device != torch.device("cpu"):
+        if lightning_module is not None and lightning_module.device != torch.device(
+            "cpu"
+        ):
             x = lightning_module.all_gather(self.x).sum(0).cpu().numpy()
             xx = lightning_module.all_gather(self.xx).sum(0).cpu().numpy()
             counts = lightning_module.all_gather(self.counts).sum(0).cpu().numpy()
@@ -193,7 +196,6 @@ class StatsTracker:
         }
 
         dims = ("features", "features_")
-        print(mean.shape, cov.shape, corr.shape, min_vals.shape)
         dataset = xr.Dataset(
             {name: (dims[: data.ndim], data) for name, data in stats.items()}
         )
@@ -205,9 +207,7 @@ class StatsTracker:
             dataset["counts"] = (("features", "bins"), counts)
         return dataset
 
-    def epoch_finished(
-        self
-    ) -> None:
+    def epoch_finished(self) -> None:
         """
         Signal processing of an epoch of data has finished.
         """
