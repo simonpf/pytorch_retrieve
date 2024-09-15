@@ -534,7 +534,7 @@ class LightningRetrieval(L.LightningModule):
                     target_k = MaskedTensor(target_k, mask=mask)
                     n_samples = (~mask).sum()
                 else:
-                    n_samples = target_k.size()
+                    n_samples = target_k.numel()
 
                 loss_k = pred_k.loss(target_k)
                 tot_loss += loss_k if n_samples > 0 else 0

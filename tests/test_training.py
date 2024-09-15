@@ -51,6 +51,41 @@ def model_config_file(tmp_path):
     return output_path
 
 
+MULTI_OUTPUT_MODEL_CONFIG = """
+[architecture]
+name = "MLP"
+
+[architecture.body]
+hidden_channels = 64
+n_layers = 2
+activation_factory = "GELU"
+normalization_factory = "LayerNorm"
+
+[input.x_1]
+n_features = 1
+normalize = "minmax"
+
+[output.y]
+kind = "Mean"
+shape = [1,]
+
+[output.-y]
+kind = "Mean"
+shape = [1,]
+"""
+
+
+@pytest.fixture
+def multi_output_model_config_file(tmp_path):
+    """
+    Provides a path to a trainign config file in a temporary directory.
+    """
+    output_path = tmp_path / "model.toml"
+    with open(output_path, "w") as output:
+        output.write(MULTI_OUTPUT_MODEL_CONFIG)
+    return output_path
+
+
 TRAINING_CONFIG = """
 [warm_up]
 dataset_module = "pytorch_retrieve.data.synthetic"
@@ -74,6 +109,42 @@ def training_config_file(tmp_path):
     with open(output_path, "w") as output:
         output.write(TRAINING_CONFIG)
     return output_path
+
+
+MULTI_OUTPUT_TRAINING_CONFIG = """
+[warm_up]
+dataset_module = "pytorch_retrieve.data.synthetic"
+training_dataset = "Synthetic1dMultiOutput"
+training_dataset_args = {"n_samples"=256}
+validation_dataset_args = {"n_samples"=128}
+n_epochs = 2
+batch_size = 64
+optimizer = "SGD"
+optimizer_args = {"lr"= 1e-3}
+metrics = ["Bias", "CorrelationCoef"]
+"""
+
+@pytest.fixture
+def multi_output_training_config_file(tmp_path):
+    """
+    Provides a path to a trainign config file in a temporary directory.
+    """
+    output_path = tmp_path / "training.toml"
+    with open(output_path, "w") as output:
+        output.write(MULTI_OUTPUT_TRAINING_CONFIG)
+    return output_path
+
+
+@pytest.fixture
+def training_config_file(tmp_path):
+    """
+    Provides a path to a trainign config file in a temporary directory.
+    """
+    output_path = tmp_path / "training.toml"
+    with open(output_path, "w") as output:
+        output.write(TRAINING_CONFIG)
+    return output_path
+
 
 
 def test_variable_replacement(monkeypatch):
@@ -198,6 +269,31 @@ def test_training(
     assert len(ckpts) > 0
 
 
+def test_training_multi_output(
+        monkeypatch,
+        multi_output_model_config_file,
+        multi_output_training_config_file,
+        tmp_path,
+        cpu_compute_config
+):
+    """
+    Test training of MLP model with multiple outputs.
+    """
+    monkeypatch.chdir(tmp_path)
+    model = load_and_compile_model(multi_output_model_config_file)
+    schedule = parse_training_config(read_config_file(multi_output_training_config_file))
+    module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+    run_eda(tmp_path / "stats", model.input_config, model.output_config, schedule["warm_up"])
+
+    model = load_and_compile_model(multi_output_model_config_file)
+    module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+    run_training(tmp_path, module, compute_config=cpu_compute_config)
+
+    # Assert that checkpoint files are created.
+    ckpts = list((tmp_path / "checkpoints").glob("*.ckpt"))
+    assert len(ckpts) > 0
+
+
 def test_training_encoder_decoder(
         encoder_decoder_model_config_file,
         encoder_decoder_training_config_file,
@@ -205,7 +301,7 @@ def test_training_encoder_decoder(
         tmp_path
 ):
     """
-    Run training on synthetic data.
+    Run training on multi-output synthetic data.
     """
     model = load_and_compile_model(encoder_decoder_model_config_file)
     schedule = parse_training_config(read_config_file(encoder_decoder_training_config_file))
