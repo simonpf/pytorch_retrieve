@@ -13,6 +13,7 @@ from torch import nn
 from ..config import read_config_file
 from .mlp import MLP
 from .encoder_decoder import EncoderDecoder
+from .satformer import Satformer
 from .recurrent_encoder_decoder import RecurrentEncoderDecoder
 from .metnet import MetNet
 from .autoregressive import Autoregressive
@@ -56,6 +57,8 @@ def compile_architecture(config_dict) -> nn.Module:
         model = DirectForecast.from_config_dict(config_dict)
     elif arch_name == "MetNet":
         model = MetNet.from_config_dict(config_dict)
+    elif arch_name == "Satformer":
+        model = Satformer.from_config_dict(config_dict)
     else:
         raise RuntimeError(
             f"The architecture '{arch_name}' is currently not supported."

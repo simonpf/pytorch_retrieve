@@ -5,6 +5,7 @@ pytorch_retrieve.metrics
 Provides TorchMetrics metrics modules that handle pytorch_retrieve's
 probabilistic outputs.
 """
+
 import logging
 from typing import Dict, Optional, Tuple, Union
 
@@ -20,9 +21,8 @@ from pytorch_retrieve.tensors import (
     MaskedTensor,
     RegressionTensor,
     ClassificationTensor,
-    DetectionTensor
+    DetectionTensor,
 )
-
 
 
 LOGGER = logging.getLogger(__name__)
@@ -453,9 +453,7 @@ class SMAPE(ScalarMetric, tm.Metric):
     name = "SMAPE"
 
     def __init__(
-            self,
-            threshold: float = 1e-3,
-            conditional: Optional[Dict[str, BinSpec]] = None
+        self, threshold: float = 1e-3, conditional: Optional[Dict[str, BinSpec]] = None
     ):
         ScalarMetric.__init__(self, conditional=conditional)
         tm.Metric.__init__(self)
@@ -500,7 +498,9 @@ class SMAPE(ScalarMetric, tm.Metric):
             valid = target >= self.threshold
             pred = pred[valid]
             target = target[valid]
-            smape = torch.abs(pred - target) / (0.5 * (torch.abs(pred) + torch.abs(target)))
+            smape = torch.abs(pred - target) / (
+                0.5 * (torch.abs(pred) + torch.abs(target))
+            )
             self.error += smape.sum()
             self.counts += torch.numel(pred)
         else:
@@ -530,10 +530,10 @@ class SMAPE(ScalarMetric, tm.Metric):
             pred = pred[valid]
             target = target[valid]
             coords = coords[valid]
-            smape = torch.abs(pred - target) / (0.5 * (torch.abs(pred) + torch.abs(target)))
-            self.error += torch.histogramdd(
-                coords, bins=bins, weight=smape
-            )[0]
+            smape = torch.abs(pred - target) / (
+                0.5 * (torch.abs(pred) + torch.abs(target))
+            )
+            self.error += torch.histogramdd(coords, bins=bins, weight=smape)[0]
             self.counts += torch.histogramdd(coords, bins=bins)[0]
 
     def compute(self) -> torch.Tensor:
@@ -713,7 +713,9 @@ class PlotSamples(tm.Metric):
                     target_min = 0
                     target_max = 1
                     cmap = colormaps["Pastel1"]
-                    pred = (pred.to(dtype=torch.float32).probability() > 0.5).to(dtype=torch.float32)[0]
+                    pred = (pred.to(dtype=torch.float32).probability() > 0.5).to(
+                        dtype=torch.float32
+                    )[0]
                 else:
                     continue
 
@@ -729,7 +731,6 @@ class PlotSamples(tm.Metric):
                 target = target[0]
                 if target.dim() == 3:
                     target = target[0]
-
 
                 pred = pred.to(dtype=torch.float32).cpu().numpy()
                 target = target.to(dtype=torch.float32).cpu().numpy()
@@ -751,7 +752,7 @@ class PlotSamples(tm.Metric):
 
             target_min = np.nanmin(torch.stack(target).cpu().numpy())
             target_max = np.nanmax(torch.stack(target).cpu().numpy())
-            target_max *= 0.2
+            target_max = max(target_min * 1.5, target_max)
             cmap = colormaps["magma"]
             cmap.set_bad("grey")
 

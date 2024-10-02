@@ -5,6 +5,7 @@ pytorch_retrieve.config
 The 'pytorch_retrieve.config' module implements functionality for
  reading configuration files.
 """
+
 from copy import copy
 from dataclasses import dataclass, asdict
 import os
@@ -141,11 +142,18 @@ class InputConfig:
         normalize: String indicating whether and what kind of normalization
             the model should perform. Set to 'None' if input data is normalized
             by data loader or no normalization is required.
+        meta_data: Optional name of the input that encodes meta data corresponding to this
+            input.
+        encoding: Optional name of an encoding module to use to encode the meta data.
+        mask: Name of an optional mask input that should be used to mask invalid values.
     """
 
     n_features: int
     scale: Tuple[int] = (1, 1)
     normalize: str = "none"
+    meta_data: Optional[str] = None
+    encoding: Optional[str] = None
+    mask: Optional[str] = None
 
     @classmethod
     def parse(cls, name, cfg):
@@ -154,7 +162,18 @@ class InputConfig:
         if isinstance(scale, int):
             scale = (scale, scale)
         normalize = get_config_attr("normalize", str, cfg, f"input.{name}", "none")
-        return InputConfig(n_features, scale=scale, normalize=normalize)
+        meta_data = get_config_attr("meta_data", str, cfg, f"input.{name}", None)
+        encoding = get_config_attr("encoding", str, cfg, f"input.{name}", None)
+        mask = get_config_attr("mask", str, cfg, f"input.{name}", None)
+
+        return InputConfig(
+            n_features,
+            scale=scale,
+            normalize=normalize,
+            meta_data=meta_data,
+            encoding=encoding,
+            mask=mask,
+        )
 
     def to_config_dict(self):
         """
@@ -166,7 +185,17 @@ class InputConfig:
 @dataclass
 class OutputConfig:
     """
-    Represents a retrieval output.
+    Represents outputs from a retrieval model.
+
+    Attributes:
+        target: The name of the output.
+        kind: The type of output (mean, quantiles, bins, classification)
+        transformation: Optional transformation to apply to the outputs.
+        dimensions: The dimensions of the output.
+        n_classes: The number of classes for a classification output.
+        conditional: Name of a conditional input that this output is conditioned on.
+        encoding: Name of an encoding module to use to encode the conditional input.
+        mask: Name of a mask input that identifies output that should be ignored.
     """
 
     target: str
@@ -176,6 +205,9 @@ class OutputConfig:
     transformation: Optional[str] = None
     dimensions: Optional[List[str]] = None
     n_classes: Optional[int] = None
+    conditional: Optional[str] = None
+    encoding: Optional[str] = None
+    mask: Optional[str] = None
 
     @classmethod
     def parse(cls, name, cfg):
@@ -202,7 +234,9 @@ class OutputConfig:
         quantiles = get_config_attr("quantiles", None, cfg, f"output.{name}")
         transformation = get_config_attr("transformation", None, cfg, f"output.{name}")
 
-        dimensions = get_config_attr("dimensions", None, cfg, f"output.{name}", default=None)
+        dimensions = get_config_attr(
+            "dimensions", None, cfg, f"output.{name}", default=None
+        )
         if dimensions is None:
             if scalar:
                 dimensions = []
@@ -211,6 +245,10 @@ class OutputConfig:
 
         n_classes = get_config_attr("n_classes", None, cfg, f"output.{name}")
 
+        conditional = get_config_attr("conditional", str, cfg, f"output.{name}", None)
+        encoding = get_config_attr("encoding", str, cfg, f"output.{name}", None)
+        mask = get_config_attr("mask", str, cfg, f"output.{name}", None)
+
         return OutputConfig(
             target=target,
             kind=kind,
@@ -218,7 +256,10 @@ class OutputConfig:
             quantiles=quantiles,
             transformation=transformation,
             dimensions=dimensions,
-            n_classes=n_classes
+            n_classes=n_classes,
+            conditional=conditional,
+            encoding=encoding,
+            mask=mask,
         )
 
     @property
@@ -237,7 +278,6 @@ class OutputConfig:
             "the documentation of the pytorch_retrieve.modules.output module "
             "for available outputs."
         )
-
 
     def get_output_shape(self) -> Tuple[int]:
         """
@@ -303,9 +343,7 @@ class OutputConfig:
             elif isinstance(quantiles, list):
                 quantiles = np.array(list)
             return {f"tau_{self.target}": quantiles}
-        raise ValueError(
-            f"Output kind {self.kind} is not supported."
-        )
+        raise ValueError(f"Output kind {self.kind} is not supported.")
 
     def get_output_layer(self) -> nn.Module:
         """
@@ -314,13 +352,14 @@ class OutputConfig:
         transformation = self.transformation
         if transformation is not None:
             try:
-                transformation = getattr(pytorch_retrieve.modules.transformations, transformation)()
+                transformation = getattr(
+                    pytorch_retrieve.modules.transformations, transformation
+                )()
             except AttributeError:
                 raise ValueError(
                     f"The transformation {transformation} is not known. Please refere to the "
                     "'pytorch_retrieve.modules.transformations' module for available transformations."
                 )
-
 
         kind = self.kind
         if kind == "Mean":
@@ -331,7 +370,9 @@ class OutputConfig:
                 quantiles = np.linspace(0, 1, quantiles + 2)[1:-1]
             elif isinstance(quantiles, list):
                 quantiles = np.array(list)
-            return output.Quantiles(self.target, self.shape, tau=quantiles, transformation=transformation)
+            return output.Quantiles(
+                self.target, self.shape, tau=quantiles, transformation=transformation
+            )
         if kind == "Detection":
             return output.Detection(self.target, self.shape)
         if kind == "Classification":
@@ -409,6 +450,7 @@ class ComputeConfig:
             return strategies.DDPStrategy(find_unused_parameters=True)
         elif self.strategy == "fsdp":
             import pytorch_retrieve
+
             return strategies.FSDPStrategy(
                 sharding_strategy="SHARD_GRAD_OP",
                 activation_checkpointing_policy=pytorch_retrieve.modules.conv.blocks.ALL,
@@ -421,15 +463,16 @@ class RetrievalOutputConfig:
     """
     Describes inference output to be calculated from the model predictions.
     """
+
     output_config: OutputConfig
     retrieval_output: str
     parameters: Optional[Dict[str, Any]]
 
     def __init__(
-            self,
-            output_config: OutputConfig,
-            retrieval_output: str,
-            parameters: Optional[Dict[str, Any]] = None,
+        self,
+        output_config: OutputConfig,
+        retrieval_output: str,
+        parameters: Optional[Dict[str, Any]] = None,
     ):
         self.output_config = output_config
         self.retrieval_output = retrieval_output
@@ -437,6 +480,7 @@ class RetrievalOutputConfig:
 
         try:
             import pytorch_retrieve.retrieval_output
+
             output_class = getattr(pytorch_retrieve.retrieval_output, retrieval_output)
         except AttributeError:
             raise RuntimeError(
@@ -456,12 +500,9 @@ class RetrievalOutputConfig:
                 " output classes."
             )
 
-
     @staticmethod
     def parse(
-            name: str,
-            output_cfg: OutputConfig,
-            config_dict: Union[str, Dict[str, Any]]
+        name: str, output_cfg: OutputConfig, config_dict: Union[str, Dict[str, Any]]
     ) -> "RetrievalOuputConfig":
         """
         Parse retrieval output config.
@@ -502,6 +543,7 @@ class InferenceConfig:
     """
     Defines which output quantities to compute for a given output.
     """
+
     batch_size: int = 8
     tile_size: Optional[Tuple[int, int]] = None
     spatial_overlap: Optional[Tuple[int, int]] = None
@@ -527,19 +569,11 @@ class InferenceConfig:
             An InferenceConfig object holding the inference configuration.
         """
         batch_size = get_config_attr(
-            "batch_size",
-            int,
-            config_dict,
-            "inference config",
-            default=8
+            "batch_size", int, config_dict, "inference config", default=8
         )
 
         tile_size = get_config_attr(
-            "tile_size",
-            None,
-            config_dict,
-            "inference config",
-            default=None
+            "tile_size", None, config_dict, "inference config", default=None
         )
         if tile_size is not None:
             if isinstance(tile_size, int):
@@ -548,34 +582,18 @@ class InferenceConfig:
                 tile_size = tuple(tile_size)
 
         spatial_overlap = get_config_attr(
-            "spatial_overlap",
-            None,
-            config_dict,
-            "inference config",
-            default=None
+            "spatial_overlap", None, config_dict, "inference config", default=None
         )
 
         temporal_overlap = get_config_attr(
-            "temporal_overlap",
-            None,
-            config_dict,
-            "inference config",
-            default=None
+            "temporal_overlap", None, config_dict, "inference config", default=None
         )
 
         input_loader = get_config_attr(
-            "input_loader",
-            None,
-            config_dict,
-            "inference config",
-            default=None
+            "input_loader", None, config_dict, "inference config", default=None
         )
         input_loader_args = get_config_attr(
-            "input_loader_args",
-            None,
-            config_dict,
-            "inference config",
-            default=None
+            "input_loader_args", None, config_dict, "inference config", default=None
         )
         if input_loader_args is not None:
             input_loader_args = dict(input_loader_args)
@@ -595,8 +613,8 @@ class InferenceConfig:
                     f"{model_output}.{output_name}",
                     output_cfg[model_output],
                     cfg_dict,
-                ) for
-                output_name, cfg_dict in outputs.items()
+                )
+                for output_name, cfg_dict in outputs.items()
             }
             retrieval_output[model_output] = outputs
 
@@ -607,9 +625,8 @@ class InferenceConfig:
             temporal_overlap=temporal_overlap,
             input_loader=input_loader,
             input_loader_args=input_loader_args,
-            retrieval_output=retrieval_output
+            retrieval_output=retrieval_output,
         )
-
 
     def to_dict(self) -> Dict[str, Any]:
         """

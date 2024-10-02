@@ -40,7 +40,8 @@ def cat(
 
 
 def forward(
-    module: nn.Module, tensor: Union[torch.Tensor, List[torch.Tensor]]
+        module: nn.Module, tensor: Union[torch.Tensor, List[torch.Tensor]],
+        **kwargs
 ) -> Union[torch.Tensor, List[torch.Tensor]]:
     """
     Generic forward function for single tensors and lists of tensors.
@@ -54,8 +55,8 @@ def forward(
         'tensor' through the given module.
     """
     if isinstance(tensor, list):
-        return [module(tnsr) for tnsr in tensor]
-    return module(tensor)
+        return [module(tnsr, **kwargs) for tnsr in tensor]
+    return module(tensor, **kwargs)
 
 
 class Decoder(nn.Module, ParamCount):
@@ -135,10 +136,6 @@ class Decoder(nn.Module, ParamCount):
                 stage_factories = [SequentialStage(block_factory) for _ in range(n_stages)]
         else:
             if isinstance(stage_factory, list):
-                raise RuntimeError(
-                    "If a list of stage factories is provided, its length must match "
-                    "the number of stages in the decoder."
-                )
                 if isinstance(block_factory, list):
                     if len(block_factory) < n_stages:
                         raise RuntimeError(
@@ -229,8 +226,10 @@ class Decoder(nn.Module, ParamCount):
 
 
     def forward_multi_scale_output(
-        self,
-        x: Union[torch.Tensor, Dict[Scale, torch.Tensor]]
+            self,
+            x: Union[torch.Tensor, Dict[Scale, torch.Tensor]],
+            **kwargs
+
     ) -> Dict[Scale, torch.Tensor]:
         """
         Forward input through decoder and return outputs at all decoder scales.
@@ -265,9 +264,9 @@ class Decoder(nn.Module, ParamCount):
                 f_up = self.upsampling_factors[ind]
                 scale //= f_up
                 if scale in self.skip_connections and scale != prev_scale:
-                    y = stage(cat(x[scale], forward(up, y)))
+                    y = stage(cat(x[scale], forward(up, y)), **kwargs)
                 else:
-                    y = stage(forward(up, y))
+                    y = stage(forward(up, y), **kwargs)
                 outputs[scale] = y
                 prev_scale = scale
         else:
@@ -277,7 +276,7 @@ class Decoder(nn.Module, ParamCount):
             for ind, (up, stage) in enumerate(zip(self.upsamplers, stages)):
                 f_up = self.upsampling_factors[ind]
                 scale //= f_up
-                y = stage(forward(up, y))
+                y = stage(forward(up, y), **kwargs)
                 outputs[scale] = y
 
         return outputs
@@ -285,7 +284,8 @@ class Decoder(nn.Module, ParamCount):
 
     def forward(
             self,
-            x: Union[torch.Tensor, Dict[Scale, torch.Tensor]]
+            x: Union[torch.Tensor, Dict[Scale, torch.Tensor]],
+            **kwargs
     ) -> torch.Tensor:
         """
         Args:
@@ -318,15 +318,15 @@ class Decoder(nn.Module, ParamCount):
                 f_up = self.upsampling_factors[ind]
                 scale //= f_up
                 if scale in self.skip_connections and scale != prev_scale:
-                    y = stage(cat(x[scale], forward(up, y)))
+                    y = stage(cat(x[scale], forward(up, y)), **kwargs)
                 else:
-                    y = stage(forward(up, y))
+                    y = stage(forward(up, y), **kwargs)
                 prev_scale = scale
         else:
             y = x
             stages = self.stages
             for up, stage in zip(self.upsamplers, stages):
-                y = stage(forward(up, y))
+                y = stage(forward(up, y), **kwargs)
         return y
 
 

@@ -2,6 +2,7 @@
 Tests for the pytorch_retrieve.config module.
 =============================================
 """
+
 import os
 
 import yaml
@@ -15,9 +16,9 @@ from pytorch_retrieve.config import (
     read_config_file,
     InputConfig,
     OutputConfig,
-    InferenceConfig
+    InferenceConfig,
 )
-from pytorch_retrieve.modules.output import (Mean, Quantiles)
+from pytorch_retrieve.modules.output import Mean, Quantiles
 
 
 def test_replace_environment_variables():
@@ -93,6 +94,8 @@ scale = 4
 [input.x_2]
 n_features = 32
 scale = 8
+meta_data = "x_2_meta"
+encoding = "x_2"
 """
 
 
@@ -107,10 +110,13 @@ def test_input_config():
     }
 
     assert "x_1" in inpt_cfgs
-    inpt_cfgs["x_1"].n_features == 16
+    assert inpt_cfgs["x_1"].n_features == 16
 
     assert "x_2" in inpt_cfgs
-    inpt_cfgs["x_2"].n_features == 8
+    assert inpt_cfgs["x_2"].n_features == 32
+    assert inpt_cfgs["x_2"].n_features == 32
+    assert inpt_cfgs["x_2"].meta_data == "x_2_meta"
+    assert inpt_cfgs["x_2"].encoding == "x_2"
 
 
 OUTPUT_CONFIGS = """
@@ -121,6 +127,8 @@ shape = [1]
 [output.y_1_scalar]
 kind = "Mean"
 shape = 1
+conditional = "y_1"
+encoding = "position"
 
 [output.y_2]
 kind = "Quantiles"
@@ -159,6 +167,8 @@ def test_output_config():
     assert len(output_cfgs["y_1"].extra_dimensions) == 0
     assert len(output_cfgs["y_1_scalar"].get_output_dimensions()) == 0
     assert len(output_cfgs["y_1_scalar"].get_output_coordinates()) == 0
+    assert output_cfgs["y_1_scalar"].conditional == "y_1"
+    assert output_cfgs["y_1_scalar"].encoding == "position"
 
     assert len(output_cfgs["y_2"].extra_dimensions) == 1
     assert len(output_cfgs["y_2"].get_output_dimensions()) == 1
@@ -178,6 +188,7 @@ surface_precip_median = {retrieval_output="Quantiles", tau=[0.5]}
 surface_precip_heavy = {retrieval_output="ExceedanceProbability", threshold=10.0}
 """
 
+
 def test_inference_config():
     """
     Test parsing of inference configs.
@@ -185,7 +196,8 @@ def test_inference_config():
     model_config = toml.loads(MODEL_CONFIG_MLP)
     model_config["output"]["surface_precip"] = {"kind": "Mean"}
     output_config = {
-        name: OutputConfig.parse(name, value) for name, value in model_config["output"].items()
+        name: OutputConfig.parse(name, value)
+        for name, value in model_config["output"].items()
     }
     inference_config = toml.loads(INFERENCE_CONFIG)
     inference_config = InferenceConfig.parse(output_config, inference_config)
@@ -200,12 +212,16 @@ def test_inference_config():
 
     ic_saved = toml.dumps(inference_config.to_dict())
     inference_config_loaded = toml.loads(ic_saved)
-    inference_config_loaded = InferenceConfig.parse(output_config, inference_config_loaded)
+    inference_config_loaded = InferenceConfig.parse(
+        output_config, inference_config_loaded
+    )
 
     assert inference_config_loaded.batch_size == 12
     assert inference_config_loaded.tile_size == (32, 32)
     assert inference_config_loaded.spatial_overlap == 8
     assert inference_config_loaded.temporal_overlap == 0
 
-    qty = inference_config_loaded.retrieval_output["surface_precip"]["surface_precip_mean"]
+    qty = inference_config_loaded.retrieval_output["surface_precip"][
+        "surface_precip_mean"
+    ]
     assert qty.retrieval_output == "ExpectedValue"

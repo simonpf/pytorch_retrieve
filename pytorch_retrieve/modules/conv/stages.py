@@ -86,9 +86,9 @@ class SequentialWKeywords(nn.Module):
         super().__init__()
         self.layers = nn.ModuleList(layers)
 
-    def forward(self, *x, **kwargs):
+    def forward(self, x, **kwargs):
         for layer in self.layers:
-            x = layer(*x, **kwargs)
+            x = layer(x, **kwargs)
         return x
 
 

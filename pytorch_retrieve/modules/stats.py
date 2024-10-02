@@ -89,6 +89,11 @@ class StatsTracker:
         Args:
              x: The tensors containing the data to track.
         """
+        if isinstance(x, list):
+            for x_i in x:
+                self.track_stats(x_i)
+            return None
+
         if not isinstance(x, MaskedTensor):
             mask = torch.isnan(x)
             x = MaskedTensor(x, mask=mask)

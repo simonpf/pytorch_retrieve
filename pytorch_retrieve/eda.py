@@ -5,6 +5,7 @@ pytorch_retrieve.eda
 Implements functionality to perform explorative data analysis extracting
 basic statistics from datasets.
 """
+
 import logging
 from pathlib import Path
 from typing import Dict, Optional
@@ -20,13 +21,13 @@ from pytorch_retrieve.config import (
     read_config_file,
     InputConfig,
     OutputConfig,
-    ComputeConfig
+    ComputeConfig,
 )
 from pytorch_retrieve.training import parse_training_config, TrainingConfig
 from pytorch_retrieve.utils import (
     read_model_config,
     read_training_config,
-    read_compute_config
+    read_compute_config,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -41,10 +42,10 @@ class EDAModule(L.LightningModule):
     """
 
     def __init__(
-            self,
-            input_configs: Dict[str, InputConfig],
-            output_configs: Dict[str, OutputConfig],
-            stats_path: Path
+        self,
+        input_configs: Dict[str, InputConfig],
+        output_configs: Dict[str, OutputConfig],
+        stats_path: Path,
     ):
         """
         Args:
@@ -66,10 +67,7 @@ class EDAModule(L.LightningModule):
             }
         )
         self.output_modules = nn.ModuleDict(
-            {
-                name: cfg.get_output_layer()
-                for name, cfg in output_configs.items()
-            }
+            {name: cfg.get_output_layer() for name, cfg in output_configs.items()}
         )
         self.params = nn.Parameter(torch.zeros(1), requires_grad=True)
 
@@ -125,7 +123,6 @@ class EDAModule(L.LightningModule):
             save_stats(stats, self.stats_path / "output", name)
 
 
-
 def run_eda(
     stats_path: Path,
     input_configs: Dict[str, InputConfig],
@@ -178,7 +175,7 @@ def run_eda(
         "Directory to which to write the resulting statistics files. If not "
         "set, they will be written to directory named 'stats' in the model "
         "path. "
-    )
+    ),
 )
 @click.option(
     "--model_config",
@@ -212,7 +209,7 @@ def run_eda(
     help=(
         "If provided, training settings for the EDA will be loaded from this "
         "stage of the training schedule."
-    )
+    ),
 )
 def cli(
     model_path: Path,
@@ -220,7 +217,7 @@ def cli(
     model_config: Path,
     training_config: Path,
     compute_config: Optional[Path],
-    stage: str
+    stage: str,
 ) -> int:
     """
     Performs EDA on training and validation data.
@@ -261,6 +258,16 @@ def cli(
         name: InputConfig.parse(name, cfg)
         for name, cfg in model_config["input"].items()
     }
+
+    # Ensure that stats for meta data input are recorded.
+    if "meta_data" in model_config:
+        input_configs.update(
+            {
+                name: InputConfig.parse(name, cfg)
+                for name, cfg in model_config["meta_data"].items()
+            }
+        )
+
     output_configs = {
         name: OutputConfig.parse(name, cfg)
         for name, cfg in model_config["output"].items()
@@ -273,7 +280,7 @@ def cli(
             LOGGER.error(
                 "The given stage '%s' is not a stage in the provided training "
                 "schedule.",
-                stage
+                stage,
             )
             return 1
         training_config = training_schedule[stage]
@@ -283,5 +290,5 @@ def cli(
         input_configs,
         output_configs,
         training_config,
-        compute_config=compute_config
+        compute_config=compute_config,
     )

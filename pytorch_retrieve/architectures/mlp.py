@@ -7,6 +7,7 @@ Defines the 'MLP' architecture for retrievals based on multi-layer perceptrons
  independently taking only a single multi-spectral observation from one or
 multiple sensors as input.
 """
+
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
@@ -32,6 +33,7 @@ class StemConfig:
     """
     Configuration attributes of the stems of an MLP architecture.
     """
+
     input_name: str
     in_channels: int
     hidden_channels: int
@@ -42,15 +44,14 @@ class StemConfig:
     masked: bool = False
     normalize: Optional[str] = None
 
-
     @classmethod
     def parse(
-            cls,
-            name: str,
-            input_name: str,
-            input_config: InputConfig,
-            config_dict: dict,
-            exhaustive=False
+        cls,
+        name: str,
+        input_name: str,
+        input_config: InputConfig,
+        config_dict: dict,
+        exhaustive=False,
     ) -> "StemConfig":
         """
         Parse configuration of MLP stem.
@@ -96,7 +97,7 @@ class StemConfig:
             activation_factory=activation_factory,
             normalization_factory=normalization_factory,
             masked=masked,
-            normalize=normalize
+            normalize=normalize,
         )
 
     def compile(self, out_channels) -> nn.Module:
@@ -111,25 +112,30 @@ class StemConfig:
         """
         blocks = []
         if self.normalize != "none":
-            blocks.append(StandardizationLayer(self.input_name, self.in_channels))
+            blocks.append(
+                StandardizationLayer(
+                    self.input_name, self.in_channels, kind=self.normalize
+                )
+            )
 
         if self.hidden_channels < 0:
             hidden_channels = out_channels
         else:
             hidden_channels = self.hidden_channels
 
-        blocks.append(MLPStem(
-            self.in_channels,
-            out_channels,
-            self.n_layers,
-            hidden_channels=hidden_channels,
-            residual_connections=self.residual_connections,
-            activation_factory=self.activation_factory,
-            normalization_factory=self.normalization_factory,
-            masked=self.masked,
-        ))
+        blocks.append(
+            MLPStem(
+                self.in_channels,
+                out_channels,
+                self.n_layers,
+                hidden_channels=hidden_channels,
+                residual_connections=self.residual_connections,
+                activation_factory=self.activation_factory,
+                normalization_factory=self.normalization_factory,
+                masked=self.masked,
+            )
+        )
         return nn.Sequential(*blocks)
-
 
 
 @dataclass
@@ -350,16 +356,20 @@ class MLP(RetrievalModel):
             "input", dict, config_dict, "model config", required=True
         )
         input_configs = {
-            name: InputConfig.parse(name, config) for name, config in input_configs.items()
+            name: InputConfig.parse(name, config)
+            for name, config in input_configs.items()
         }
         output_configs = get_config_attr(
             "output", dict, config_dict, "model config", required=True
         )
         output_configs = {
-            name: OutputConfig.parse(name, config) for name, config in output_configs.items()
+            name: OutputConfig.parse(name, config)
+            for name, config in output_configs.items()
         }
 
-        body_config = get_config_attr("body", dict, arch_config, "architecture", required=True)
+        body_config = get_config_attr(
+            "body", dict, arch_config, "architecture", required=True
+        )
         body_config = BodyConfig.parse(body_config)
         hidden_channels = body_config.hidden_channels
 
@@ -393,7 +403,6 @@ class MLP(RetrievalModel):
                 for name, input_config in input_configs.items()
             }
 
-
         head_config_dict = arch_config.get("head", {})
         if "base" in head_config_dict:
             head_configs = {}
@@ -416,7 +425,13 @@ class MLP(RetrievalModel):
         agg_config = arch_config.get("aggregator", {})
         aggregator_config = AggregatorConfig.parse(agg_config)
 
-        return cls(stem_configs, body_config, head_configs, aggregator_config, config_dict=config_dict)
+        return cls(
+            stem_configs,
+            body_config,
+            head_configs,
+            aggregator_config,
+            config_dict=config_dict,
+        )
 
     def __init__(
         self,
@@ -458,10 +473,7 @@ class MLP(RetrievalModel):
         self.body = body_cfg.compile()
         if isinstance(head_cfgs, dict):
             self.outputs = nn.ModuleDict(
-                {
-                    key: output_cfg.compile()
-                    for key, output_cfg in head_cfgs.items()
-                }
+                {key: output_cfg.compile() for key, output_cfg in head_cfgs.items()}
             )
         else:
             self.outputs = output_cfgs.compile()
@@ -510,9 +522,7 @@ class MLP(RetrievalModel):
             name, stem = next(iter(self.stems.items()))
             inputs = stem(inputs)
         else:
-            inputs = {
-                key: stem(inputs[key]) for key, stem in self.stems.items()
-            }
+            inputs = {key: stem(inputs[key]) for key, stem in self.stems.items()}
             inputs = self.aggregator(inputs)
 
         outputs = self.body(inputs)

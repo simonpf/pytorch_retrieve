@@ -1,13 +1,15 @@
 """
 Tests for the pytorch_retrieve.modules.conv.upsampling module.
 """
+
 import pytest
 import torch
 
 from pytorch_retrieve.modules.conv.upsampling import (
     Bilinear,
     Trilinear,
-    ConvTranspose
+    ConvTranspose,
+    StepwiseBilinear,
 )
 
 
@@ -30,7 +32,6 @@ def test_bilinear(upsampler_factory):
     assert y.shape == (1, 16, 16, 16)
 
 
-
 def test_trilinear():
     """
     Instantiate a trilinear upsampler factory, create upsampler modules, and ensure that
@@ -47,3 +48,16 @@ def test_trilinear():
     x = torch.rand(1, 8, 8, 8, 8)
     y = upsampler(x)
     assert y.shape == (1, 16, 16, 16, 16)
+
+
+def test_stepwise_bilinear():
+    """
+    Instantiate an upsampler factory, create upsampler modules, and ensure that
+    they correctly upsample inputs.
+    """
+    upsampler_factory = StepwiseBilinear()
+
+    upsampler = upsampler_factory(8, 8, 2)
+    x = torch.rand(1, 8, 4, 8, 8)
+    y = upsampler(x)
+    assert y.shape == (1, 8, 4, 16, 16)

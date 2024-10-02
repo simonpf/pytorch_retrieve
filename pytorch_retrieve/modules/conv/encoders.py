@@ -4,7 +4,7 @@ pytorch_retrieve.modules.conv.encoders
 
 Generic encoder modules.
 """
-from typing import Optional, Callable, Union, Optional, List, Dict, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -133,20 +133,15 @@ class Encoder(nn.Module, ParamCount):
             else:
                 stage_factories = [SequentialStage(block_factory) for _ in range(n_stages)]
         else:
-            if isinstance(stage_factory, list):
-                raise RuntimeError(
-                    "If a list of stage factories is provided, its length must match "
-                    "the number of stages in the encoder."
-                )
-                if isinstance(block_factory, list):
-                    if len(block_factory) < n_stages:
-                        raise RuntimeError(
-                            "If a list of block factories is provided, its length must match "
-                            "the number of stages in the encoder."
-                        )
-                    stage_factories = [s_fac(b_fac) for s_fac, b_fac in zip(stage_factory, block_factory)]
-                else:
-                    stage_factories = [s_fac(block_factory) for s_fac in stage_factory]
+            if isinstance(block_factory, list):
+                if len(block_factory) < n_stages:
+                    raise RuntimeError(
+                        "If a list of block factories is provided, its length must match "
+                        "the number of stages in the encoder."
+                    )
+                stage_factories = [s_fac(b_fac) for s_fac, b_fac in zip(stage_factory, block_factory)]
+            else:
+                stage_factories = [stage_factory(block_factory) for _ in range(n_stages)]
 
 
         # Populate list of down samplers and stages.
@@ -194,13 +189,18 @@ class Encoder(nn.Module, ParamCount):
         """
         return {scl: chans for scl, chans in zip(self.scales, self.channels)}
 
-    def forward_with_skips(self, x: torch.Tensor) -> Dict[Tuple[int], torch.Tensor]:
+    def forward_with_skips(
+            self,
+            x: torch.Tensor,
+            **kwargs: Dict[Any, Any]
+    ) -> Dict[Tuple[int], torch.Tensor]:
         """
         Legacy implementation of the forward_with_skips function of the
         SpatialEncoder.
 
         Args:
             x: A ``torch.Tensor`` to feed into the encoder.
+            kwargs: Keywords to pass down to stages in encoder.
 
         Return:
             A dictionary mapping scale tuples to corresponding feature
@@ -209,11 +209,15 @@ class Encoder(nn.Module, ParamCount):
         y = x
         skips = {}
         for scl, down, stage in zip(self.scales, self.downsamplers, self.stages):
-            y = stage(down(y))
+            y = stage(down(y), **kwargs)
             skips[scl] = y
         return skips
 
-    def forward(self, x: torch.Tensor) -> Union[torch.Tensor, Dict[int, torch.Tensor]]:
+    def forward(
+            self,
+            x: torch.Tensor,
+            **kwargs: Dict[Any, Any]
+    ) -> Union[torch.Tensor, Dict[int, torch.Tensor]]:
         """
         Args:
             x: A ``torch.Tensor`` to feed into the encoder.
@@ -225,12 +229,12 @@ class Encoder(nn.Module, ParamCount):
             just the output tensor from the last stage of the encoder.
         """
         if self.has_skips:
-            return self.forward_with_skips(x)
+            return self.forward_with_skips(x, **kwargs)
 
         y = x
 
         for down, stage in zip(self.downsamplers, self.stages):
-            y = stage(down(y))
+            y = stage(down(y), **kwargs)
 
         return y
 

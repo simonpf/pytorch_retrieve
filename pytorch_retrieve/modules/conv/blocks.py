@@ -1469,3 +1469,285 @@ ALL = set([
     cls for cls in globals().values()
     if isinstance(cls, type) and issubclass(cls, nn.Module)
 ])
+
+
+
+class SatformerBlock(nn.Module, ParamCount):
+    """
+    Convolutional block that operates on sequences of images and applies self
+    attention between the image sequences.
+    """
+    def __init__(
+            self,
+            in_channels: int,
+            out_channels: int,
+            expansion_factor: int = 4,
+            kernel_size: int = 3,
+            activation_factory: Callable[[], nn.Module] = nn.ReLU,
+            normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm2d,
+            padding: Optional[Tuple[int]] = None,
+            attention: bool = True,
+            padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
+            n_heads: int = 1,
+            dropout: Optional[float] = None,
+            excitation_ratio: float = 0.0,
+            downsample: Optional[int] = None,
+            anti_aliasing: bool = False,
+            fused: bool = False
+    ):
+        """
+        Args:
+            in_channels: The number of channels in the input.
+            out_channels: The number of channels to put out. This number of output channels is used to calculate
+                 the number of channels in the inverted bottle neck.
+            expansion_factor: Increase in number of channels in the inverted bottleneck.
+            kernel_size: The kernel size in the grouped convolution.
+            activation_factory: Factory for the activation functions used in the block.
+            normalization_factory: Factory for the normalization layers used in the block.
+            padding: Padding applied to the spatial dimensions of the input.
+            attention: Whether or not to include an attention layer in the block.
+            padding_factory: Factory for the padding layers applied in the block.
+            n_heads: The number fo heads in the attention module.
+            dropout: The dropout to apply in the attention layer.
+            excitation_ratio: The excitation ratio to apply in the squeeze and excite block.
+            anti_aliasing: Wheter to apply anti-aliasing.
+            fused: Whether or not to fuse the first two blocks.
+        """
+        super().__init__()
+        self.act = activation_factory()
+
+        hidden_channels = out_channels * expansion_factor
+
+        stride = (1, 1)
+        if downsample is not None:
+            if isinstance(downsample, int):
+                downsample = (downsample,) * 2
+            if max(downsample) > 1:
+                stride = downsample
+
+        if padding is None:
+            padding = calculate_padding(kernel_size)
+
+        if max(stride) > 1:
+            self.downsampling_block = nn.Sequential(
+                nn.Conv2d(in_channels, hidden_channels, kernel_size=2, stride=2),
+                normalization_factory(hidden_channels)
+            )
+            in_channels = hidden_channels
+        else:
+            self.downsampling_block = None
+
+        self.projection = get_projection(
+            in_channels,
+            out_channels,
+            stride=(1, 1)
+        )
+
+        blocks = []
+        if not fused:
+            blocks += [
+                nn.Conv2d(in_channels, hidden_channels, kernel_size=1),
+            ]
+
+            blocks += [
+                padding_factory(padding),
+                nn.Conv2d(
+                    hidden_channels,
+                    hidden_channels,
+                    kernel_size=kernel_size,
+                    groups=hidden_channels,
+                ),
+                normalization_factory(hidden_channels),
+                self.act
+            ]
+        else:
+            blocks += [
+                padding_factory(padding),
+                nn.Conv2d(
+                    in_channels,
+                    hidden_channels,
+                    kernel_size=kernel_size,
+                ),
+                normalization_factory(hidden_channels),
+                self.act
+            ]
+
+        if excitation_ratio > 0.0:
+            blocks.append(
+                PWSqueezeExcite(
+                    hidden_channels,
+                    excitation_ratio,
+                    activation_factory
+                )
+            )
+
+        blocks += [
+            nn.Conv2d(hidden_channels, out_channels, kernel_size=1),
+            normalization_factory(out_channels),
+            self.act
+        ]
+        self.conv_body = nn.Sequential(*blocks)
+
+        if attention:
+            self.att_norm = nn.LayerNorm(out_channels)
+            self.attention = nn.MultiheadAttention(
+                embed_dim=out_channels,
+                num_heads=n_heads,
+                dropout=0.0,
+                batch_first=True
+            )
+        else:
+            self.attention = None
+
+    def forward(
+            self,
+            x: torch.Tensor,
+            mask: Optional[torch.Tensor] = None,
+            source_seq: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """
+        Propagate input through layer.
+        """
+        n_batch, _, n_seq, *_ = x.shape
+
+        # Shape: [n_batch * n_seq, n_chans, n_y, n_x]
+        x_conv = x.transpose(1, 2).flatten(0, 1)
+
+        if self.downsampling_block is not None:
+            x_conv = self.downsampling_block(x_conv)
+        n_y, n_x = x_conv.shape[-2:]
+
+        x = self.conv_body(x_conv) + self.projection(x_conv)
+        n_embed = x.shape[1]
+
+        # Restore sequence dimensions
+        # Shape: [n_batch, n_seq, n_embed, n_y, n_x]
+        x = x.unflatten(0, (n_batch, n_seq))
+
+        if self.attention is not None:
+            if mask is not None:
+                mask = mask.repeat_interleave(n_x * n_y, 0)
+            # Shape: [n_batch, n_y, n_x, n_seq, n_embed] -> [n_batch * n_y * n_x, n_seq, n_embed]
+            x_att = self.att_norm(torch.permute(x, (0, 3, 4, 1, 2)).reshape(-1, n_seq, n_embed))
+            x_att, _ = self.attention(x_att, x_att, x_att, key_padding_mask=mask, need_weights=False)
+            # Shape: [n_batch, n_y, n_x, n_seq, n_embed]
+            x_att = x_att.reshape((n_batch, n_y, n_x, n_seq, n_embed))
+            # Shape: [n_batch, n_seq, n_embed, n_y, n_x]
+            x_att = x_att.permute(0, 3, 4, 1, 2)
+            x = x + x_att
+
+        return x.transpose(1, 2)
+
+
+class Satformer():
+    """
+    Factory for Satformer blocks.
+    """
+    def __init__(
+            self,
+            kernel_size: Optional[Union[Tuple[int, int], int]] = (3, 3),
+            activation_factory: Callable[[], nn.Module] = nn.ReLU,
+            normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm2d,
+            padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
+            expansion_factor: int = 4,
+            excitation_ratio: float = 0.0,
+            anti_aliasing: bool = False,
+            fused: bool = False,
+            attention: bool = True,
+            n_heads: bool = 1,
+            dropout: float = 0.0
+    ):
+        """
+        Args:
+            kernel_size: The size of the convolution kernel used in the
+                grouped convolution.
+            activation_factory: The factory to use to produce the activation
+                function for the block.
+            normalization_factory: The factory to use to produce the normalization
+                layers in the block.
+            padding_factory: The factory to use to produce the padding modules
+                used in the block.
+            expansion_factor: The factor by which to expand the channels in
+                the inverted bottleneck.
+            excitation_ratio: The excitation ratio to use in the squeeze and
+                excite block. If <= 0.0, the squeeze-and-excite block is omitted.
+            anti_aliasing: Whether to apply anit-aliasing filter prior to
+                downsampling.
+            fused: It 'True', the expansion and grouped convolution are fused
+                into a single convolution, which is more performant for large
+                image sizes.
+            attention: Whether to include cross-channel attention in this layer.
+            n_heads: The number of attention heads.
+            dropout: Whether to apply dropout in the attention layer.
+        """
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size,) * 2
+        self.kernel_size = kernel_size
+        if isinstance(activation_factory, str):
+            activation_factory = get_activation_factory(activation_factory)
+        self.activation_factory = activation_factory
+        if isinstance(normalization_factory, str):
+            normalization_factory = get_normalization_factory(normalization_factory)
+        self.normalization_factory = normalization_factory
+        if isinstance(padding_factory, str):
+            padding_factory = get_padding_factory(padding_factory)
+        self.padding_factory = padding_factory
+        self.expansion_factor = expansion_factor
+        self.excitation_ratio = excitation_ratio
+        self.anti_aliasing = anti_aliasing
+        self.fused = fused
+        self.attention = attention
+        self.n_heads = n_heads
+        self.dropout = dropout
+
+    def __call__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        downsample: Optional[Union[Tuple[int, int], int]] = None,
+        kernel_size: Optional[Union[Tuple[int, int], int]] = None,
+        padding: Optional[int] = None,
+        **kwargs,
+    ) -> nn.Module:
+        """
+        Instantiate InvertedBottleneck module.
+
+        Args:
+            in_channels: The number of incoming channels.
+            out_channels: The number of outgoing channels.
+            downsample: An integer or tuple of integers specifying the
+                downsampling to apply in the block.
+            kernel_size: An optional kernel argument to overwrite the
+                default kernel size of the factory.
+            padding: An iteger specifying the padding to apply to each
+                side of the spatial dimensions of the input tensor.
+
+        Return:
+            The inverted-bottleneck block.
+        """
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size,) * 2
+        if kernel_size is None:
+            kernel_size = self.kernel_size
+
+        if padding is None:
+            padding = (
+                (kernel_size[0]) // 2,
+                (kernel_size[1]) // 2,
+            )
+        return SatformerBlock(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            downsample=downsample,
+            padding=padding,
+            expansion_factor=self.expansion_factor,
+            excitation_ratio=self.excitation_ratio,
+            activation_factory=self.activation_factory,
+            normalization_factory=self.normalization_factory,
+            padding_factory=self.padding_factory,
+            fused=self.fused,
+            attention=self.attention,
+            n_heads=self.n_heads,
+            dropout=self.dropout
+        )

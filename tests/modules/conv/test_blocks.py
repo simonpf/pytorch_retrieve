@@ -10,7 +10,8 @@ from pytorch_retrieve.modules.conv.blocks import (
     ResNeXt,
     ResNeXt2Plus1,
     InvertedBottleneck,
-    InvertedBottleneck2Plus1
+    InvertedBottleneck2Plus1,
+    Satformer
 )
 
 
@@ -222,3 +223,14 @@ def test_inverted_bottleneck_2p1():
 
     y = module_4(x)
     assert y.shape == (1, 64, 8, 16, 32)
+
+
+def test_satformer_block():
+    """
+    Tests for the Satformer block.
+    """
+    block_factory = Satformer(attention=True, n_heads=4)
+    block = block_factory(32, 64)
+
+    x = torch.rand(1, 32, 16, 64, 64)
+    y = block(x)
