@@ -1603,6 +1603,7 @@ class SatformerBlock(nn.Module, ParamCount):
             self,
             x: torch.Tensor,
             mask: Optional[torch.Tensor] = None,
+            attn_mask: Optional[torch.Tensor] = None,
             source_seq: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """
@@ -1629,7 +1630,7 @@ class SatformerBlock(nn.Module, ParamCount):
                 mask = mask.repeat_interleave(n_x * n_y, 0)
             # Shape: [n_batch, n_y, n_x, n_seq, n_embed] -> [n_batch * n_y * n_x, n_seq, n_embed]
             x_att = self.att_norm(torch.permute(x, (0, 3, 4, 1, 2)).reshape(-1, n_seq, n_embed))
-            x_att, _ = self.attention(x_att, x_att, x_att, key_padding_mask=mask, need_weights=False)
+            x_att, _ = self.attention(x_att, x_att, x_att, key_padding_mask=mask, attn_mask=attn_mask, need_weights=False)
             # Shape: [n_batch, n_y, n_x, n_seq, n_embed]
             x_att = x_att.reshape((n_batch, n_y, n_x, n_seq, n_embed))
             # Shape: [n_batch, n_seq, n_embed, n_y, n_x]

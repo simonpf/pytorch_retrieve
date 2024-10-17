@@ -440,8 +440,8 @@ class SatformerConfig():
         output_configs: Dict[str, OutputConfig],
         arch_config: Dict[str, object],
     ):
-        conditional_outputs = [name for name, cfg in output_configs.items() if cfg.conditional is not None]
-        token_length = len(input_configs) + len(conditional_outputs)
+        outputs = [name for name, cfg in output_configs.items()]
+        token_length = len(input_configs) + len(outputs)
 
         stem_config_dict = arch_config.get("stem", {})
         stem_configs = {}
@@ -615,14 +615,22 @@ class Satformer(RetrievalModel):
         self.masks.update({name: cfg.mask for name, cfg in output_config.items() if cfg.mask is not None})
 
         conditional_outputs = {}
+        unconditional_outputs = []
         for output_name, output_cfg in output_config.items():
             if output_cfg.conditional is not None:
                 conditional_outputs[output_name] = output_cfg.conditional
                 if output_cfg.encoding is not None:
                     self.encoding_map[output_name] = output_cfg.encoding
+            else:
+                unconditional_outputs.append(output_name)
 
         self.conditional_outputs = conditional_outputs
-        self.token_length = len(self.input_names) + len(conditional_outputs)
+        self.unconditional_outputs = unconditional_outputs
+        self.token_length = (
+            len(self.input_names) +
+            len(conditional_outputs) +
+            len(unconditional_outputs)
+        )
 
         self.stems = nn.ModuleDict(
             {name: cfg.compile() for name, cfg in arch_config.stem_configs.items()}
@@ -641,6 +649,7 @@ class Satformer(RetrievalModel):
 
         # Propagate input tensors through stems and encode meta data.
         sequence_elements = []
+        attn_mask = []
         tokens = []
         masks = []
         token_index = 0
@@ -656,10 +665,11 @@ class Satformer(RetrievalModel):
                     enc = self.encodings[self.encoding_map[name]](x[meta_data])
                     inpt = inpt + enc
                 sequence_elements.append(inpt)
+                attn_mask += [False] * inpt.shape[2]
 
-                n_batch, _, n_seq, n_y, n_x = inpt.shape
+                n_batch, n_chans_in, n_seq, n_y, n_x = inpt.shape
                 token = token_index  * torch.zeros(
-                    (n_batch, self.token_length, n_seq, n_y, n_y),
+                    (n_batch, self.token_length, n_seq, n_y, n_x),
                     device=inpt.device,
                     dtype=inpt.dtype
                 )
@@ -679,10 +689,11 @@ class Satformer(RetrievalModel):
             if cond in x:
                 inpt = self.encodings[self.encoding_map[name]](x[cond])
                 sequence_elements.append(inpt)
+                attn_mask += [True] * inpt.shape[2]
 
                 n_batch, _, n_seq, n_y, n_x = inpt.shape
                 token = token_index  * torch.zeros(
-                    (n_batch, self.token_length, n_seq, n_y, n_y),
+                    (n_batch, self.token_length, n_seq, n_y, n_x),
                     device=inpt.device,
                     dtype=inpt.dtype
                 )
@@ -699,14 +710,42 @@ class Satformer(RetrievalModel):
 
             token_index += 1
 
+        for name in self.unconditional_outputs:
+            attn_mask += [True]
+            inpt = torch.zeros(
+                (n_batch, n_chans_in, 1, n_y, n_x),
+                device=inpt.device,
+                dtype=inpt.dtype,
+            )
+            sequence_elements.append(inpt)
+            token = token_index  * torch.zeros(
+                (n_batch, self.token_length, 1, n_y, n_x),
+                device=inpt.device,
+                dtype=inpt.dtype
+            )
+            token[:, token_index] = 1.0
+            tokens.append(token)
+
+            masks.append(torch.zeros((n_batch, 1), device=inpt.device, dtype=torch.bool))
+            output_slices.append(slice(seq_start, seq_start + n_seq))
+
+            seq_start += 1
+            token_index += 1
+
         input_sequence = torch.cat(sequence_elements, 2)
+        attn_mask = torch.tensor(attn_mask, device=input_sequence.device)[None]
+        attn_mask = attn_mask.repeat_interleave(input_sequence.shape[2], 0)
+
         tokens = torch.cat(tokens, 2)
         mask = torch.cat(masks, 1)
         inpt = torch.cat((tokens, input_sequence), 1)
 
-        output = self.decoder(self.encoder(inpt, mask=mask), mask=mask)
+        output = self.decoder(self.encoder(inpt, mask=mask), mask=mask, attn_mask=attn_mask)
         seqs = {}
-        for slc, output_name in zip(output_slices[-len(self.conditional_outputs):], self.conditional_outputs):
+        for slc, output_name in zip(output_slices[:len(self.conditional_outputs)], self.conditional_outputs):
+            seqs[output_name] = [self.heads[output_name](x_i) for x_i in torch.unbind(output[:, :, slc], 2)]
+
+        for slc, output_name in zip(output_slices[len(self.conditional_outputs):], self.unconditional_outputs):
             seqs[output_name] = [self.heads[output_name](x_i) for x_i in torch.unbind(output[:, :, slc], 2)]
 
         return seqs
