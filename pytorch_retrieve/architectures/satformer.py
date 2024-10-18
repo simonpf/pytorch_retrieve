@@ -735,6 +735,8 @@ class Satformer(RetrievalModel):
         input_sequence = torch.cat(sequence_elements, 2)
         attn_mask = torch.tensor(attn_mask, device=input_sequence.device)[None]
         attn_mask = attn_mask.repeat_interleave(input_sequence.shape[2], 0)
+        for elem_ind in range(attn_mask.shape[0]):
+            attn_mask[elem_ind, elem_ind] = False
 
         tokens = torch.cat(tokens, 2)
         mask = torch.cat(masks, 1)
