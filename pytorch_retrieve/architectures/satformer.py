@@ -617,9 +617,9 @@ class Satformer(RetrievalModel):
         conditional_outputs = {}
         unconditional_outputs = []
         for output_name, output_cfg in output_config.items():
-            if output_cfg.conditional is not None:
+            if output_cfg.conditional is not None and output_cfg.conditional != "None":
                 conditional_outputs[output_name] = output_cfg.conditional
-                if output_cfg.encoding is not None:
+                if output_cfg.encoding is not None and output_cfg.encoding != "None":
                     self.encoding_map[output_name] = output_cfg.encoding
             else:
                 unconditional_outputs.append(output_name)
@@ -632,6 +632,17 @@ class Satformer(RetrievalModel):
             len(unconditional_outputs)
         )
 
+        n_chans = arch_config.encoder_config.channels[0]
+        self.uncond_encodings = nn.ParameterDict()
+        for uncond_output in self.unconditional_outputs:
+            self.uncond_encodings[uncond_output] = nn.Parameter(
+                torch.normal(
+                    torch.zeros((1, n_chans, 1, 1, 1)),
+                    torch.ones((1, n_chans, 1, 1, 1)),
+                )
+            )
+
+
         self.stems = nn.ModuleDict(
             {name: cfg.compile() for name, cfg in arch_config.stem_configs.items()}
         )
@@ -639,7 +650,9 @@ class Satformer(RetrievalModel):
             {name: cfg.compile() for name, cfg in arch_config.encoding_configs.items()}
         )
         self.encoder = arch_config.encoder_config.compile()
-        self.decoder = arch_config.decoder_config.compile()
+        self.decoders = nn.ModuleDict({
+            name: arch_config.decoder_config.compile() for name in output_config.keys()
+        })
         self.heads = nn.ModuleDict(
             {name: cfg.compile() for name, cfg in arch_config.head_configs.items()}
         )
@@ -661,7 +674,7 @@ class Satformer(RetrievalModel):
                 inpt = self.stems[name](x[name])
                 meta_data = self.meta_data[name]
                 # Add meta data encoding
-                if meta_data is not None:
+                if meta_data is not None and meta_data != "None":
                     enc = self.encodings[self.encoding_map[name]](x[meta_data])
                     inpt = inpt + enc
                 sequence_elements.append(inpt)
@@ -712,11 +725,8 @@ class Satformer(RetrievalModel):
 
         for name in self.unconditional_outputs:
             attn_mask += [True]
-            inpt = torch.zeros(
-                (n_batch, n_chans_in, 1, n_y, n_x),
-                device=inpt.device,
-                dtype=inpt.dtype,
-            )
+            inpt = self.uncond_encodings[name]
+            inpt = torch.broadcast_to(inpt, (n_batch, inpt.shape[1], 1, n_y, n_x))
             sequence_elements.append(inpt)
             token = token_index  * torch.zeros(
                 (n_batch, self.token_length, 1, n_y, n_x),
@@ -742,7 +752,7 @@ class Satformer(RetrievalModel):
         mask = torch.cat(masks, 1)
         inpt = torch.cat((tokens, input_sequence), 1)
 
-        output = self.decoder(self.encoder(inpt, mask=mask), mask=mask, attn_mask=attn_mask)
+        output = self.decoder(self.encoder(inpt, mask=mask, attn_mask=attn_mask), mask=mask, attn_mask=attn_mask)
         seqs = {}
         for slc, output_name in zip(output_slices[:len(self.conditional_outputs)], self.conditional_outputs):
             seqs[output_name] = [self.heads[output_name](x_i) for x_i in torch.unbind(output[:, :, slc], 2)]
