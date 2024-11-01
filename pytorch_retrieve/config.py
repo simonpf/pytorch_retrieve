@@ -231,9 +231,7 @@ class OutputConfig:
                     "."
                 )
 
-        quantiles = get_config_attr("quantiles", None, cfg, f"output.{name}")
         transformation = get_config_attr("transformation", None, cfg, f"output.{name}")
-
         dimensions = get_config_attr(
             "dimensions", None, cfg, f"output.{name}", default=None
         )
@@ -243,7 +241,20 @@ class OutputConfig:
             else:
                 dimensions = [f"{name}_dim_{ind + 1}" for ind in range(len(shape))]
 
+        quantiles = get_config_attr("quantiles", None, cfg, f"output.{name}")
+        if kind == "Quantiles":
+            if quantiles is None:
+                raise ValueError(
+                    f"Output {name} has kind 'Quantiles' but quantiles attribute is not set"
+                )
+
         n_classes = get_config_attr("n_classes", None, cfg, f"output.{name}")
+        if kind == "Classification":
+            if n_classes is None:
+                raise ValueError(
+                    f"Output {name} has kind 'Classification' but n_classes attribute is not set"
+                )
+            n_classes = int(n_classes)
 
         conditional = get_config_attr("conditional", str, cfg, f"output.{name}", None)
         encoding = get_config_attr("encoding", str, cfg, f"output.{name}", None)
@@ -272,6 +283,11 @@ class OutputConfig:
             return []
         if kind == "Quantiles":
             return [f"tau_{self.target}"]
+        if kind == "Detection":
+            return []
+        if kind == "Classification":
+            return [f"{self.target}_probability"]
+
 
         raise RuntimeError(
             f"The output kind '{kind}' is currently not supported. Refer to "
@@ -343,6 +359,13 @@ class OutputConfig:
             elif isinstance(quantiles, list):
                 quantiles = np.array(list)
             return {f"tau_{self.target}": quantiles}
+        if self.kind == "Detection":
+            return {}
+        if self.kind == "Classification":
+            return {
+                f"{self.target}_classes":
+                np.array([f"class_{i}" for i in range(self.n_classes)])
+            }
         raise ValueError(f"Output kind {self.kind} is not supported.")
 
     def get_output_layer(self) -> nn.Module:

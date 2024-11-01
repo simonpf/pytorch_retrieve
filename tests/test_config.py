@@ -9,6 +9,7 @@ import yaml
 import toml
 
 from conftest import MODEL_CONFIG_MLP
+import pytest
 
 from pytorch_retrieve.config import (
     replace_environment_variables,
@@ -135,8 +136,17 @@ kind = "Quantiles"
 shape = 32
 quantiles = 32
 transformation = "SquareRoot"
-"""
 
+[output.y_3]
+kind = "Detection"
+shape = 1
+quantiles = 32
+
+[output.y_4]
+kind = "Classification"
+shape = 1
+n_classes = 8
+"""
 
 def test_output_config():
     """
@@ -150,14 +160,14 @@ def test_output_config():
     }
 
     assert "y_1" in output_cfgs
-    output_cfgs["y_1"].shape == [1]
-    output_cfgs["y_1"].get_output_shape == (1,)
+    assert output_cfgs["y_1"].shape == (1,)
+    assert output_cfgs["y_1"].get_output_shape() == (1,)
     layer = output_cfgs["y_1"].get_output_layer()
     assert isinstance(layer, Mean)
 
     assert "y_2" in output_cfgs
-    output_cfgs["y_2"].shape == [32]
-    output_cfgs["y_2"].get_output_shape == (32,)
+    assert output_cfgs["y_2"].shape == (32,)
+    assert output_cfgs["y_2"].get_output_shape() == (32, 32,)
     layer = output_cfgs["y_2"].get_output_layer()
     assert isinstance(layer, Quantiles)
     assert layer.transformation is not None
@@ -173,6 +183,55 @@ def test_output_config():
     assert len(output_cfgs["y_2"].extra_dimensions) == 1
     assert len(output_cfgs["y_2"].get_output_dimensions()) == 1
     assert len(output_cfgs["y_2"].get_output_coordinates()) == 1
+
+    assert len(output_cfgs["y_3"].extra_dimensions) == 0
+    assert len(output_cfgs["y_3"].get_output_dimensions()) == 0
+    assert len(output_cfgs["y_3"].get_output_coordinates()) == 0
+
+    assert len(output_cfgs["y_4"].extra_dimensions) == 1
+    assert len(output_cfgs["y_4"].get_output_dimensions()) == 1
+    assert len(output_cfgs["y_4"].get_output_coordinates()) == 1
+    assert output_cfgs["y_4"].get_output_shape() == (8,)
+
+
+MISSING_QUANTILES = """
+[output.y_2]
+kind = "Quantiles"
+shape = 32
+transformation = "SquareRoot"
+"""
+
+def test_output_config_missing_quantiles():
+    """
+    Ensures that an error is raised when the quantiles attribute is missing in a Quantiles
+    output.
+    """
+    output_cfgs = toml.loads(MISSING_QUANTILES)
+    with pytest.raises(ValueError):
+        output_cfgs = {
+            name: OutputConfig.parse(name, cfg)
+            for name, cfg in output_cfgs["output"].items()
+        }
+
+
+MISSING_N_CLASSES = """
+[output.y_2]
+kind = "Classification"
+shape = 32
+transformation = "SquareRoot"
+"""
+
+def test_output_config_missing_n_classes():
+    """
+    Ensures that an error is raised when the n_classes attribute is missing in a Classficiation
+    output.
+    """
+    output_cfgs = toml.loads(MISSING_N_CLASSES)
+    with pytest.raises(ValueError):
+        output_cfgs = {
+            name: OutputConfig.parse(name, cfg)
+            for name, cfg in output_cfgs["output"].items()
+        }
 
 
 INFERENCE_CONFIG = """
