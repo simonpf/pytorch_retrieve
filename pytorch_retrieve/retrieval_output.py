@@ -197,3 +197,54 @@ class Quantiles(RetrievalOutput):
         for qf in self.tau:
             quantiles.append(1.0 - preds.probability_greater_than(qf))
         return torch.stack(quantiles, 1)
+
+
+class ClassProbability(RetrievalOutput):
+    """
+    Output class representing class probabilities of classfication output.
+    """
+    def __init__(
+        self,
+        model_output: OutputConfig,
+        dim_name: Optional[str] = None,
+        class_names: Optional[List[str]] = None
+    ):
+        """
+        Args:
+            model_output: The output config describing the model output.
+            tau: A list containing the quantile fractions defining the quantiles
+                to compute.
+            dim_name: Optional name to use for the new quantile dimension.
+        """
+        dimensions = model_output.get_output_dimensions()
+        coordinates = model_output.get_output_coordinates()
+        extra_dims = model_output.extra_dimensions
+        coodinates = {
+            name: coords
+            for name, coords in coordinates.items()
+            if name not in extra_dims
+        }
+        if dim_name is None:
+            dim_name = f"{model_output.target}_probability"
+
+        if class_names is None:
+            class_names = [f"class_{i}" for i in range(model_output.n_classes)]
+        coordinates[dim_name] = class_names
+        self.n_classes = model_output.n_classes
+        super().__init__([dim_name] + dimensions[1:], coordinates)
+
+
+    def compute(self, preds: torch.Tensor) -> torch.Tensor:
+        """
+        Compute retrieval output from model outputs.
+
+        Args:
+            preds: A torch.Tensor containing the raw model output.
+
+        Return:
+            A tensor containing the retrieval output computed from 'preds'.
+        """
+        if isinstance(preds, list):
+            return [self.compute(pred) for pred in preds]
+
+        return preds.probability()

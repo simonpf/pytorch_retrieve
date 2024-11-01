@@ -9,7 +9,9 @@ import torch
 from pytorch_retrieve.config import OutputConfig
 from pytorch_retrieve.tensors import (
     QuantileTensor,
-    ProbabilityTensor
+    ProbabilityTensor,
+    DetectionTensor,
+    ClassificationTensor
 )
 from pytorch_retrieve.tensors import (
     MeanTensor,
@@ -19,7 +21,8 @@ from pytorch_retrieve.tensors import (
 from pytorch_retrieve.retrieval_output import (
     Full,
     ExpectedValue,
-    ExceedanceProbability
+    ExceedanceProbability,
+    ClassProbability
 )
 
 def get_normal_mean_tensor() -> MeanTensor:
@@ -52,15 +55,36 @@ def get_normal_probability_tensor() -> ProbabilityTensor:
     )
 
 
+def get_detection_tensor() -> ProbabilityTensor:
+    """
+    Create detection tensor containing logits for binary classification output.
+    """
+    p = torch.zeros((32, 1))
+    return DetectionTensor(p)
+
+
+def get_classficiation_tensor() -> ProbabilityTensor:
+    """
+    Create detection tensor containing logits for binary classification output.
+    """
+    p = torch.zeros((32, 4))
+    return ClassificationTensor(p)
+
+
 TEST_TENSORS = [
     get_normal_mean_tensor(),
     get_normal_quantile_tensor(),
-    get_normal_probability_tensor()
+    get_normal_probability_tensor(),
 ]
 
 TEST_TENSORS_PROB = [
     get_normal_quantile_tensor(),
     get_normal_probability_tensor()
+]
+
+TEST_TENSORS_CLASS = [
+    get_detection_tensor(),
+    get_classficiation_tensor()
 ]
 
 
@@ -95,3 +119,19 @@ def test_exceedance_probability(pred: torch.Tensor):
     output = ExceedanceProbability(output_config, 0.0)
     expv = output.compute(pred)
     assert torch.isclose(expv, torch.tensor(0.5)).all()
+
+
+@pytest.mark.parametrize("pred", TEST_TENSORS_CLASS)
+def test_class_probability(pred: torch.Tensor):
+    """
+    Ensure that calculation of class probabilities yields uniform values
+    across classes.
+    """
+    n_classes = pred.shape[1]
+    if n_classes == 1:
+        n_classes = 2
+
+    output_config = OutputConfig("y", "Classification", shape=1, n_classes=n_classes)
+    output = ClassProbability(output_config)
+    probs = output.compute(pred)
+    assert torch.isclose(probs, torch.tensor(1.0 / n_classes)).all()
