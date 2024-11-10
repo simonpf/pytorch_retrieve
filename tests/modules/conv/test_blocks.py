@@ -160,6 +160,21 @@ def test_inverted_bottleneck():
     y = module_3(x)
     assert y.shape == (1, 64, 16, 32)
 
+    # Stochastic depth.
+    factory = InvertedBottleneck(
+        expansion_factor=6,
+        excitation_ratio=0.25,
+        anti_aliasing=True,
+        fused=True,
+        stochastic_depth=0.0
+    )
+    module = factory(
+        64, 64, downsample=(2, 1), expansion_factor=6,
+        excitation_ratio=0.25, anti_aliasing=True
+    )
+    y = module(x)
+    assert y.shape == (1, 64, 16, 32)
+
 
 def test_inverted_bottleneck_2p1():
     """

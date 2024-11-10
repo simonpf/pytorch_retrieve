@@ -944,13 +944,15 @@ class InvertedBottleneckBlock(nn.Module, ParamCount):
             padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
             downsample: Optional[int] = None,
             anti_aliasing: bool = False,
-            fused: bool = False
+            fused: bool = False,
+            stochastic_depth: Optional[float] = None
     ):
         super().__init__()
         self.act = activation_factory()
         act = activation_factory()
 
         hidden_channels = out_channels * expansion_factor
+        self.stochastic_depth = stochastic_depth
 
         stride = (1, 1)
         if downsample is not None:
@@ -1041,8 +1043,15 @@ class InvertedBottleneckBlock(nn.Module, ParamCount):
         Propagate input through layer.
         """
         shortcut = self.projection(x)
-        x = self.body(x)
-        return x + shortcut
+
+        # Apply stochastic depth.
+        if self.stochastic_depth is not None and self.training:
+            p = torch.rand(1)
+            if p <= self.stochastic_depth:
+                return shortcut + self.body(x)
+            return shortcut
+
+        return shortcut + self.body(x)
 
 
 class InvertedBottleneck:
@@ -1058,7 +1067,8 @@ class InvertedBottleneck:
         expansion_factor: int = 4,
         excitation_ratio: float = 0.0,
         anti_aliasing: bool = False,
-        fused: bool = False
+        fused: bool = False,
+        stochastic_depth: Optional[float] = None
     ):
         """
         Args:
@@ -1079,6 +1089,8 @@ class InvertedBottleneck:
             fused: It 'True', the expansion and grouped convolution are fused
                 into a single convolution, which is more performant for large
                 image sizes.
+            stochastic_depth: Survival probability of the block for stochastic depth. Disabled
+                if 'None'.
         """
         if isinstance(kernel_size, int):
             kernel_size = (kernel_size,) * 2
@@ -1096,6 +1108,7 @@ class InvertedBottleneck:
         self.excitation_ratio = excitation_ratio
         self.anti_aliasing = anti_aliasing
         self.fused = fused
+        self.stochastic_depth = stochastic_depth
 
     def __call__(
         self,
@@ -1144,7 +1157,8 @@ class InvertedBottleneck:
             normalization_factory=self.normalization_factory,
             padding_factory=self.padding_factory,
             anti_aliasing=self.anti_aliasing,
-            fused=self.fused
+            fused=self.fused,
+            stochastic_depth=self.stochastic_depth
         )
 
 
@@ -1488,7 +1502,7 @@ class SatformerBlock(nn.Module, ParamCount):
             padding: Optional[Tuple[int]] = None,
             attention: bool = True,
             padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
-            n_heads: int = 1,
+            n_heads: int = 2,
             dropout: Optional[float] = None,
             excitation_ratio: float = 0.0,
             downsample: Optional[int] = None,
@@ -1602,6 +1616,7 @@ class SatformerBlock(nn.Module, ParamCount):
     def forward(
             self,
             x: torch.Tensor,
+            x_in: Optional[torch.Tensor] = None,
             mask: Optional[torch.Tensor] = None,
             attn_mask: Optional[torch.Tensor] = None,
             source_seq: Optional[torch.Tensor] = None
@@ -1609,6 +1624,13 @@ class SatformerBlock(nn.Module, ParamCount):
         """
         Propagate input through layer.
         """
+        if x.dim() < 5:
+            x = x[:, :, None]
+            collapse_seq = True
+        else:
+            collapse_seq = False
+
+
         n_batch, _, n_seq, *_ = x.shape
 
         # Shape: [n_batch * n_seq, n_chans, n_y, n_x]
@@ -1628,16 +1650,28 @@ class SatformerBlock(nn.Module, ParamCount):
         if self.attention is not None:
             if mask is not None:
                 mask = mask.repeat_interleave(n_x * n_y, 0)
+
             # Shape: [n_batch, n_y, n_x, n_seq, n_embed] -> [n_batch * n_y * n_x, n_seq, n_embed]
             x_att = self.att_norm(torch.permute(x, (0, 3, 4, 1, 2)).reshape(-1, n_seq, n_embed))
-            x_att, _ = self.attention(x_att, x_att, x_att, key_padding_mask=mask, attn_mask=attn_mask, need_weights=False)
+
+            if x_in is None:
+                x_in = x_att
+            else:
+                n_seq_in = x_in.shape[2]
+                x_in = torch.permute(x_in, (0, 3, 4, 2, 1)).reshape(-1, n_seq_in, n_embed)
+
+            x_att, _ = self.attention(x_att, x_in, x_in, key_padding_mask=mask, attn_mask=attn_mask, need_weights=False)
             # Shape: [n_batch, n_y, n_x, n_seq, n_embed]
             x_att = x_att.reshape((n_batch, n_y, n_x, n_seq, n_embed))
             # Shape: [n_batch, n_seq, n_embed, n_y, n_x]
             x_att = x_att.permute(0, 3, 4, 1, 2)
             x = x + x_att
 
-        return x.transpose(1, 2)
+        x = x.transpose(1, 2)
+        if collapse_seq:
+            x = x[:, :, 0]
+
+        return x
 
 
 class Satformer():
@@ -1655,7 +1689,7 @@ class Satformer():
             anti_aliasing: bool = False,
             fused: bool = False,
             attention: bool = True,
-            n_heads: bool = 1,
+            n_heads: bool = 4,
             dropout: float = 0.0
     ):
         """
