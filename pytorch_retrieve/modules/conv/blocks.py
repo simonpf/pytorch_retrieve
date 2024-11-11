@@ -1212,7 +1212,8 @@ class InvertedBottleneck2Plus1Block(nn.Module, ParamCount):
             padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
             downsample: Optional[int] = None,
             anti_aliasing: bool = False,
-            fused: bool = False
+            fused: bool = False,
+            stochastic_depth: Optional[float] = None
     ):
         """
         Args:
@@ -1236,6 +1237,7 @@ class InvertedBottleneck2Plus1Block(nn.Module, ParamCount):
             fused: It 'True', the expansion and grouped convolution are fused
                 into a single convolution, which is more performant for large
                 image sizes.
+            stochastic_depth: Survival rate for stochastic depth. Disabled if 'None'.
         """
         super().__init__()
         self.act = activation_factory()
@@ -1256,6 +1258,8 @@ class InvertedBottleneck2Plus1Block(nn.Module, ParamCount):
                 downsample = tuple(downsample)
             if max(downsample) > 1:
                 stride = downsample
+
+        self.stochastic_depth = stochastic_depth
 
         self.projection = get_projection(
             in_channels,
@@ -1370,9 +1374,13 @@ class InvertedBottleneck2Plus1Block(nn.Module, ParamCount):
         """
         Propagate input through layer.
         """
-        shortcut = self.projection(x)
-        x = self.body(x)
-        return x + shortcut
+        if self.stochastic_depth is not None and self.training:
+            p = torch.rand(1)
+            if p <= self.stochastic_depth:
+                return shortcut + self.body(x)
+            return shortcut
+
+        return shortcut + self.body(x)
 
 
 class InvertedBottleneck2Plus1:
@@ -1388,7 +1396,8 @@ class InvertedBottleneck2Plus1:
         expansion_factor: int = 4,
         excitation_ratio: float = 0.0,
         anti_aliasing: bool = False,
-        fused: bool =False
+        fused: bool = False,
+        stochastic_depth: Optional[float] = None
     ):
         """
         Args:
@@ -1409,6 +1418,8 @@ class InvertedBottleneck2Plus1:
             fused: It 'True', the expansion and grouped convolution are fused
                 into a single convolution, which is more performant for large
                 image sizes.
+            stochastic_depth: Survival rate for stochastic depth. 'None' to disable
+                stochastic depth.
         """
         if isinstance(kernel_size, int):
             kernel_size = (kernel_size,) * 3
@@ -1426,6 +1437,7 @@ class InvertedBottleneck2Plus1:
         self.excitation_ratio = excitation_ratio
         self.anti_aliasing = anti_aliasing
         self.fused = fused
+        self.stochastic_depth = stochastic_depth
 
     def __call__(
         self,
@@ -1475,7 +1487,8 @@ class InvertedBottleneck2Plus1:
             normalization_factory=self.normalization_factory,
             padding_factory=self.padding_factory,
             anti_aliasing=self.anti_aliasing,
-            fused=self.fused
+            fused=self.fused,
+            stochastic_depth=self.stochastic_depth
         )
 
 

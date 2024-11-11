@@ -239,6 +239,18 @@ def test_inverted_bottleneck_2p1():
     y = module_4(x)
     assert y.shape == (1, 64, 8, 16, 32)
 
+    factory = InvertedBottleneck2Plus1(
+        expansion_factor=6,
+        excitation_ratio=0.25,
+        probabilistic_depth=0.1
+    )
+    module = factory(
+        64, 64, downsample=(1, 2, 1), expansion_factor=6,
+        excitation_ratio=0.25, anti_aliasing=True
+    )
+    y = module(x)
+    assert y.shape == (1, 64, 8, 16, 32)
+
 
 def test_satformer_block():
     """
