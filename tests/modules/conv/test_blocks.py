@@ -242,7 +242,7 @@ def test_inverted_bottleneck_2p1():
     factory = InvertedBottleneck2Plus1(
         expansion_factor=6,
         excitation_ratio=0.25,
-        probabilistic_depth=0.1
+        stochastic_depth=0.1
     )
     module = factory(
         64, 64, downsample=(1, 2, 1), expansion_factor=6,

@@ -1374,6 +1374,8 @@ class InvertedBottleneck2Plus1Block(nn.Module, ParamCount):
         """
         Propagate input through layer.
         """
+        shortcut = self.projection(x)
+
         if self.stochastic_depth is not None and self.training:
             p = torch.rand(1)
             if p <= self.stochastic_depth:
