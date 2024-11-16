@@ -6,7 +6,7 @@ Defines decoder modules for use within encoder-decoder architectures.
 """
 from copy import copy
 from math import ceil
-from typing import Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
 import torch
@@ -285,6 +285,7 @@ class Decoder(nn.Module, ParamCount):
     def forward(
             self,
             x: Union[torch.Tensor, Dict[Scale, torch.Tensor]],
+            stage_kwargs: Optional[Dict[Scale, Any]] = None,
             **kwargs
     ) -> torch.Tensor:
         """
@@ -317,16 +318,27 @@ class Decoder(nn.Module, ParamCount):
             for ind, (up, stage) in enumerate(zip(self.upsamplers, stages)):
                 f_up = self.upsampling_factors[ind]
                 scale //= f_up
-                if scale in self.skip_connections and scale != prev_scale:
-                    y = stage(cat(x[scale], forward(up, y)), **kwargs)
+                if stage_kwargs is not None and scale in stage_kwargs:
+                    kwargs_s = stage_kwargs[scale]
                 else:
-                    y = stage(forward(up, y), **kwargs)
+                    kwargs_s = {}
+                if scale in self.skip_connections and scale != prev_scale:
+                    y = stage(cat(x[scale], forward(up, y)), **kwargs_s, **kwargs)
+                else:
+                    y = stage(forward(up, y), **kwargs_s, **kwargs)
                 prev_scale = scale
         else:
             y = x
             stages = self.stages
-            for up, stage in zip(self.upsamplers, stages):
-                y = stage(forward(up, y), **kwargs)
+            scale = self.base_scale
+            for ind, (up, stage) in enumerate(zip(self.upsamplers, stages)):
+                f_up = self.upsampling_factors[ind]
+                scale //= f_up
+                if stage_kwargs is not None and scale in stage_kwargs:
+                    kwargs_s = stage_kwargs[scale]
+                else:
+                    kwargs_s = {}
+                y = stage(forward(up, y), **kwargs_s, **kwargs)
         return y
 
 

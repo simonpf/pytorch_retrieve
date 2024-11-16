@@ -1044,12 +1044,12 @@ class InvertedBottleneckBlock(nn.Module, ParamCount):
         """
         shortcut = self.projection(x)
 
-        # Apply stochastic depth.
-        if self.stochastic_depth is not None and self.training:
-            p = torch.rand(1)
-            if p <= self.stochastic_depth:
-                return shortcut + self.body(x)
-            return shortcut
+        ## Apply stochastic depth.
+        #if self.stochastic_depth is not None and self.training:
+        #    p = torch.rand(1)
+        #    if p <= self.stochastic_depth:
+        #        return shortcut + self.body(x)
+        #    return shortcut
 
         return shortcut + self.body(x)
 

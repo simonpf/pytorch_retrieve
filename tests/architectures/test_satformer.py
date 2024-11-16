@@ -15,6 +15,7 @@ from pytorch_retrieve.architectures.satformer import Satformer
 SATFORMER_CFG = """
 [architecture]
 name = "Satformer"
+output_embed_dim = 16
 
 [architecture.encoder]
 channels = [16, 32, 64, 128, 256]
@@ -35,8 +36,8 @@ block_factory_args = [
     {expansion_factor=4, excitation_ratio=0.25, anti_aliasing=true, attention=true},
     {expansion_factor=4, excitation_ratio=0.25, anti_aliasing=true, attention=true},
     {expansion_factor=4, excitation_ratio=0.0, fused=true, attention=true},
-    {expansion_factor=4, excitation_ratio=0.0, fused=true, attention=true},
-    {expansion_factor=1, excitation_ratio=0.0, fused=true, attention=false},
+    {expansion_factor=4, excitation_ratio=0.0, fused=true, attention=true, n_heads=2},
+    {expansion_factor=1, excitation_ratio=0.0, fused=true, attention=false, n_heads=2},
 ]
 
 [architecture.encoding.observations]
@@ -98,6 +99,7 @@ def test_satformer(satformer_cfg, tmp_path):
 SATFORMER_UNCOND_CFG = """
 [architecture]
 name = "Satformer"
+output_embed_dim = 16
 
 [architecture.encoder]
 channels = [16, 32, 64, 128, 256]
@@ -110,7 +112,6 @@ block_factory_args = [
     {expansion_factor=4, excitation_ratio=0.25, anti_aliasing=true, attention=true},
 ]
 
-
 [architecture.decoder]
 channels = [128, 64, 32, 16]
 stage_depths = [3, 2, 2, 1]
@@ -118,8 +119,8 @@ block_factory_args = [
     {expansion_factor=4, excitation_ratio=0.25, anti_aliasing=true, attention=true},
     {expansion_factor=4, excitation_ratio=0.25, anti_aliasing=true, attention=true},
     {expansion_factor=4, excitation_ratio=0.0, fused=true, attention=true},
-    {expansion_factor=4, excitation_ratio=0.0, fused=true, attention=true},
-    {expansion_factor=1, excitation_ratio=0.0, fused=true, attention=false},
+    {expansion_factor=4, excitation_ratio=0.0, fused=true, attention=true, n_heads=2},
+    {expansion_factor=1, excitation_ratio=0.0, fused=true, attention=false, n_heads=2},
 ]
 
 [architecture.encoding.observations]
