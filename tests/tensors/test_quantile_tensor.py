@@ -7,6 +7,8 @@ from scipy.stats import norm
 import torch
 from torch import nn
 
+import pytest
+
 from pytorch_retrieve.tensors import QuantileTensor, MaskedTensor
 from pytorch_retrieve.modules.transformations import SquareRoot
 
@@ -297,7 +299,10 @@ def test_masked_quantile_loss():
     y_true = MaskedTensor(y_true, mask=mask)
 
     q_loss = y_pred.loss(y_true)
-    ref = 0.5 * torch.abs(y_pred.base - y_true.base)[~(y_pred.base.mask + y_true.mask)].mean()
+    ref = (
+        0.5
+        * torch.abs(y_pred.base - y_true.base)[~(y_pred.base.mask + y_true.mask)].mean()
+    )
     assert torch.isclose(q_loss, ref)
 
     y_1 = torch.rand(10, 1, 10, 10)
@@ -442,7 +447,7 @@ def test_to():
     """
     Test .to method.
     """
-    tensor = 100 * torch.rand(100, 3, 100)
+    tensor = 100 * torch.rand(100, 32, 100)
     tau = torch.tensor(np.linspace(0, 1, 34)[1:-1]).to(torch.float32)
     tensor = QuantileTensor(tensor, tau=tau)
 
@@ -458,14 +463,42 @@ def test_cpu():
     """
     Test .cpu method.
     """
-    tensor = 100 * torch.rand(100, 3, 100)
+    tensor = 100 * torch.rand(100, 32, 100)
     tau = torch.tensor(np.linspace(0, 1, 34)[1:-1]).to(torch.float32)
     tensor = QuantileTensor(tensor, tau=tau)
 
     tensor = tensor.to("cuda:0")
-    assert tensor.device == torch.device('cuda:0')
-    assert tensor.tau.device == torch.device('cuda:0')
+    assert tensor.device == torch.device("cuda:0")
+    assert tensor.tau.device == torch.device("cuda:0")
 
     tensor = tensor.cpu()
-    assert tensor.device == torch.device('cpu')
-    assert tensor.tau.device == torch.device('cpu')
+    assert tensor.device == torch.device("cpu")
+    assert tensor.tau.device == torch.device("cpu")
+
+
+def test_loss():
+    """
+    Test calculation of the quantile loss.
+    """
+    tensor_1 = 100 * torch.rand(100, 1, 100)
+    tau = torch.tensor(0.5)
+    tensor_1 = QuantileTensor(tensor_1, tau=tau)
+
+    tensor_2 = 100 * torch.rand(100, 100)
+
+    loss = tensor_1.loss(tensor_2)
+    assert torch.isclose(loss, 0.5 * (tensor_1[:, 0] - tensor_2).abs().mean())
+
+    tensor_2 = tensor_2[:, None]
+    loss = tensor_1.loss(tensor_2)
+    assert torch.isclose(loss, 0.5 * (tensor_1 - tensor_2).abs().mean())
+
+    weights = torch.ones_like(tensor_2)
+    weights[50:] = 0.0
+    loss = tensor_1.loss(tensor_2, weights=weights)
+    assert not torch.isclose(loss, 0.5 * (tensor_1 - tensor_2).abs().mean())
+    assert torch.isclose(loss, 0.5 * (tensor_1[:50] - tensor_2[:50]).abs().mean())
+
+    with pytest.raises(ValueError):
+        weights = torch.zeros((1,))
+        loss = tensor_1.loss(tensor_2, weights=weights)

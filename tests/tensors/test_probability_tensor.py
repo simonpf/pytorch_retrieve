@@ -257,6 +257,7 @@ def test_pdf():
     assert torch.isclose(x_pdf[0, 0], torch.tensor(0.05)).all()
     assert torch.isclose(y_pdf[:, 0], torch.tensor(10.0)).all()
 
+
 def test_cdf():
     """
     Test that CDF is correctly calculated.
@@ -313,6 +314,8 @@ def test_any_all():
 
 
 pytest.mark.skipif(not torch.cuda.is_available(), reason="Needs GPU.")
+
+
 def test_to():
     """
     Test .to method.
@@ -340,9 +343,43 @@ def test_cpu():
     tensor = ProbabilityTensor(tensor, bins=bins)
 
     tensor = tensor.to("cuda:0")
-    assert tensor.device == torch.device('cuda:0')
-    assert tensor.bins.device == torch.device('cuda:0')
+    assert tensor.device == torch.device("cuda:0")
+    assert tensor.bins.device == torch.device("cuda:0")
 
     tensor = tensor.cpu()
-    assert tensor.device == torch.device('cpu')
-    assert tensor.bins.device == torch.device('cpu')
+    assert tensor.device == torch.device("cpu")
+    assert tensor.bins.device == torch.device("cpu")
+
+
+def test_loss():
+    """
+    Test loss calculation.
+    """
+    tensor_1 = torch.zeros(100, 2, 100)
+    tensor_1[:, 1] = 1.0
+    bins = np.linspace(0, 10, 3)
+    tensor_1 = ProbabilityTensor(tensor_1, bins=bins)
+
+    tensor_2 = torch.zeros(100, 100)
+
+    loss = tensor_1.loss(tensor_2)
+    assert torch.isclose(
+        loss, torch.tensor(-np.log(1 / (1.0 + np.exp(1.0))).astype(np.float32))
+    )
+
+    tensor_2[:50] = 10.0
+    loss = tensor_1.loss(tensor_2)
+    assert not torch.isclose(
+        loss, torch.tensor(-np.log(1 / (1.0 + np.exp(1.0))).astype(np.float32))
+    )
+
+    weights = torch.ones_like(tensor_2)
+    weights[:50] = 0.0
+    loss = tensor_1.loss(tensor_2, weights=weights)
+    assert torch.isclose(
+        loss, torch.tensor(-np.log(1 / (1.0 + np.exp(1.0))).astype(np.float32))
+    )
+
+    with pytest.raises(ValueError):
+        weights = torch.zeros((1,))
+        loss = tensor_1.loss(tensor_2, weights=weights)

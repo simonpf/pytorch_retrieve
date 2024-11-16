@@ -5,6 +5,8 @@ import numpy as np
 import torch
 from torch import nn
 
+import pytest
+
 from pytorch_retrieve.tensors import MeanTensor, MaskedTensor
 
 
@@ -250,6 +252,7 @@ def test_masked_mse_loss():
     mse_loss = y_pred.loss(y_true)
     assert torch.isclose(mse_loss, torch.tensor(1.0))
 
+
 def test_unbind():
     """
     Ensure that unbinding yields a mean tensor.
@@ -273,3 +276,26 @@ def test_any_all():
 
     assert torch.all(tensor_1 <= 1.0)
     assert not torch.any(tensor_1 > 1.0)
+
+
+def test_loss():
+    """
+    Test calculation of MSE.
+    """
+    tensor_1 = MeanTensor(torch.zeros((4, 8, 8)))
+    tensor_2 = torch.ones((4, 8, 8))
+    loss = tensor_1.loss(tensor_2)
+    assert torch.isclose(loss, torch.tensor(1.0))
+
+    weights = torch.zeros_like(tensor_2)
+    weights[2:] = 1.0
+    loss = tensor_1.loss(tensor_2, weights=weights)
+    assert torch.isclose(loss, torch.tensor(1.0))
+
+    tensor_2[2:] = 0.0
+    loss = tensor_1.loss(tensor_2, weights=weights)
+    assert torch.isclose(loss, torch.tensor(0.0))
+
+    with pytest.raises(ValueError):
+        weights = torch.zeros((1,))
+        loss = tensor_1.loss(tensor_2, weights=weights)

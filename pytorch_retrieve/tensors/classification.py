@@ -6,6 +6,8 @@ Provides the 'DetectionTensor' and 'ClassificationTensor' classes representing
 the ouput from detection (binary classification) and mulit-class
  classification.
 """
+from typing import Optional
+
 import torch
 from torch import nn
 
@@ -17,6 +19,7 @@ class DetectionTensor(torch.Tensor):
     A DetectionTensor is a tensor that holds predictions of a detection
     of two-class classification tasks.
     """
+
     def __new__(cls, *args, **kwargs):
         tensor = super().__new__(cls, *args, **kwargs)
 
@@ -69,20 +72,35 @@ class DetectionTensor(torch.Tensor):
         tensor_repr = self.base.__repr__()
         return "DetectionTensor" + tensor_repr[6:]
 
-    def loss(self, y_true: torch.Tensor) -> torch.Tensor:
+    def loss(
+        self, y_true: torch.Tensor, weights: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         """
         Args:
             y_true: Tensor containing the true values.
+            weights: An optional tensor containing weights to weigh
+                the predictions. Must have the same shape as y_true.
 
         Return:
             The binary cross-entropy loss of this tensor and the given
             true label.
 
         """
-        return nn.functional.binary_cross_entropy_with_logits(
-            self.base.squeeze(),
-            y_true.squeeze(),
+        if weights is None:
+            return nn.functional.binary_cross_entropy_with_logits(
+                self.base.squeeze(),
+                y_true.squeeze(),
+            )
+
+        if weights.shape != y_true.shape:
+            raise ValueError(
+                "If provided, 'weights' must match the reference tensor 'y_true'."
+            )
+
+        loss = nn.functional.binary_cross_entropy_with_logits(
+            self.base.squeeze(), y_true.squeeze(), reduction="none"
         )
+        return (loss * weights).sum() / weights.sum()
 
     def probability(self):
         """
@@ -149,20 +167,33 @@ class ClassificationTensor(torch.Tensor):
         tensor_repr = self.base.__repr__()
         return "ClassificationTensor" + tensor_repr[6:]
 
-    def loss(self, y_true: torch.Tensor) -> torch.Tensor:
+    def loss(
+        self, y_true: torch.Tensor, weights: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         """
         Args:
             y_true: Tensor containing the true values.
+            weights: An optional tensor containing weights to weigh
+                the predictions. Must have the same shape as y_true.
 
         Return:
             The binary cross-entropy loss of this tensor and the given
             true label.
 
         """
-        return nn.functional.cross_entropy(
-            self.base,
-            y_true,
-        )
+        if weights is None:
+            return nn.functional.cross_entropy(
+                self.base,
+                y_true,
+            )
+
+        if weights.shape != y_true.shape:
+            raise ValueError(
+                "If provided, 'weights' must match the reference tensor 'y_true'."
+            )
+
+        loss = nn.functional.cross_entropy(self.base, y_true, reduction="none")
+        return (loss * weights).sum() / weights.sum()
 
     def probability(self) -> torch.Tensor:
         """

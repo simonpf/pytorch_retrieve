@@ -8,7 +8,7 @@ containing predictions of distributions of scalar quantities represented
 """
 from collections.abc import Sequence, Mapping
 import functools
-from typing import Union
+from typing import Union, Optional
 
 
 import torch
@@ -40,6 +40,7 @@ class ProbabilityTensor(torch.Tensor, RegressionTensor):
     scalar quantities represented using a sequence of probabilities
     over a discretized range of values.
     """
+
     def __new__(cls, tensor, bins, *args, bin_dim=1, **kwargs):
         new_tensor = super().__new__(cls, tensor, *args, **kwargs)
 
@@ -73,7 +74,9 @@ class ProbabilityTensor(torch.Tensor, RegressionTensor):
             return result
 
         if func == torch.Tensor.unbind or func == torch.unbind:
-            return tuple([ProbabilityTensor(tensor, bins=args[0].bins) for tensor in result])
+            return tuple(
+                [ProbabilityTensor(tensor, bins=args[0].bins) for tensor in result]
+            )
 
         if isinstance(result, torch.Tensor):
             p_args = get_prob_attrs(args)
@@ -84,17 +87,32 @@ class ProbabilityTensor(torch.Tensor, RegressionTensor):
 
         return result
 
-    def loss(self, y_true: Union[torch.Tensor, MaskedTensor]) -> torch.tensor:
+    def loss(
+        self,
+        y_true: Union[torch.Tensor, MaskedTensor],
+        weights: Optional[torch.Tensor] = None,
+    ) -> torch.tensor:
         """
         Args:
             y_true: Tensor containing the true values.
-
+            weights: An optional tensor containing weights to weigh
+                the predictions. Should have the same shape as y_true.
         Return:
             The cross-entropy loss with respect to the true values.
         """
         y_binned = torch.bucketize(y_true, self.bins.type_as(y_true)) - 1
         y_binned = torch.clamp(y_binned, 0, len(self.bins) - 2)
-        return nn.functional.cross_entropy(self.base, y_binned)
+
+        if weights is None:
+            return nn.functional.cross_entropy(self.base, y_binned)
+
+        if weights.shape != y_true.shape:
+            raise ValueError(
+                "If provided, 'weights' must match the reference tensor 'y_true'."
+            )
+
+        loss = nn.functional.cross_entropy(self.base, y_binned, reduction="none")
+        return (weights * loss).sum() / weights.sum()
 
     def __repr__(self):
         tensor_repr = self.base.__repr__()
@@ -137,7 +155,6 @@ class ProbabilityTensor(torch.Tensor, RegressionTensor):
         x_cdf = torch.broadcast_to(bins[dim_pad], y_cdf.shape)
         return x_cdf, y_cdf
 
-
     def expected_value(self):
         r"""
         Computes the mean of the posterior distribution defined by an array
@@ -158,7 +175,6 @@ class ProbabilityTensor(torch.Tensor, RegressionTensor):
         exp = torch.sum(probs * x_c[dim_pad], dim=self.bin_dim)
         return exp
 
-
     def probability_less_than(self, thresh):
         """
         A mean tensor alone is not a probabilistic estimate.
@@ -173,7 +189,6 @@ class ProbabilityTensor(torch.Tensor, RegressionTensor):
         dim_pad = (...,) + (None,) * (self.base.ndim - self.bin_dim - 1)
         probs = (probs * weights[dim_pad]).sum(self.bin_dim)
         return probs
-
 
     def probability_greater_than(self, thresh):
         """

@@ -6,6 +6,7 @@ Provides the MeanTensor class, which is used to represent tensors containing
 predictions of the posterior mean.
 """
 from collections.abc import Sequence, Iterable, Mapping
+from typing import Optional
 
 import torch
 
@@ -19,6 +20,7 @@ def implements(torch_function):
     """
     Register a torch function override for MeanTensor.
     """
+
     def decorator(func):
         functools.update_wrapper(func, torch_function)
         HANDLED_FUNCTIONS[torch_function] = func
@@ -72,10 +74,12 @@ class MeanTensor(torch.Tensor, RegressionTensor):
             return self.invert(self.base)
         return self.base
 
-    def loss(self, y_true):
+    def loss(self, y_true, weights: Optional[torch.Tensor] = None):
         """
         Args:
             y_true: Tensor containing the true values.
+            weights: An optional tensor containing weights to weigh
+                the predictions. Must have the same shape as y_true.
 
         Return:
             The means-squared error of this tensor and 'y_true.
@@ -85,7 +89,19 @@ class MeanTensor(torch.Tensor, RegressionTensor):
 
         if y_true.dim() < self.dim():
             y_true = y_true.unsqueeze(1)
-        return ((self.base - y_true) ** 2).mean()
+
+        if weights is None:
+            return ((self.base - y_true) ** 2).mean()
+
+        if weights.shape != y_true.shape:
+            raise ValueError(
+                "If provided, 'weights' must match the reference tensor 'y_true'."
+            )
+
+        if weights.dim() < self.dim():
+            weights = weights.unsqueeze(1)
+
+        return (weights * (self.base - y_true) ** 2).sum() / weights.sum()
 
     def probability_less_than(self, y):
         """

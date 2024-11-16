@@ -7,7 +7,7 @@ containing predictions of distributions represented by a sequence of quantiles.
 """
 from collections.abc import Sequence, Mapping
 import functools
-from typing import Union, List
+from typing import Union, List, Optional
 
 
 import torch
@@ -95,10 +95,12 @@ class QuantileTensor(torch.Tensor, RegressionTensor):
 
         return result
 
-    def loss(self, y_true):
+    def loss(self, y_true, weights: Optional[torch.Tensor] = None):
         """
         Args:
             y_true: Tensor containing the true values.
+            weights: An optional tensor containing weights to weigh
+                the predictions. Should have the same shape as y_true.
 
         Return:
             The quantile loss of this tensor with respect to 'y_true'.
@@ -111,12 +113,26 @@ class QuantileTensor(torch.Tensor, RegressionTensor):
         tau = tau.__getitem__((...,) + (None,) * (self.ndim - self.quantile_dim - 1))
 
         if y_true.ndim < self.ndim:
-            new_shape = y_true.shape[:1] + (1,) * (self.ndim - y_true.ndim) + y_true.shape[1:]
-            y_true = y_true.reshape(new_shape)
+            # new_shape = y_true.shape[:1] + (1,) * (self.ndim - y_true.ndim) + y_true.shape[1:]
+            # y_true = y_true.reshape(new_shape)
+            y_true = y_true.unsqueeze(self.quantile_dim)
 
         delta = y_true - self.base
+
+        if weights is None:
+            loss = torch.where(delta > 0, tau * delta, (tau - 1.0) * delta)
+            return loss.mean()
+
+        if weights.shape != y_true.shape:
+            raise ValueError(
+                "If provided, 'weights' must match the reference tensor 'y_true'."
+            )
+
+        if weights.ndim < self.ndim:
+            weights = weights.unsqueeze(self.quantile_dim)
+
         loss = torch.where(delta > 0, tau * delta, (tau - 1.0) * delta)
-        return loss.mean()
+        return (weights * loss).sum() / weights.sum()
 
     def __repr__(self):
         tensor_repr = self.base.__repr__()
@@ -333,7 +349,6 @@ class QuantileTensor(torch.Tensor, RegressionTensor):
 
         new = torch.stack(new, self.quantile_dim)
         return QuantileTensor(new, torch.tensor(tau))
-
 
 
 def get_base(arg):
