@@ -15,13 +15,7 @@ import click
 import lightning as L
 import torch
 from torch import nn
-from torch.utils.data import (
-    Dataset,
-    DataLoader,
-    IterableDataset,
-    Subset,
-    random_split
-)
+from torch.utils.data import Dataset, DataLoader, IterableDataset, Subset, random_split
 from torch.optim.lr_scheduler import SequentialLR
 from lightning.pytorch import callbacks
 
@@ -37,7 +31,7 @@ from pytorch_retrieve.utils import (
     read_model_config,
     read_training_config,
     read_compute_config,
-    find_most_recent_checkpoint
+    find_most_recent_checkpoint,
 )
 from pytorch_retrieve.lightning import LightningRetrieval
 
@@ -45,10 +39,7 @@ from pytorch_retrieve.lightning import LightningRetrieval
 LOGGER = logging.getLogger(__name__)
 
 
-def load_weights(
-        path: Path,
-        model: nn.Module
-) -> None:
+def load_weights(path: Path, model: nn.Module) -> None:
     """
     Load model weights from existing model file.
 
@@ -88,20 +79,21 @@ def load_weights(
             LOGGER.warning(
                 "The following layers loaded from the model at %s were discarded "
                 "due to shape mis-match: %s",
-                path, mismatch
+                path,
+                mismatch,
             )
         if len(ignored) > 0:
             LOGGER.warning(
                 "The following layers loaded from the model at %s were ignored "
                 "because the current model contains no matching layer: %s",
-                path, ignored
+                path,
+                ignored,
             )
     else:
         LOGGER.error(
             "Path provided as 'load_weights' argument does not point "
             "to an existing file."
         )
-
 
 
 class TrainingConfigBase:
@@ -128,9 +120,10 @@ class TrainingConfigBase:
                 " provided dataset is actually importable."
             )
         generator = torch.Generator().manual_seed(42)
-        train, val = random_split(dataset, [1.0 - self.validation_split, self.validation_split])
+        train, val = random_split(
+            dataset, [1.0 - self.validation_split, self.validation_split]
+        )
         return train, val
-
 
     def get_training_dataset(self):
         """
@@ -179,7 +172,7 @@ class TrainingConfigBase:
         the training dataset. Otherwise None is returned.
         """
         if self.validation_dataset_args is None:
-            if self.validation_split is  None:
+            if self.validation_split is None:
                 return None
             return self.get_training_and_validation_splits()[1]
         try:
@@ -266,11 +259,15 @@ class TrainingConfigBase:
                 scheduler_args = self.scheduler_args
                 if scheduler_args is None:
                     scheduler_args = {}
-                scheds.append(scheduler(
-                    optimizer=optimizer,
-                    **args,
-                ))
-            scheduler = SequentialLR(optimizer, schedulers=scheds, milestones=self.milestones)
+                scheds.append(
+                    scheduler(
+                        optimizer=optimizer,
+                        **args,
+                    )
+                )
+            scheduler = SequentialLR(
+                optimizer, schedulers=scheds, milestones=self.milestones
+            )
             scheduler.stepwise = self.stepwise_scheduling
             return optimizer, scheduler
 
@@ -377,6 +374,7 @@ class TrainingConfig(TrainingConfigBase):
     accumulate_grad_batches: int = 1
     load_weights: Optional[str] = None
     n_data_loader_workers: int = 12
+    debug: bool = False
 
     @classmethod
     def parse(cls, name, config_dict: Dict[str, object]):
@@ -429,7 +427,12 @@ class TrainingConfig(TrainingConfigBase):
                 for name, val in validation_dataset_args.items()
             }
         validation_split = get_config_attr(
-            "validation_split", None, config_dict, f"training stage {name}", required=False, default=None
+            "validation_split",
+            None,
+            config_dict,
+            f"training stage {name}",
+            required=False,
+            default=None,
         )
 
         n_epochs = get_config_attr(
@@ -495,6 +498,9 @@ class TrainingConfig(TrainingConfigBase):
         n_data_loader_workers = get_config_attr(
             "n_data_loader_workers", int, config_dict, f"training stage {name}", 12
         )
+        debug = get_config_attr(
+            "debug", bool, config_dict, f"training stage {name}", False
+        )
 
         return TrainingConfig(
             training_dataset=training_dataset,
@@ -519,7 +525,8 @@ class TrainingConfig(TrainingConfigBase):
             gradient_clip_algorithm=gradient_clip_algorithm,
             accumulate_grad_batches=accumulate_grad_batches,
             load_weights=load_weights,
-            n_data_loader_workers=n_data_loader_workers
+            n_data_loader_workers=n_data_loader_workers,
+            debug=debug,
         )
 
 
@@ -571,8 +578,8 @@ def run_training(
             checkpoint,
             model=module.model,
             training_schedule=module.training_schedule,
-            model_dir = module.model_dir,
-            logger=module.logger_class
+            model_dir=module.model_dir,
+            logger=module.logger_class,
         )
 
     while not module.training_finished:
@@ -600,13 +607,14 @@ def run_training(
             accumulate_grad_batches=training_config.accumulate_grad_batches,
             num_sanity_val_steps=0,
             gradient_clip_val=training_config.gradient_clip_val,
-            gradient_clip_algorithm=training_config.gradient_clip_algorithm
+            gradient_clip_algorithm=training_config.gradient_clip_algorithm,
+            detect_anomaly=False,
         )
         trainer.fit(
             module,
             train_dataloaders=training_loader,
             val_dataloaders=validation_loader,
-            ckpt_path=checkpoint
+            ckpt_path=checkpoint,
         )
         module = module.to(torch.device("cpu"))
         model_path = module.save_model(model_dir)
@@ -687,9 +695,7 @@ def cli(
     training_schedule = parse_training_config(training_config)
 
     module = LightningRetrieval(
-        retrieval_model,
-        training_schedule=training_schedule,
-        name=module_name
+        retrieval_model, training_schedule=training_schedule, name=module_name
     )
 
     compute_config = read_compute_config(LOGGER, model_path, compute_config)

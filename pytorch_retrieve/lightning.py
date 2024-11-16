@@ -30,6 +30,7 @@ class LightningRetrieval(L.LightningModule):
     The RetrievalModule implements a LightningModule for the training
     of PytorchRetrieve models.
     """
+
     def __init__(
         self,
         model: nn.Module,
@@ -75,6 +76,8 @@ class LightningRetrieval(L.LightningModule):
         self.inputs_prev = None
         self.pred_prev = None
         self.target_prev = None
+        self.mean_loss = None
+        self.alpha = 0.99
 
     @property
     def training_finished(self):
@@ -135,6 +138,12 @@ class LightningRetrieval(L.LightningModule):
         stage_name = self.stage_names[self.stage]
         return self.training_schedule[stage_name]
 
+    @property
+    def debug(self) -> bool:
+        if self.current_training_config is None:
+            return False
+        return self.current_training_config.debug
+
     def training_step_single_pred(
         self, pred: torch.Tensor, target: Union[torch.Tensor, dict]
     ) -> torch.Tensor:
@@ -150,6 +159,7 @@ class LightningRetrieval(L.LightningModule):
         Return:
             The loss of the prediction with respect to the given target.
         """
+        weights = None
         if isinstance(target, dict):
             if len(target) > 1:
                 raise RuntimeError(
@@ -159,8 +169,14 @@ class LightningRetrieval(L.LightningModule):
                     " be associated with."
                 )
             name, target = next(iter(target.items()))
+
         else:
             name = None
+
+        if isinstance(target, tuple):
+            target, weights = target
+        else:
+            weights = None
 
         if isinstance(pred, list):
             if not isinstance(target, list):
@@ -168,12 +184,16 @@ class LightningRetrieval(L.LightningModule):
                     "Model predicts a sequence but the reference data is not."
                 )
             loss = torch.tensor(0.0)
-            for pred_s, target_s in zip(pred, target):
+
+            if weights is None:
+                weights = [None] * len(target)
+
+            for pred_s, target_s, weights_s in zip(pred, target, weights):
                 mask = torch.isnan(target_s)
                 if mask.any():
                     target_s = torch.nan_to_num(target_s, 0.0)
                     target_s = MaskedTensor(target_s, mask=mask)
-                loss += pred_s.loss(target_s)
+                loss += pred_s.loss(target_s, weights=weights_s)
 
             if name is not None:
                 self.log("Training loss", loss)
@@ -185,7 +205,7 @@ class LightningRetrieval(L.LightningModule):
         if mask.any():
             target = torch.nan_to_num(target, 0.0)
             target = MaskedTensor(target, mask=mask)
-        loss = pred.loss(target)
+        loss = pred.loss(target, weights=weights)
 
         if name is not None:
             self.log("Training loss", loss)
@@ -255,14 +275,21 @@ class LightningRetrieval(L.LightningModule):
 
             pred_k = pred[key]
             target_k = target[key]
+            weights_k = target.get(key + "_weights", None)
 
             if isinstance(pred_k, list):
                 if not isinstance(target_k, list):
                     raise RuntimeError(
                         "Model predicts a sequence but the reference data is not."
                     )
+
+                if weights_k is None:
+                    weights_k = [None] * len(target_k)
+
                 losses[key] = 0.0
-                for pred_k_s, target_k_s in zip(pred_k, target_k):
+                for pred_k_s, target_k_s, weights_k_s in zip(
+                    pred_k, target_k, weights_k
+                ):
                     mask = torch.isnan(target_k_s)
                     if mask.any():
                         target_k_s = torch.nan_to_num(target_k_s, 0.0)
@@ -277,10 +304,9 @@ class LightningRetrieval(L.LightningModule):
                         target_k_s = 0.0 * target_k_s
 
                     tot_samples += n_samples
-                    loss_k_s = pred_k_s.loss(target_k_s)
+                    loss_k_s = pred_k_s.loss(target_k_s, weights=weights_k_s)
                     tot_loss = tot_loss + n_samples * loss_k_s
                     losses[name] += loss_k_s.item()
-
 
             else:
                 mask = torch.isnan(target_k)
@@ -289,7 +315,7 @@ class LightningRetrieval(L.LightningModule):
                     target_k = MaskedTensor(target_k, mask=mask)
 
                 n_samples = (~mask).sum()
-                loss_k = pred[name].loss(target_k)
+                loss_k = pred[name].loss(target_k, weights=weights_k)
                 tot_loss = tot_loss + n_samples * loss_k
                 tot_samples += n_samples
                 losses[name] = loss_k.item()
@@ -307,26 +333,45 @@ class LightningRetrieval(L.LightningModule):
         self.log("Training loss", tot_loss)
         losses["loss"] = tot_loss
 
-        if np.isnan(tot_loss.item()):
+        if self.mean_loss is not None:
+            self.log("Mean loss", self.mean_loss, on_step=True, prog_bar=True)
 
-            pass
-            #if self.pred_prev is not None:
-            #    for tensors, name in zip(
-            #            [inputs, target, pred, self.inputs_prev, self.target_prev, self.pred_prev],
-            #            ["inputs", "target", "pred", "input_prev", "target_prev", "pred_prev"]
-            #    ):
-            #        if not isinstance(tensors, dict):
-            #            tensors = {"x": tensors}
+        if self.mean_loss is None:
+            self.mean_loss = tot_loss.item()
+        else:
+            # Check if loss is anomalous
+            if self.debug and (
+                tot_loss > 5 * self.mean_loss or torch.isnan(tot_loss).all()
+            ):
+                filename = f"inputs_prev_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
+                torch.save(self.inputs_prev, filename)
+                filename = f"targets_prev_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
+                torch.save(self.target_prev, filename)
+                filename = f"preds_prev_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
+                torch.save(self.pred_prev, filename)
+                filename = (
+                    f"inputs_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
+                )
+                torch.save(inputs, filename)
+                filename = (
+                    f"targets_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
+                )
+                torch.save(target, filename)
+                filename = (
+                    f"preds_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
+                )
+                torch.save(pred, filename)
+            self.mean_loss = (
+                self.alpha * self.mean_loss + (1.0 - self.alpha) * tot_loss.item()
+            )
 
-            #        for key, tensor in tensors.items():
-            #            if isinstance(tensor, list):
-            #                tensor = torch.stack(tensor, -3)
-            #            tensor = tensor.detach().to(dtype=torch.float32, device="cpu").numpy()
-            #            np.save(f"{name}_{key}.npy", tensor)
+            if self.debug:
+                if torch.isnan(tot_loss).all():
+                    raise ValueError("NAN encountered in training.")
+                self.inputs_prev = inputs
+                self.target_prev = target
+                self.pred_prev = pred
 
-        self.inputs_prev = inputs
-        self.target_prev = target
-        self.pred_prev = pred
         return losses
 
     def on_train_start(self):
@@ -337,6 +382,15 @@ class LightningRetrieval(L.LightningModule):
             )
         else:
             self.metrics = []
+
+    def on_before_optimizer_step(self, optimizer):
+        from lightning.pytorch.utilities import grad_norm
+
+        pass
+        # Compute the 2-norm for each layer
+        # If using mixed precision, the gradients are already unscaled here
+        # norms = grad_norm(self.model, norm_type=2)
+        # self.log_dict(norms)
 
     def validation_step_single_sequence(
         self, pred: List[torch.Tensor], target: Union[List[torch.Tensor], dict]
@@ -353,6 +407,10 @@ class LightningRetrieval(L.LightningModule):
                     " the predictions should be associated with."
                 )
             target = next(iter(target.values()))
+            if isinstance(target, tuple):
+                target, weights = target
+            else:
+                weights = None
 
         metrics = self.metrics
         if len(metrics) > 1:
@@ -369,9 +427,12 @@ class LightningRetrieval(L.LightningModule):
             metric for metric in metrics if isinstance(metric, ScalarMetric)
         ]
 
+        if weights is None:
+            weights = [None] * len(target)
+
         loss = 0.0
-        for pred_s, loss_s in zip(pred, target):
-            loss += pred_s.loss(target_)
+        for pred_s, target_s, weights_s in zip(pred, target, weights):
+            loss += pred_s.loss(target_s, weights=weights_s)
 
             if hasattr(pred_s, "expected_value"):
                 scalar_pred = pred_s.expected_value()
@@ -396,6 +457,7 @@ class LightningRetrieval(L.LightningModule):
         Return:
             The loss of the prediction with respect to the given target.
         """
+        weights = None
         if isinstance(target, dict):
             if len(target) > 1:
                 raise RuntimeError(
@@ -405,6 +467,9 @@ class LightningRetrieval(L.LightningModule):
                     " be associated with."
                 )
             target = next(iter(target.values()))
+
+        if isinstance(target, tuple):
+            target, weights = target
 
         metrics = self.metrics
         if len(metrics) > 1:
@@ -418,7 +483,7 @@ class LightningRetrieval(L.LightningModule):
         if mask.any():
             target = MaskedTensor(target, mask=mask)
 
-        loss = pred.loss(target)
+        loss = pred.loss(target, weights=weights)
 
         scalar_metrics = [
             metric for metric in metrics if isinstance(metric, ScalarMetric)
@@ -486,6 +551,8 @@ class LightningRetrieval(L.LightningModule):
             target_k = target[key]
             losses[name] = 0.0
 
+            weights_k = target.get(key + "_weights", None)
+
             # Determine scalar metrics for this outout
             metrics_k = metrics.get(name, [])
             scalar_metrics = [
@@ -497,8 +564,14 @@ class LightningRetrieval(L.LightningModule):
             ]
 
             if isinstance(pred_k, list):
+                if weights_k is None:
+                    weights_k = [None] * len(target_k)
+
                 tot_samples = 0
-                for pred_k_s, target_k_s in zip(pred_k, target_k):
+
+                for pred_k_s, target_k_s, weights_k_s in zip(
+                    pred_k, target_k, weights_k
+                ):
                     mask = torch.isnan(target_k_s)
                     if mask.any():
                         target_k_s = MaskedTensor(target_k_s, mask=mask)
@@ -511,7 +584,7 @@ class LightningRetrieval(L.LightningModule):
                         target_k_s = 0.0 * target_k_s
                     tot_samples += n_samples
 
-                    loss_k_s = pred_k_s.loss(target_k_s)
+                    loss_k_s = pred_k_s.loss(target_k_s, weights=weights_k_s)
                     tot_loss = tot_loss + loss_k_s * n_samples
                     losses[name] += loss_k_s.item()
 
@@ -522,7 +595,7 @@ class LightningRetrieval(L.LightningModule):
                             metric.update(pred_k_s, target_k_s)
 
                 if tot_samples > 0:
-                    tot_loss =  tot_loss / tot_samples
+                    tot_loss = tot_loss / tot_samples
 
                 for metric in other_metrics:
                     metric = metric.to(device=pred_k_s.device)
@@ -536,7 +609,7 @@ class LightningRetrieval(L.LightningModule):
                 else:
                     n_samples = target_k.numel()
 
-                loss_k = pred_k.loss(target_k)
+                loss_k = pred_k.loss(target_k, weights=weights_k)
                 tot_loss += loss_k if n_samples > 0 else 0
                 losses[name] += loss_k.item() if n_samples > 0 else 0
 
@@ -571,8 +644,6 @@ class LightningRetrieval(L.LightningModule):
             self.trainer.optimizers[0].param_groups[0]["lr"],
         )
 
-
-
     def configure_optimizers(self):
         if self.training_schedule is None:
             optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-3)
@@ -588,9 +659,7 @@ class LightningRetrieval(L.LightningModule):
             curr_config.optimizer_args["lr"] = self.lr
 
         optimizer, scheduler = curr_config.get_optimizer_and_scheduler(
-            curr_name,
-            self,
-            previous_optimizer=self.prev_optim
+            curr_name, self, previous_optimizer=self.prev_optim
         )
 
         conf = {"optimizer": optimizer}
@@ -645,7 +714,5 @@ class LightningRetrieval(L.LightningModule):
         curr_config = copy.copy(self.current_training_config)
         curr_config.reuse_optimizer = False
         self.prev_optim, _ = curr_config.get_optimizer_and_scheduler(
-            self.stage_name,
-            self,
-            previous_optimizer=self.prev_optim
+            self.stage_name, self, previous_optimizer=self.prev_optim
         )
