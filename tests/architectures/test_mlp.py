@@ -143,12 +143,12 @@ def multi_output_config(tmp_path):
     return cfg_path
 
 
-def test_mlp_multi_input(single_input_config):
+def test_mlp_multi_input(multi_output_config):
     """
     Instantiate a single-input, single-output retrieval and propagate synthetic
     test data through the resulting module.
     """
-    cfg_dict = read_config_file(single_input_config)
+    cfg_dict = read_config_file(multi_output_config)
     mod = compile_architecture(cfg_dict)
     data_loader = data_loader_1d(Synthetic1dMultiOutput, 128, 8)
     x, y = next(iter(data_loader))
