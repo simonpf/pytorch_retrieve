@@ -140,7 +140,10 @@ class LightningRetrieval(L.LightningModule):
 
     @property
     def debug(self) -> bool:
-        if self.current_training_config is None:
+        try:
+            if self.current_training_config is None:
+                return False
+        except AttributeError:
             return False
         return self.current_training_config.debug
 
