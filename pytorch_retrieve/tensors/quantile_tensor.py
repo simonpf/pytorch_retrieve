@@ -113,9 +113,8 @@ class QuantileTensor(torch.Tensor, RegressionTensor):
         tau = tau.__getitem__((...,) + (None,) * (self.ndim - self.quantile_dim - 1))
 
         if y_true.ndim < self.ndim:
-            # new_shape = y_true.shape[:1] + (1,) * (self.ndim - y_true.ndim) + y_true.shape[1:]
-            # y_true = y_true.reshape(new_shape)
-            y_true = y_true.unsqueeze(self.quantile_dim)
+            new_shape = y_true.shape[:1] + (1,) * (self.ndim - y_true.ndim) + y_true.shape[1:]
+            y_true = y_true.reshape(new_shape)
 
         delta = y_true - self.base
 
