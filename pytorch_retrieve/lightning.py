@@ -343,37 +343,40 @@ class LightningRetrieval(L.LightningModule):
             self.mean_loss = tot_loss.item()
         else:
             # Check if loss is anomalous
-            if self.debug and (
-                tot_loss > 5 * self.mean_loss or torch.isnan(tot_loss).all()
-            ):
-                filename = f"inputs_prev_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
-                torch.save(self.inputs_prev, filename)
-                filename = f"targets_prev_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
-                torch.save(self.target_prev, filename)
-                filename = f"preds_prev_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
-                torch.save(self.pred_prev, filename)
-                filename = (
-                    f"inputs_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
+            try:
+                if self.debug and (
+                    tot_loss > 5 * self.mean_loss or torch.isnan(tot_loss).all()
+                ):
+                    filename = f"inputs_prev_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
+                    torch.save(self.inputs_prev, filename)
+                    filename = f"targets_prev_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
+                    torch.save(self.target_prev, filename)
+                    filename = f"preds_prev_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
+                    torch.save(self.pred_prev, filename)
+                    filename = (
+                        f"inputs_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
+                    )
+                    torch.save(inputs, filename)
+                    filename = (
+                        f"targets_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
+                    )
+                    torch.save(target, filename)
+                    filename = (
+                        f"preds_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
+                    )
+                    torch.save(pred, filename)
+                self.mean_loss = (
+                    self.alpha * self.mean_loss + (1.0 - self.alpha) * tot_loss.item()
                 )
-                torch.save(inputs, filename)
-                filename = (
-                    f"targets_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
-                )
-                torch.save(target, filename)
-                filename = (
-                    f"preds_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
-                )
-                torch.save(pred, filename)
-            self.mean_loss = (
-                self.alpha * self.mean_loss + (1.0 - self.alpha) * tot_loss.item()
-            )
 
-            if self.debug:
-                if torch.isnan(tot_loss).all():
-                    raise ValueError("NAN encountered in training.")
-                self.inputs_prev = inputs
-                self.target_prev = target
-                self.pred_prev = pred
+                if self.debug:
+                    if torch.isnan(tot_loss).all():
+                        raise ValueError("NAN encountered in training.")
+                    self.inputs_prev = inputs
+                    self.target_prev = target
+                    self.pred_prev = pred
+            except AttributeError:
+                pass
 
         return losses
 
