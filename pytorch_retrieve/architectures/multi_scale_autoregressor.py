@@ -293,10 +293,13 @@ class MultiScaleAutoregressor(RetrievalModel):
         )
         self.encoder = arch_config.encoder_config.compile()
         self.decoder = arch_config.decoder_config.compile()
+        self.output_decoder = arch_config.decoder_config.compile()
         self.propagator = arch_config.propagator_config.compile(self.encoder, self.decoder)
         self.heads = nn.ModuleDict(
             {name: cfg.compile() for name, cfg in arch_config.head_configs.items()}
         )
+        self.scales = [max(list(self.encoder.skip_connections.keys()))] + list(self.decoder.multi_scale_outputs.keys())
+        self.base_scale = max(self.scales)
 
         self.time_step = arch_config.time_step
         self.retrieval = arch_config.retrieval
@@ -375,21 +378,31 @@ class MultiScaleAutoregressor(RetrievalModel):
             lead_times =[]
             steps = 0
 
-        retrieved = decoded[min(decoded)]
         decoded[self.decoder.base_scale] = encs[self.decoder.base_scale]
         predicted = self.propagator(decoded, steps)
+        predicted = {
+            scl: torch.stack(tensors, 2) for scl, tensors in predicted.items()
+        }
+
+        if self.retrieval:
+            inpt = {
+                scl: torch.cat((decoded[scl], predicted[scl]), 2) for scl in predicted
+            }
+            results = self.output_decoder(inpt)
+        else:
+            inpt = {}
+            base_scale = max(self.scales)
+            for scl in self.scales:
+                extra = base_scale[0] // scl[0]
+                inpt[scl] = torch.cat((decoded[scl][:, :, -extra:], predicted[scl]), 2)
+            results = self.output_decoder(inpt)
 
         lead_time = self.time_step
 
-        if self.retrieval:
-            results = list(torch.unbind(retrieved, -3))
-        else:
-            results = []
+        if not self.retrieval:
+            results = results[:, :, extra:]
 
-        for step, pred in enumerate(predicted):
-            if lead_time in lead_times:
-                results.append(pred)
-            lead_time += self.time_step
+        results = torch.unbind(results, 2)
 
         outputs = {}
         for result in results:

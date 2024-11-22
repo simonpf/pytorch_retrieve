@@ -446,6 +446,8 @@ class MultiScalePropagator(nn.Module, ParamCount):
         min_scale = min(self.scales)
         prev_preds = None
 
+        pred_ms = {}
+
         for scale, stage, upsampler in zip(
                 self.scales,
                 self.stages,
@@ -455,7 +457,6 @@ class MultiScalePropagator(nn.Module, ParamCount):
             t_scale = scale.scale[0] // min_scale.scale[0]
             scale_steps = ceil(n_steps / t_scale)
             preds = list(torch.unbind(inputs[scale][:, :, -self.order:], 2))
-
 
             for step in range(scale_steps):
                 if prev_preds is None:
@@ -470,7 +471,8 @@ class MultiScalePropagator(nn.Module, ParamCount):
 
                 preds.append(pred_step)
 
-            preds = preds[-scale_steps:]
+            preds = preds[self.order:]
+            pred_ms[scale] = preds
 
             if upsampler is not None:
                 preds = torch.stack(preds, 2)
@@ -478,4 +480,4 @@ class MultiScalePropagator(nn.Module, ParamCount):
 
             prev_preds = preds
 
-        return preds[-n_steps:]
+        return pred_ms

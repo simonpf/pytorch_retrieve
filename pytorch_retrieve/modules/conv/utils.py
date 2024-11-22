@@ -71,6 +71,9 @@ class Scale:
             [scl_l // scl_r for scl_l, scl_r in zip(self.scale, other.scale)]
         ))
 
+    def __getitem__(self, ind) -> int:
+        return self.scale[ind]
+
     def __hash__(self):
         return hash(self.scale)
 

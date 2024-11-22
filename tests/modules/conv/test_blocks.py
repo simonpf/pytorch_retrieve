@@ -258,6 +258,10 @@ def test_satformer_block():
     """
     block_factory = Satformer(attention=True, n_heads=4)
     block = block_factory(32, 64)
+    x = torch.rand(1, 32, 16, 64, 64)
+    y = block(x)
 
+    block_factory = Satformer(attention=True, n_heads=4, stochastic_depth=0.5)
+    block = block_factory(32, 64)
     x = torch.rand(1, 32, 16, 64, 64)
     y = block(x)

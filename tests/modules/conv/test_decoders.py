@@ -157,8 +157,8 @@ def test_multi_scale_propagator():
         Scale((1, 2, 2)): torch.rand(2, 16, 8, 64, 64),
     }
     y = propagator(x, 8)
-    assert len(y) == 8
-    assert y[0].shape == (2, 16, 64, 64)
+    assert len(y) == 3
+    assert y[(1, 2, 2)][0].shape == (2, 16, 64, 64)
 
     propagator = MultiScalePropagator(
         inputs,
@@ -167,12 +167,12 @@ def test_multi_scale_propagator():
         residual=False
     )
     y = propagator(x, 8)
-    assert len(y) == 8
-    assert y[0].shape == (2, 16, 64, 64)
+    assert len(y[(1, 2, 2)]) == 8
+    assert y[(1, 2, 2)][0].shape == (2, 16, 64, 64)
 
     y = propagator(x, 3)
-    assert len(y) == 3
-    assert y[0].shape == (2, 16, 64, 64)
+    assert len(y[(1, 2, 2)]) == 3
+    assert y[(1, 2, 2)][0].shape == (2, 16, 64, 64)
 
     # Synthetic case with deterministic output values.
     stage_depths = [1, 1, 1]
@@ -196,5 +196,5 @@ def test_multi_scale_propagator():
         Scale((1, 2, 2)): 3 * torch.ones(2, 16, 8, 64, 64),
     }
     y = propagator(x, 4)
-    assert len(y) == 4
-    assert torch.isclose(y[0], torch.tensor(4.0)).all()
+    assert len(y[(1, 2, 2)]) == 4
+    assert torch.isclose(y[(1, 2, 2)][0], torch.tensor(4.0)).all()

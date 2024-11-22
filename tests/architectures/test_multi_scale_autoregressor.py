@@ -29,7 +29,7 @@ downsampling_factors = [[2, 2, 2], [2, 2, 2], [1, 2, 2]]
 block_factory = ["BasicConv3d", "BasicConv3d", "BasicConv3d", "BasicConv3d"]
 channels = [64, 32, 16]
 stage_depths = [2, 2, 2]
-upsampling_factors = [[2, 2, 2], [2, 2, 2], [1, 2, 2]]
+upsampling_factors = [[1, 2, 2], [2, 2, 2], [2, 2, 2]]
 upsampling_factory = "Trilinear"
 
 [architecture.propagator]
@@ -128,7 +128,7 @@ downsampling_factors = [[2, 2, 2], [2, 2, 2], [1, 2, 2]]
 block_factory = "BasicConv3d"
 channels = [64, 32, 16]
 stage_depths = [2, 2, 2]
-upsampling_factors = [[2, 2, 2], [2, 2, 2], [1, 2, 2]]
+upsampling_factors = [[1, 2, 2], [2, 2, 2], [2, 2, 2]]
 upsampling_factory = "Trilinear"
 
 [architecture.propagator]
