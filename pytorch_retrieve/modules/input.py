@@ -235,26 +235,40 @@ class StandardizationLayer(InputLayer):
 
         if self.finalized.item() > 0.0:
             if self.kind == "standardize":
-                mean = self.t_mean.to(device=x.device).__getitem__(
+                mean = self.t_mean.to(device=x.device, dtype=x.dtype).__getitem__(
                     (...,) + (None,) * pad_dims
                 )
-                std_dev = self.t_std_dev.to(device=x.device).__getitem__(
+                std_dev = self.t_std_dev.to(device=x.device, dtype=x.dtype).__getitem__(
                     (...,) + (None,) * pad_dims
                 )
                 x_n = (x - mean) / std_dev
             elif self.kind == "minmax":
-                mins = self.t_min.to(device=x.device).__getitem__(
+                mins = self.t_min.to(device=x.device, dtype=x.dtype).__getitem__(
                     (...,) + (None,) * pad_dims
                 )
-                maxs = self.t_max.to(device=x.device).__getitem__(
+                maxs = self.t_max.to(device=x.device, dtype=x.dtype).__getitem__(
                     (...,) + (None,) * pad_dims
                 )
                 x_n = -1.0 + 2.0 * (x - mins) / (maxs - mins)
+            elif self.kind == "atanh":
+                mins = self.t_min.to(device=x.device, dtype=x.dtype).__getitem__(
+                    (...,) + (None,) * pad_dims
+                )
+                maxs = self.t_max.to(device=x.device, dtype=x.dtype).__getitem__(
+                    (...,) + (None,) * pad_dims
+                )
+                masked = mins == maxs
+                masked = torch.broadcast_to(masked[None], x.shape)
+                x_n = -2.0 + 4.0 * (x - mins) / (maxs - mins)
+                x_n = torch.tanh(x_n)
+                mean = torch.zeros(masked.sum()).to(device=x.device, dtype=x.dtype)
+                #x_n = torch.where(masked, torch.normal(mean=torch.zeros_like(x)), x_n)
 
             # Replace NANs
             if torch.isnan(x_n).any():
                 mask = torch.isfinite(x_n)
                 x_n = torch.where(mask, x_n, self.sentinel)
+
             return x_n
 
         return super().forward(x)

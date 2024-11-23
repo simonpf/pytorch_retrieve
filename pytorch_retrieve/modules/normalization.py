@@ -89,7 +89,7 @@ def get_normalization_factory(name: str) -> Callable:
     if name is None or name == "none":
         return None
 
-    if hasattr(nn, name):
+    if name != "RMSNorm" and hasattr(nn, name):
         return getattr(nn, name)
 
     if name in globals():

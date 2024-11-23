@@ -138,14 +138,15 @@ def get_dimensions(
     retrieval_output_cfg = None
     if inference_cfg is not None:
         for name, outputs in inference_cfg.retrieval_output.items():
-            for output_name, output_cfg in outputs.items():
+            for output_name, out_cfg in outputs.items():
                 if output_name == result_name:
-                    retrieval_output_cfg = output_cfg
+                    retrieval_output_cfg = out_cfg
+
     if retrieval_output_cfg is not None:
         return tuple(retrieval_output_cfg.output.dimensions)
 
     if result_name in output_cfg:
-        return tuple(output_cfg[results_name].dimensions)
+        return tuple(output_cfg[result_name].dimensions)
 
     return None
 
@@ -173,10 +174,12 @@ def process(
                 else:
                     retrieval_output = inference_config.retrieval_output.get(key, None)
                 if retrieval_output is None:
-                    results[key] = tensor.cpu()
+                    results[key] = to_rec(tensor, device="cpu")
                 else:
                     for output_name, output in retrieval_output.items():
-                        results[output_name] = output.output.compute(tensor).cpu()
+                        results[output_name] = to_rec(
+                            output.output.compute(tensor), device="cpu"
+                        )
         else:
             if inference_config is None:
                 results["retrieved"] = preds
@@ -190,7 +193,7 @@ def process(
                     iter(inference_config.retrieval_output.values())
                 )
                 for output_name, output in retrieval_output.items():
-                    results[output_name] = output.output.compute(preds).cpu()
+                    results[output_name] = to_rec(output.output.compute(preds), device="cpu")
             else:
                 results["retrieved"] = preds.cpu()
     return results
@@ -336,6 +339,7 @@ def run_inference(
     output_path: Optional[Path] = None,
     device: torch.device = torch.device("cpu"),
     dtype: torch.dtype = torch.float32,
+    exclude_from_tiling: Optional[List[str]] = None
 ) -> Union[List[Path], List[xr.Dataset]]:
     """
     Run inference using the given model on a sequence of inputs provided by an
@@ -349,6 +353,7 @@ def run_inference(
         output_path: An optional output path to which to write the results.
         device: The device on which to perform the inference.
         dtype: The floating point type to use for the inference.
+        exclude_from_tiling: List of input tensor names to exclude from tiling.
 
     Return:
         If an output path is provided, a list of the output files that were written is returned.
@@ -399,6 +404,13 @@ def run_inference(
                 if overlap is None:
                     overlap = tile_size // 8
 
+                if exclude_from_tiling is not None:
+                    not_tiled = {
+                        name: input_data.pop(name)
+                        for name in exclude_from_tiling
+                    }
+                else:
+                    not_tiled = {}
                 tiler = Tiler(input_data, tile_size=tile_size, overlap=overlap)
 
                 results_tiled = np.array([[None] * tiler.N] * tiler.M)
@@ -406,7 +418,9 @@ def run_inference(
 
                 for row_ind in range(tiler.M):
                     for col_ind in range(tiler.N):
-                        results_s = processor.process(tiler.get_tile(row_ind, col_ind))
+                        tiled_input = tiler.get_tile(row_ind, col_ind)
+                        tiled_input.update(not_tiled)
+                        results_s = processor.process(tiled_input)
                         tile_stack.append((row_ind, col_ind))
                         for output in results_s:
                             tile_inds, *tile_stack = tile_stack
@@ -431,10 +445,15 @@ def run_inference(
                             dims = tuple(
                                 [f"{key}_dim_{ind}" for ind in range(tensor.ndim - 2)]
                             )
-                        if len(dims) < tensor.ndim:
-                            tensor = torch.squeeze(tensor)
 
-                        results[key] = (tuple(dims) + ("x", "y"), tensor)
+                        # Discard dummy dimensions if necessary.
+                        if isinstance(tensor, list):
+                            tensor = [t_i.squeeze() if len(dims) < t_i.ndim else t_i for t_i in tensor]
+                            results[key] = (tuple(dims) + (f"{key}_step", "x", "y"), np.stack(tensor))
+                        elif len(dims) < tensor.ndim:
+                            tensor = torch.squeeze(tensor)
+                            results[key] = (tuple(dims) + ("x", "y"), tensor)
+
                     results = xr.Dataset(results)
 
                 filename = f"results_{cntr}.nc"

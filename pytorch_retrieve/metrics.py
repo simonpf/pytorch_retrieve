@@ -131,30 +131,31 @@ class Bias(ScalarMetric, tm.Metric):
         if self.conditional is None:
             self.error += (pred - target).sum()
             self.counts += pred.numel()
-        else:
-            device = torch.device("cpu")
-            self.to(device=device)
+            return None
 
-            coords = []
-            for cond in self.conditional:
-                if mask is None:
-                    coords.append(conditional[cond].squeeze())
-                else:
-                    mask = mask.to(device=device)
-                    cond_s = conditional[cond].squeeze()
-                    mask_s = mask.squeeze()
-                    # Expand channel dimension if necessary
-                    if cond_s.ndim < mask_s.ndim:
-                        cond_s = cond_s[:, None]
-                        cond_s = torch.broadcast_to(cond_s, mask_s.shape)
-                    coords.append(cond_s[~mask_s])
+        device = torch.device("cpu")
+        self.to(device=device)
 
-            coords = torch.stack(coords, -1).to(device=device)
+        coords = []
+        for cond in self.conditional:
+            if mask is None:
+                coords.append(conditional[cond].squeeze())
+            else:
+                mask = mask.to(device=device)
+                cond_s = conditional[cond].squeeze()
+                mask_s = mask.squeeze()
+                # Expand channel dimension if necessary
+                if cond_s.ndim < mask_s.ndim:
+                    cond_s = cond_s[:, None]
+                    cond_s = torch.broadcast_to(cond_s, mask_s.shape)
+                coords.append(cond_s[~mask_s])
 
-            wgts = (pred - target).to(device=device)
-            bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
-            self.error += torch.histogramdd(coords, bins=bins, weight=wgts)[0]
-            self.counts += torch.histogramdd(coords, bins=bins)[0]
+        coords = torch.stack(coords, -1).to(device=device)
+
+        wgts = (pred - target).to(device=device)
+        bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
+        self.error += torch.histogramdd(coords, bins=bins, weight=wgts)[0]
+        self.counts += torch.histogramdd(coords, bins=bins)[0]
 
     def compute(self) -> torch.Tensor:
         """

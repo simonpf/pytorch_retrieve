@@ -186,7 +186,7 @@ class LightningRetrieval(L.LightningModule):
                 raise RuntimeError(
                     "Model predicts a sequence but the reference data is not."
                 )
-            loss = torch.tensor(0.0)
+            loss = torch.tensor(0.0, device=self.device, dtype=self.dtype)
 
             if weights is None:
                 weights = [None] * len(target)
@@ -199,9 +199,9 @@ class LightningRetrieval(L.LightningModule):
                 loss += pred_s.loss(target_s, weights=weights_s)
 
             if name is not None:
-                self.log("Training loss", loss)
+                self.log("Training loss", loss, prog_bar=True)
             else:
-                self.log(f"Training loss ({name})", loss)
+                self.log(f"Training loss ({name})", loss, prog_bar=True)
             return loss
 
         mask = torch.isnan(target)
@@ -494,21 +494,65 @@ class LightningRetrieval(L.LightningModule):
         scalar_metrics = [
             metric for metric in metrics if isinstance(metric, ScalarMetric)
         ]
-
-        if hasattr(pred, "expected_value"):
-            scalar_pred = pred.expected_value()
-            for metric in scalar_metrics:
-                metric = metric.to(device=scalar_pred.device)
-                metric.update(scalar_pred, target)
-
+        # Other metrics
         other_metrics = [
             metric for metric in metrics if not isinstance(metric, ScalarMetric)
         ]
-        for metric in other_metrics:
-            metric = metric.to(device=scalar_pred.device)
-            metric.update(pred, target)
 
-        return loss
+        if isinstance(pred, list):
+            tot_samples = 0
+            tot_loss = torch.tensor(0.0, device=self.device, dtype=self.dtype)
+
+            for pred_s, target_s in zip(pred, target):
+                mask = torch.isnan(target_s)
+                if mask.any():
+                    target_s = MaskedTensor(target_s, mask=mask)
+                if mask.all():
+                    continue
+
+                n_samples = (~mask).sum()
+                if n_samples == 0:
+                    pred_s = 0.0 * pred_s
+                    target_s = 0.0 * target_s
+                tot_samples += n_samples
+
+                loss_s = pred_s.loss(target_s)
+                tot_loss = tot_loss + loss_s * n_samples
+
+                if hasattr(pred_s, "expected_value") and len(scalar_metrics) > 0:
+                    pred_s = pred_s.expected_value()
+                    for metric in scalar_metrics:
+                        metric = metric.to(device=pred_s.device)
+                        metric.update(pred_s, target_s)
+
+            if tot_samples > 0:
+                tot_loss =  tot_loss / tot_samples
+
+            for metric in other_metrics:
+                metric = metric.to(device=pred_s.device)
+                metric.update(pred, target)
+
+        else:
+            mask = torch.isnan(target)
+            if mask.any():
+                target = MaskedTensor(target, mask=mask)
+                n_samples = (~mask).sum()
+            else:
+                n_samples = target.numel()
+
+            tot_loss = pred.loss(target)
+
+            for metric in other_metrics:
+                metric = metric.to(device=pred.device)
+                metric.update(pred, target)
+
+            if hasattr(pred, "expected_value") and len(scalar_metrics) > 0:
+                pred = pred.expected_value()
+                for metric in scalar_metrics:
+                    metric = metric.to(device=pred.device)
+                    metric.update(pred, target)
+
+        return tot_loss
 
     def validation_step(self, batch: tuple, batch_idx: int, dataloader_idx=0):
         """
@@ -599,6 +643,7 @@ class LightningRetrieval(L.LightningModule):
                         for metric in scalar_metrics:
                             metric = metric.to(device=pred_k_s.device)
                             metric.update(pred_k_s, target_k_s)
+
 
                 if tot_samples > 0:
                     tot_loss = tot_loss / tot_samples

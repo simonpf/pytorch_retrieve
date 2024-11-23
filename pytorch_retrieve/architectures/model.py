@@ -48,7 +48,7 @@ class RetrievalModel(ParamCount, nn.Module):
         from . import compile_architecture
 
         path = Path(path)
-        loaded = torch.load(path, map_location=torch.device("cpu"))
+        loaded = torch.load(path, map_location=torch.device("cpu"), weights_only=True)
         model = compile_architecture(loaded["model_config"])
         state = loaded["state_dict"]
         if path.suffix == ".ckpt":

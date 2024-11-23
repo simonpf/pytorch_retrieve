@@ -8,10 +8,11 @@ from torch import nn
 from pytorch_retrieve.modules.transformations import (
     SquareRoot,
     Log,
-    LogLinear
+    LogLinear,
+    MinMax
 )
 
-@pytest.mark.parametrize("transformation", [SquareRoot(), Log(), LogLinear()])
+@pytest.mark.parametrize("transformation", [SquareRoot(), Log(), LogLinear(), MinMax(100.0, 200)])
 def test_transformations(transformation):
 
     x_ref = 1e3 * torch.rand(10, 10, 10) + 1e-6
