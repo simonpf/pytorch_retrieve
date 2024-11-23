@@ -91,7 +91,7 @@ class Quantiles(stats.StatsTracker, nn.Module):
         if self.training:
             result = QuantileTensor(x, tau=tau, transformation=self.transformation)
         else:
-            result = QuantileTensor(self.transformation.invert(result), tau=tau)
+            result = QuantileTensor(self.transformation.invert(x), tau=tau, transformation=None)
         return result
 
 
