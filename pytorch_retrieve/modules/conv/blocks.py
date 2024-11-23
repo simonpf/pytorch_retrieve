@@ -1518,7 +1518,8 @@ class SatformerBlock(nn.Module, ParamCount):
             excitation_ratio: float = 0.0,
             downsample: Optional[int] = None,
             anti_aliasing: bool = False,
-            fused: bool = False
+            fused: bool = False,
+            stochastic_depth: Optional[float] = None
     ):
         """
         Args:
@@ -1537,6 +1538,7 @@ class SatformerBlock(nn.Module, ParamCount):
             excitation_ratio: The excitation ratio to apply in the squeeze and excite block.
             anti_aliasing: Wheter to apply anti-aliasing.
             fused: Whether or not to fuse the first two blocks.
+            stochastic_depth: If given, survival probability for stochastic depth.
         """
         super().__init__()
         self.act = activation_factory()
@@ -1554,11 +1556,7 @@ class SatformerBlock(nn.Module, ParamCount):
             padding = calculate_padding(kernel_size)
 
         if max(stride) > 1:
-            self.downsampling_block = nn.Sequential(
-                nn.Conv2d(in_channels, hidden_channels, kernel_size=2, stride=2),
-                normalization_factory(hidden_channels)
-            )
-            in_channels = hidden_channels
+            self.downsampling_block = nn.AvgPool2d(kernel_size=2, stride=2)
         else:
             self.downsampling_block = None
 
@@ -1611,6 +1609,11 @@ class SatformerBlock(nn.Module, ParamCount):
             normalization_factory(out_channels),
             self.act
         ]
+
+        if stochastic_depth is not None:
+            from torchvision.ops import StochasticDepth
+            blocks.append(StochasticDepth(1.0 - stochastic_depth, "row"))
+
         self.conv_body = nn.Sequential(*blocks)
 
         if attention:
@@ -1618,11 +1621,16 @@ class SatformerBlock(nn.Module, ParamCount):
             self.attention = nn.MultiheadAttention(
                 embed_dim=out_channels,
                 num_heads=n_heads,
-                dropout=0.0,
                 batch_first=True
             )
+            if stochastic_depth is not None:
+                from torchvision.ops import StochasticDepth
+                self.stochastic_depth = StochasticDepth(1.0 - stochastic_depth, "row")
+            else:
+                self.stochastic_depth = nn.Identity()
         else:
             self.attention = None
+            self.stochast_depth = None
 
     def forward(
             self,
@@ -1671,12 +1679,12 @@ class SatformerBlock(nn.Module, ParamCount):
                 n_seq_in = x_in.shape[2]
                 x_in = torch.permute(x_in, (0, 3, 4, 2, 1)).reshape(-1, n_seq_in, n_embed)
 
-            x_att, _ = self.attention(x_att, x_in, x_in, key_padding_mask=mask, attn_mask=attn_mask, need_weights=False)
+            x_att, _ = self.attention(x_att, x_in, x_in, key_padding_mask=mask, attn_mask=attn_mask)
             # Shape: [n_batch, n_y, n_x, n_seq, n_embed]
             x_att = x_att.reshape((n_batch, n_y, n_x, n_seq, n_embed))
             # Shape: [n_batch, n_seq, n_embed, n_y, n_x]
             x_att = x_att.permute(0, 3, 4, 1, 2)
-            x = x + x_att
+            x = x + self.stochastic_depth(x_att)
 
         x = x.transpose(1, 2)
         if collapse_seq:
@@ -1701,7 +1709,8 @@ class Satformer():
             fused: bool = False,
             attention: bool = True,
             n_heads: bool = 4,
-            dropout: float = 0.0
+            dropout: float = 0.0,
+            stochastic_depth: Optional[float] = None
     ):
         """
         Args:
@@ -1725,6 +1734,7 @@ class Satformer():
             attention: Whether to include cross-channel attention in this layer.
             n_heads: The number of attention heads.
             dropout: Whether to apply dropout in the attention layer.
+            stochastic_depth: If given, survival probability for stochastic depth.
         """
         if isinstance(kernel_size, int):
             kernel_size = (kernel_size,) * 2
@@ -1745,6 +1755,7 @@ class Satformer():
         self.attention = attention
         self.n_heads = n_heads
         self.dropout = dropout
+        self.stochastic_depth = stochastic_depth
 
     def __call__(
         self,
@@ -1795,5 +1806,6 @@ class Satformer():
             fused=self.fused,
             attention=self.attention,
             n_heads=self.n_heads,
-            dropout=self.dropout
+            dropout=self.dropout,
+            stochastic_depth=self.stochastic_depth
         )

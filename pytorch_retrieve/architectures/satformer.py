@@ -342,6 +342,10 @@ class DecoderConfig:
         channels = copy(self.channels)
         channels[-1] += token_length
 
+        if skip_connections is not None:
+            max_scale = max(skip_connections)
+            skip_connections[max_scale] = channels[0]
+
         upsampling_factors = self.upsampling_factors
 
         return Decoder(
@@ -613,6 +617,33 @@ class Perceiver(nn.Module):
         return x
 
 
+class CondPerceiver(nn.Module):
+    def __init__(self, cond_dim: int, embed_dim: int):
+        super().__init__()
+        self.cond_dim = cond_dim
+        self.embed_dim = embed_dim
+        self.query = nn.Linear(cond_dim, embed_dim)
+        self.norm = nn.LayerNorm(self.embed_dim)
+        self.att = nn.MultiheadAttention(self.embed_dim, 4, batch_first=True)
+
+    def forward(self, x_cond: torch.Tensor, x: torch.Tensor, key_padding_mask=None):
+        n_batch, _, n_seq_in, n_y, n_x = x.shape
+        rep = x_cond.shape[0] // x.shape[0]
+        if rep > 1:
+            x = x.repeat_interleave(rep, 0)
+        x_att = torch.permute(x, (0, 3, 4, 2, 1)).reshape(-1, n_seq_in, self.embed_dim)
+        x_in = torch.permute(x_cond, (0, 2, 3, 1)).reshape(-1, 1, self.cond_dim)
+        x_in = self.norm(self.query(x_in))
+        if key_padding_mask is not None:
+            key_padding_mask = key_padding_mask.repeat_interleave(rep * n_x * n_y, 0)
+        x, _ = self.att(x_in, x_att, x_att, key_padding_mask=key_padding_mask)
+
+        n_batch, _, n_y, n_x = x_cond.shape
+        x = torch.permute(x.unflatten(0, (n_batch, n_y, n_x)), (0, 4, 3, 1, 2)).select(2, 0)
+        return x
+
+
+
 class Satformer(RetrievalModel):
     """
     The Satformer architecture is a convolutional encoder-decoder model that
@@ -684,6 +715,12 @@ class Satformer(RetrievalModel):
                 self.encoding_map[output_name] = output_cfg.encoding
             if output_cfg.encoding is None or output_cfg.encoding == "None":
                 perceivers[output_name] = Perceiver(arch_config.encoder_config.channels[-1])
+            else:
+                perceivers[output_name] = CondPerceiver(
+                    arch_config.output_embed_dim,
+                    arch_config.encoder_config.channels[-1]
+                )
+
 
         self.perceivers = nn.ModuleDict(perceivers)
         self.token_length = len(self.input_names)
@@ -782,13 +819,18 @@ class Satformer(RetrievalModel):
                 output_scaled = {}
                 for downsample, scale in zip(self.downsamplers, self.downsampler_scales):
                     output_scaled[scale] = downsample(output)
+                min_scale = max(list(encs.keys()))
+                output_scaled[min_scale] = self.perceivers[name](
+                    output_scaled[min_scale],
+                    encs[min_scale],
+                    key_padding_mask=mask
+                )
             else:
                 min_scale = max(list(encs.keys()))
                 output = self.perceivers[name](encs[min_scale], key_padding_mask=mask)
                 n_batch, _, n_seq = output.shape[:3]
                 output = torch.permute(output, (0, 2, 1, 3, 4)).flatten(0, 1)
                 output_scaled = output
-
 
             dec = self.decoders[name]
             head = self.heads[name]

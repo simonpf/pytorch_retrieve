@@ -191,6 +191,7 @@ class OutputConfig:
         target: The name of the output.
         kind: The type of output (mean, quantiles, bins, classification)
         transformation: Optional transformation to apply to the outputs.
+        transformation_args: Dictionary containing the parameters of the transformation.
         dimensions: The dimensions of the output.
         n_classes: The number of classes for a classification output.
         conditional: Name of a conditional input that this output is conditioned on.
@@ -203,6 +204,7 @@ class OutputConfig:
     shape: List[int]
     quantiles: Optional[Union[int, List[float]]] = None
     transformation: Optional[str] = None
+    transformation_args: Dict[str, Any] = None
     dimensions: Optional[List[str]] = None
     n_classes: Optional[int] = None
     conditional: Optional[str] = None
@@ -232,6 +234,7 @@ class OutputConfig:
                 )
 
         transformation = get_config_attr("transformation", None, cfg, f"output.{name}")
+        transformation_args = get_config_attr("transformation_args", dict, cfg, f"output.{name}")
         dimensions = get_config_attr(
             "dimensions", None, cfg, f"output.{name}", default=None
         )
@@ -266,6 +269,7 @@ class OutputConfig:
             shape=shape,
             quantiles=quantiles,
             transformation=transformation,
+            transformation_args=transformation_args,
             dimensions=dimensions,
             n_classes=n_classes,
             conditional=conditional,
@@ -377,7 +381,7 @@ class OutputConfig:
             try:
                 transformation = getattr(
                     pytorch_retrieve.modules.transformations, transformation
-                )()
+                )(**self.transformation_args)
             except AttributeError:
                 raise ValueError(
                     f"The transformation {transformation} is not known. Please refere to the "
@@ -477,6 +481,7 @@ class ComputeConfig:
             return strategies.FSDPStrategy(
                 sharding_strategy="SHARD_GRAD_OP",
                 activation_checkpointing_policy=pytorch_retrieve.modules.conv.blocks.ALL,
+                #use_orig_params=True
             )
         return self.strategy
 
