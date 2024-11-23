@@ -51,7 +51,7 @@ class QuantileTensor(torch.Tensor, RegressionTensor):
     of scalar quantities represented using a squence of quantiles.
     """
 
-    def __new__(cls, tensor, tau, *args, quantile_dim=1, **kwargs):
+    def __new__(cls, tensor, tau, *args, quantile_dim=1, transformation=None, **kwargs):
         new_tensor = super().__new__(cls, tensor, *args, **kwargs)
 
         ## Keep reference to original tensor.
@@ -59,6 +59,10 @@ class QuantileTensor(torch.Tensor, RegressionTensor):
         #    new_tensor.base = tensor.base
         # else:
         new_tensor.base = tensor
+        if transformation is not None:
+            new_tensor.__transformation__ = transformation
+        if hasattr(tensor, "__transformation__"):
+            new_tensor.__transformation__ = tensor.__transformation__
 
         new_tensor.tau = torch.as_tensor(tau)
 
@@ -84,14 +88,16 @@ class QuantileTensor(torch.Tensor, RegressionTensor):
             return result
 
         if func == torch.Tensor.unbind or func == torch.unbind:
-            return tuple([QuantileTensor(tensor, tau=args[0].tau) for tensor in result])
+            q_args = get_quantile_attrs(args)
+            return tuple([
+                QuantileTensor(tensor, **q_args) for tensor in result
+            ])
 
         if isinstance(result, torch.Tensor):
             q_args = get_quantile_attrs(args)
             if q_args is None:
                 q_args = get_quantile_attrs(kwargs)
-            tau, quantile_dim = q_args
-            return QuantileTensor(result, tau, quantile_dim=quantile_dim)
+            return QuantileTensor(result, **q_args)
 
         return result
 
@@ -389,7 +395,11 @@ def get_quantile_attrs(arg):
             if result is not None:
                 return result
     elif isinstance(arg, QuantileTensor):
-        return arg.tau, arg.quantile_dim
+        return {
+            "tau": arg.tau,
+            "quantile_dim": arg.quantile_dim,
+            "transformation": getattr(arg, "__transformation__", None)
+        }
     return None
 
 

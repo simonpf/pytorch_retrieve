@@ -89,7 +89,10 @@ class Quantiles(stats.StatsTracker, nn.Module):
         """
         result = QuantileTensor(x, tau=self.tau.to(device=x.device))
         if self.transformation is not None:
-            result.__transformation__ = self.transformation
+            if self.training:
+                result.__transformation__ = self.transformation
+            else:
+                result = self.transformation.invert(result)
         return result
 
 

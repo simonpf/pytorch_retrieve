@@ -19,7 +19,9 @@ from pytorch_retrieve.config import (
     OutputConfig,
     InferenceConfig,
 )
+from pytorch_retrieve.modules.transformations import MinMax
 from pytorch_retrieve.modules.output import Mean, Quantiles
+
 
 
 def test_replace_environment_variables():
@@ -135,7 +137,8 @@ encoding = "position"
 kind = "Quantiles"
 shape = 32
 quantiles = 32
-transformation = "SquareRoot"
+transformation = "MinMax"
+transformation_args = {"x_min"=10.0, "x_max"=100}
 
 [output.y_3]
 kind = "Detection"
@@ -170,7 +173,7 @@ def test_output_config():
     assert output_cfgs["y_2"].get_output_shape() == (32, 32,)
     layer = output_cfgs["y_2"].get_output_layer()
     assert isinstance(layer, Quantiles)
-    assert layer.transformation is not None
+    assert isinstance(layer.transformation, MinMax)
 
     assert len(output_cfgs["y_1"].get_output_dimensions()) == 1
     assert len(output_cfgs["y_1"].get_output_coordinates()) == 0

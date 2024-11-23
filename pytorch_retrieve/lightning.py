@@ -286,6 +286,7 @@ class LightningRetrieval(L.LightningModule):
                         "Model predicts a sequence but the reference data is not."
                     )
 
+
                 if weights_k is None:
                     weights_k = [None] * len(target_k)
 
