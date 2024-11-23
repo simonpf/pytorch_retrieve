@@ -87,12 +87,11 @@ class Quantiles(stats.StatsTracker, nn.Module):
         """
         Produces a QuantileTensor from a model output.
         """
-        result = QuantileTensor(x, tau=self.tau.to(device=x.device))
-        if self.transformation is not None:
-            if self.training:
-                result.__transformation__ = self.transformation
-            else:
-                result = self.transformation.invert(result)
+        tau = self.tau.to(device=x.device)
+        if self.training:
+            result = QuantileTensor(x, tau=tau, transformation=self.transformation)
+        else:
+            result = QuantileTensor(self.transformation.invert(result), tau=tau)
         return result
 
 
