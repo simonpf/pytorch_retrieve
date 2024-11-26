@@ -31,6 +31,7 @@ from pytorch_retrieve.modules.conv.upsampling import Bilinear
 from pytorch_retrieve.modules.conv.encoders import Encoder
 from pytorch_retrieve.modules.conv.decoders import Decoder
 from pytorch_retrieve.modules.conv.stages import SequentialWKeywordsStage
+from pytorch_retrieve.modules.normalization import LayerNormFirst
 from .encoder_decoder import StemConfig, HeadConfig, get_downsampling_factory
 
 
@@ -425,6 +426,7 @@ class EncodingConfig:
         """
         Compile encoding.
         """
+        from pytorch_retrieve.modules.normalization import LayerNormFirst
         activation_factory = get_activation_factory(self.activation_factory)
         normalization_factory = get_normalization_factory(self.normalization_factory)
         blocks = []
@@ -442,7 +444,7 @@ class EncodingConfig:
                 residual_connections=self.residual_connections
             ))
         )
-        return nn.Sequential(*blocks)
+        return nn.Sequential(*blocks, LayerNormFirst(self.channels_out))
 
 
 
@@ -735,6 +737,10 @@ class Satformer(RetrievalModel):
             {name: cfg.compile() for name, cfg in arch_config.encoding_configs.items()}
         )
         self.encoder = arch_config.encoder_config.compile()
+        skip_connections = copy(self.encoder.skip_connections)
+        self.enc_norms = nn.ModuleDict({
+            str(scl): LayerNormFirst(chans) for scl, chans in skip_connections.items()
+        })
         self.decoders = nn.ModuleDict({
             name: arch_config.decoder_config.compile(
                 token_length=self.token_length,
@@ -809,6 +815,9 @@ class Satformer(RetrievalModel):
         inpt = torch.cat((tokens, input_sequence), 1)
 
         encs = self.encoder(inpt, mask=mask)
+        encs = {
+            scl: self.enc_norms[str(scl)](enc) for scl, enc in encs.items()
+        }
 
         outputs = {}
         for name, cond in self.outputs.items():

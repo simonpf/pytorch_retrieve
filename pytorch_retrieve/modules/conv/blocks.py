@@ -1555,16 +1555,20 @@ class SatformerBlock(nn.Module, ParamCount):
         if padding is None:
             padding = calculate_padding(kernel_size)
 
-        if max(stride) > 1:
-            self.downsampling_block = nn.AvgPool2d(kernel_size=2, stride=2)
+        if max(stride) > 1 or in_channels != out_channels:
+            blocks = []
+            if max(stride) > 1:
+                blocks.append(
+                    nn.AvgPool2d(kernel_size=stride, stride=stride),
+                )
+            blocks += [
+                nn.Conv2d(in_channels, out_channels, kernel_size=1),
+                normalization_factory(out_channels)
+            ]
+            self.downsampling_block = nn.Sequential(*blocks)
+            in_channels = out_channels
         else:
             self.downsampling_block = None
-
-        self.projection = get_projection(
-            in_channels,
-            out_channels,
-            stride=(1, 1)
-        )
 
         blocks = []
         if not fused:
@@ -1659,7 +1663,7 @@ class SatformerBlock(nn.Module, ParamCount):
             x_conv = self.downsampling_block(x_conv)
         n_y, n_x = x_conv.shape[-2:]
 
-        x = self.conv_body(x_conv) + self.projection(x_conv)
+        x = x_conv + self.conv_body(x_conv)
         n_embed = x.shape[1]
 
         # Restore sequence dimensions

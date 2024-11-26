@@ -217,6 +217,9 @@ class StemConfig:
         downsampling: The degree of downsampling applied in the stem.
         normalize: String indicating the kind of normalization applied to
             the inputs.
+        normalize_output: String of a normalization factory to use to normalize the stem outputs
+            or 'None' to not apply normalization to stem outputs.
+
     """
     input_name: str
     in_channels: int
@@ -228,6 +231,7 @@ class StemConfig:
     upsampling: Union[int, Tuple[int]] = 1
     upsampling_factory: str = "Bilinear"
     normalize: Optional[str] = None
+    normalize_output: Optional[str] = None
 
     @classmethod
     def parse(
@@ -283,6 +287,11 @@ class StemConfig:
             downsampling = tuple(downsampling)
 
         normalize = input_config.normalize
+
+        normalize_output = get_config_attr(
+            "normalize_output", None, config_dict, f"architecture.stem.{name}", None
+        )
+
         return StemConfig(
             input_name,
             in_channels=in_channels,
@@ -294,6 +303,7 @@ class StemConfig:
             upsampling=upsampling,
             upsampling_factory=upsampling_factory,
             normalize=normalize,
+            normalize_output=normalize_output
         )
 
     @property
@@ -321,6 +331,7 @@ class StemConfig:
             A ``torch.nn`` Module implementing the stem described by the
             object.
         """
+        from pytorch_retrieve.modules.normalization import LayerNormFirst
         blocks = []
         if self.normalize != "none":
             blocks.append(StandardizationLayer(self.input_name, self.in_channels))
@@ -344,6 +355,11 @@ class StemConfig:
                 downsampling=self.downsampling,
             )
         )
+
+        if self.normalize_output is not None:
+            norm_factory = get_normalization_factory(self.normalize_output)
+            blocks.append(norm_factory(self.out_channels))
+
         return nn.Sequential(*blocks)
 
 

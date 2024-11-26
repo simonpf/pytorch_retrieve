@@ -15,12 +15,11 @@ class LayerNormFirst(nn.Module):
     Layer norm performed along the first dimension.
     """
 
-    def __init__(self, n_channels, eps=1e-6):
+    def __init__(self, n_channels, eps=1e-5):
         """
         Args:
             n_channels: The number of channels in the input.
-            eps: Epsilon added to variance to avoid numerical issues.
-        """
+            eps: Epsilon added to variance to avoid numerical issues. """
         super().__init__()
         self.n_channels = n_channels
         self.scaling = nn.Parameter(torch.ones(n_channels), requires_grad=True)
@@ -46,7 +45,7 @@ class RMSNormFirst(nn.Module):
     Root-mean-square normalization
     """
 
-    def __init__(self, n_channels, eps=1e-6):
+    def __init__(self, n_channels, eps=1e-5):
         """
         Args:
             n_channels: The number of channels in the input.
