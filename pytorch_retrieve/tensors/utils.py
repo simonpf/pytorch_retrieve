@@ -81,8 +81,7 @@ def interpolate(
         dim: int
 ) -> torch.Tensor:
     """
-    Linearly interpolat tensors along given dimension.
-
+    Linearly interpolate tensors along given dimension.
 
     Args:
         x_new: A rank-(k-1) tensor containing the values to which to
@@ -93,6 +92,8 @@ def interpolate(
         dim: An integer identifying the dimenions along which to interpolate.
 
     Return:
+        A tensor containing the values 'y_i' containing the tensor 'y_f' interpolated
+        to the values in 'x_new'.
 
     """
     x_new = x_new.unsqueeze(dim)
@@ -102,6 +103,8 @@ def interpolate(
 
     weights_l = torch.clamp((x_f_r - x_new)/ d_x, 0.0, 1.0)
     weights_r = 1.0 - weights_l
+
+    print(weights_l.shape, weights_r.shape)
 
     mask = x_f_r < x_new
     weights_r[mask] = 0.0

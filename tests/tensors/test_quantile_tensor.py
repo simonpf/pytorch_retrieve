@@ -368,6 +368,53 @@ def test_cdf():
     assert np.all(np.isclose(x_pdf, 0.5 * (x_cdf[1:] + x_cdf[:-1])))
 
 
+def test_expected_value():
+    """
+    Test the calculation of the expected value of a Gaussian distribution represented using a
+    quantile tensor.
+    """
+    tau = np.linspace(0, 1, 34)[1:-1]
+    quantiles = torch.tensor(norm.ppf(tau))
+
+    quantiles = torch.broadcast_to(
+        quantiles[None, None, ..., None, None], [3, 4, 32, 5, 6]
+    )
+    quantile_tensor = QuantileTensor(quantiles, tau=tau, quantile_dim=2)
+
+    x_mean = quantile_tensor.expected_value()
+    assert np.all(np.isclose(x_mean, 0.0))
+
+    quantile_tensor = QuantileTensor(quantiles + 1.0, tau=tau, quantile_dim=2)
+    x_mean = quantile_tensor.expected_value()
+    assert np.all(np.isclose(x_mean, 1.0))
+
+    quantile_tensor = QuantileTensor(2.0 * (quantiles + 1.0), tau=tau, quantile_dim=2)
+    x_mean = quantile_tensor.expected_value()
+    assert np.all(np.isclose(x_mean, 2.0))
+
+
+def test_random_sample():
+    """
+    Test the calculation of random samples from a Normal distribution represented using a quantile
+    tensor and ensure that the first moments match 0 and 1, respectively.
+    """
+    tau = np.linspace(0, 1, 130)[1:-1]
+    quantiles = torch.tensor(norm.ppf(tau)).to(dtype=torch.float32)
+    tau = torch.tensor(tau).to(dtype=torch.float32)
+
+    quantiles = torch.broadcast_to(
+        quantiles[None, None, ..., None, None], [128, 128, 128, 8, 8]
+    )
+    quantile_tensor = QuantileTensor(quantiles, tau=tau, quantile_dim=2)
+
+    x_rand = quantile_tensor.random_sample().squeeze()
+
+    std, mean = torch.std_mean(x_rand)
+
+    assert torch.isclose(std, torch.tensor(1.0).to(dtype=torch.float32), rtol=1e-2)
+    assert torch.isclose(mean, torch.tensor(0.0).to(dtype=torch.float32), atol=1e-2)
+
+
 def test_probability_less_than():
     tau = np.linspace(0, 1, 34)[1:-1]
     quantiles = torch.tensor(norm.ppf(tau))

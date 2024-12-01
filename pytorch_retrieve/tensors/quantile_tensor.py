@@ -14,6 +14,7 @@ import torch
 from torch import nn
 
 from .base import RegressionTensor
+from .utils import interpolate
 
 
 HANDLED_FUNCTIONS = {}
@@ -354,6 +355,35 @@ class QuantileTensor(torch.Tensor, RegressionTensor):
 
         new = torch.stack(new, self.quantile_dim)
         return QuantileTensor(new, torch.tensor(tau))
+
+
+    def random_sample(self, n_samples: int = 1) -> "QuantileTensor":
+        """
+        Generate random sample from posterior distribution.
+
+        Args:
+            n_samples: The number of samples to generate per output pixel.
+
+        Return:
+            A tensor containing random samples from the distributions represented by
+            by this quantile tensor.
+        """
+        samples = []
+
+        x_cdf, y_cdf = self.cdf()
+        y_cdf = y_cdf.__getitem__((...,) + (None,) * (self.ndim - self.quantile_dim - 1))
+        y_cdf = torch.broadcast_to(y_cdf, x_cdf.shape)
+
+        for ind in range(n_samples):
+            sample_shape = list(self.shape)
+            del sample_shape[self.quantile_dim]
+            rand = torch.rand(sample_shape, device=self.device, dtype=self.dtype)
+            samples.append(interpolate(rand, y_cdf, x_cdf, dim=self.quantile_dim))
+
+        if n_samples > 1:
+            return torch.stack(samples)
+
+        return samples[0]
 
 
 def get_base(arg):
