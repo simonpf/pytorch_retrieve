@@ -402,7 +402,7 @@ def run_inference(
 
             if tile_size is not None:
                 if overlap is None:
-                    overlap = tile_size // 8
+                    overlap = (tile_size[0] // 8, tile_size[1] // 8)
 
                 if exclude_from_tiling is not None:
                     not_tiled = {
@@ -419,7 +419,8 @@ def run_inference(
                 for row_ind in range(tiler.M):
                     for col_ind in range(tiler.N):
                         tiled_input = tiler.get_tile(row_ind, col_ind)
-                        tiled_input.update(not_tiled)
+                        if len(not_tiled) > 0:
+                            tiled_input.update(not_tiled)
                         results_s = processor.process(tiled_input)
                         tile_stack.append((row_ind, col_ind))
                         for output in results_s:
