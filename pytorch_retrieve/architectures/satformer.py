@@ -27,7 +27,7 @@ from pytorch_retrieve.modules.input import StandardizationLayer
 from pytorch_retrieve.modules.normalization import get_normalization_factory
 from pytorch_retrieve.modules.activation import get_activation_factory
 from pytorch_retrieve.tensors import MeanTensor
-from pytorch_retrieve.modules.conv.upsampling import Bilinear
+from pytorch_retrieve.modules.conv.upsampling import BilinearWNorm
 from pytorch_retrieve.modules.conv.encoders import Encoder
 from pytorch_retrieve.modules.conv.decoders import Decoder
 from pytorch_retrieve.modules.conv.stages import SequentialWKeywordsStage
@@ -330,7 +330,7 @@ class DecoderConfig:
             block_factory = blocks.Satformer(self.block_factory_args)
             stage_factory = SequentialWKeywordsStage
 
-        upsampling_factory = Bilinear()
+        upsampling_factory = BilinearWNorm()
 
         if skip_connections:
             skip_connections = self.skip_connections
