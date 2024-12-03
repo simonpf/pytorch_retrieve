@@ -53,7 +53,7 @@ def load_weights(path: Path, model: nn.Module) -> None:
     """
     path = Path(path)
     if path.exists():
-        data = torch.load(path)
+        data = torch.load(path, map_location="cpu")
         state = data["state_dict"]
         if path.suffix == ".ckpt":
             state = {key[6:]: val for key, val in state.items()}
@@ -610,6 +610,16 @@ def run_training(
             gradient_clip_algorithm=training_config.gradient_clip_algorithm,
             detect_anomaly=False,
         )
+
+
+        #for name, mod in module.named_modules():
+        #    def make_hook(name):
+        #        def detect_non_finite_with_exception(module, input, output):
+        #            if isinstance(output, torch.Tensor) and not torch.isfinite(output).all():
+        #                raise ValueError(f"Non-finite value detected in output of layer: {name, module, output.shape}")
+        #        return detect_non_finite_with_exception
+        #    mod.register_forward_hook(make_hook(name))
+
         trainer.fit(
             module,
             train_dataloaders=training_loader,
