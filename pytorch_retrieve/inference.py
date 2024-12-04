@@ -515,7 +515,7 @@ def run_inference(
     "model",
     type=str,
 )
-@click.argument("input_path", type=str)
+@click.argument("input_path", type=str, nargs=-1)
 @click.option(
     "--input_loader",
     type=str,
@@ -597,7 +597,6 @@ def cli(
 
     if input_loader is None:
         input_loader = inference_config.input_loader
-        input_loader_args = inference_config.input_loader_args
 
     if input_loader is None:
         LOGGER.error(
@@ -624,13 +623,23 @@ def cli(
         if isinstance(input_loader_args, str):
             try:
                 input_loader_args = eval(input_loader_args)
+
             except Exception:
                 LOGGER.error(
                     "Encountered an error when trying to parse the 'input_loader_args' dict."
                 )
                 return 1
+            if inference_config.input_loader_args is not None:
+                input_loader_args = inference_config.input_loader_args.update(
+                    input_loader_args
+                )
     else:
-        input_loader_args = {}
+        input_loader_args = inference_config.input_loader_args
+        if input_loader_args is None:
+            input_loader_args = {}
+
+    if len(input_path) == 1:
+        input_path = input_path[0]
 
     try:
         input_loader = getattr(module, input_loader_parts[-1])(

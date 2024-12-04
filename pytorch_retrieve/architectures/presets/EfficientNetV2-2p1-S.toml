@@ -1,6 +1,6 @@
 [encoder]
 channels = [24, 48, 64, 128, 160, 256]
-downsampling_factors = [[1, 1, 1], [1, 2, 2], [2, 2, 2], [1, 2, 2], [1, 2, 2]]
+downsampling_factors = [[1, 1, 1], [1, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 2]]
 stage_depths = [1, 2, 2, 3, 4, 15]
 block_factory = [
     "InvertedBottleneck2Plus1",
@@ -22,7 +22,7 @@ aggregation_factory = "Linear3d"
 
 [decoder]
 channels = [160, 128, 64, 48, 24]
-upsampling_factors = [[1, 2, 2], [1, 2, 2], [2, 2, 2], [1, 2, 2], [1, 1, 1]]
+upsampling_factors = [[1, 2, 2], [1, 2, 2], [2, 2, 2], [2, 2, 2], [2, 1, 1]]
 upsampling_factory = "Trilinear"
 stage_depths = [4, 3, 2, 2, 1]
 block_factory = [

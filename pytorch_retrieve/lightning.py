@@ -298,7 +298,7 @@ class LightningRetrieval(L.LightningModule):
                     if mask.any():
                         target_k_s = torch.nan_to_num(target_k_s, 0.0)
                         target_k_s = MaskedTensor(target_k_s, mask=mask)
-                    if mask.all():
+                    if mask.all() or torch.isnan(pred_k_s).any():
                         continue
 
                     n_samples = (~mask).sum()

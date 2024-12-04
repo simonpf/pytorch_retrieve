@@ -161,6 +161,7 @@ class TrainingConfigBase:
             batch_size=self.batch_size,
             num_workers=self.n_data_loader_workers,
             pin_memory=True,
+            persistent_workers=True
         )
         return data_loader
 
@@ -199,6 +200,7 @@ class TrainingConfigBase:
             batch_size=self.batch_size,
             num_workers=self.n_data_loader_workers,
             pin_memory=True,
+            persistent_workers=True
         )
         return data_loader
 
