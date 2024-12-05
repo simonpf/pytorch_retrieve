@@ -22,7 +22,8 @@ from pytorch_retrieve.retrieval_output import (
     Full,
     ExpectedValue,
     ExceedanceProbability,
-    ClassProbability
+    ClassProbability,
+    RandomSample
 )
 
 def get_normal_mean_tensor() -> MeanTensor:
@@ -135,3 +136,19 @@ def test_class_probability(pred: torch.Tensor):
     output = ClassProbability(output_config)
     probs = output.compute(pred)
     assert torch.isclose(probs, torch.tensor(1.0 / n_classes)).all()
+
+
+def test_random_sample():
+    """
+    Ensure that calculation of expected yields 0.
+    """
+    quantiles = np.linspace(0, 1, 1026)[1:-1]
+    tensor = norm.ppf(quantiles)
+    tensor = QuantileTensor(
+        torch.tensor(tensor)[None].to(torch.float32),
+        tau=torch.tensor(quantiles).to(torch.float32)
+    )
+    output_config = OutputConfig("y", "RandomSample", shape=(1,))
+    output = RandomSample(output_config, n_samples=2500)
+    rand = output.compute(tensor)
+    assert torch.isclose(rand.mean(), torch.tensor(0.0), atol=0.08)

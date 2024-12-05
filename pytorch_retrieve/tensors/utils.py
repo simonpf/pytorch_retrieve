@@ -104,8 +104,6 @@ def interpolate(
     weights_l = torch.clamp((x_f_r - x_new)/ d_x, 0.0, 1.0)
     weights_r = 1.0 - weights_l
 
-    print(weights_l.shape, weights_r.shape)
-
     mask = x_f_r < x_new
     weights_r[mask] = 0.0
     select(weights_r, dim, -1)[mask.all(dim)] = 1.0

@@ -248,3 +248,49 @@ class ClassProbability(RetrievalOutput):
             return [self.compute(pred) for pred in preds]
 
         return preds.probability()
+
+
+class RandomSample(RetrievalOutput):
+    """
+    Random sample from probabilistic regression results.
+    """
+    def __init__(
+        self,
+        model_output: OutputConfig,
+        n_samples: int,
+        dim_name: Optional[str] = None,
+    ):
+        """
+        Args:
+            model_output: The output config describing the model output.
+        """
+        dimensions = model_output.get_output_dimensions()
+        coordinates = model_output.get_output_coordinates()
+        extra_dims = model_output.extra_dimensions
+        coodinates = {
+            name: coords
+            for name, coords in coordinates.items()
+            if name not in extra_dims
+        }
+        self.n_samples = n_samples
+        if n_samples > 1:
+            if dim_name is None:
+                dim_name = f"{model_output.target}_samples"
+            super().__init__([dim_name] + dimensions[1:], coordinates)
+        else:
+            super().__init__(dimensions[1:], coordinates)
+
+
+    def compute(self, preds: torch.Tensor) -> torch.Tensor:
+        """
+        Compute retrieval output from model outputs.
+
+        Args:
+            preds: A torch.Tensor containing the raw model output.
+
+        Return:
+            A tensor containing the retrieval output computed from 'preds'.
+        """
+        if isinstance(preds, list):
+            return [self.compute(pred) for pred in preds]
+        return preds.random_sample(n_samples=self.n_samples)

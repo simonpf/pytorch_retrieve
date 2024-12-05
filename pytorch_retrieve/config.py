@@ -289,6 +289,8 @@ class OutputConfig:
             return [f"tau_{self.target}"]
         if kind == "Detection":
             return []
+        if kind == "RandomSample":
+            return ["samples"]
         if kind == "Classification":
             return [f"{self.target}_probability"]
 
@@ -363,6 +365,8 @@ class OutputConfig:
             elif isinstance(quantiles, list):
                 quantiles = np.array(list)
             return {f"tau_{self.target}": quantiles}
+        if self.kind == "RandomSample":
+            return {}
         if self.kind == "Detection":
             return {}
         if self.kind == "Classification":

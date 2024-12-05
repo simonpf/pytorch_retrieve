@@ -7,13 +7,14 @@ import torch
 
 from pytorch_retrieve.modules.conv.upsampling import (
     Bilinear,
+    BilinearWNorm,
     Trilinear,
     ConvTranspose,
     StepwiseBilinear,
 )
 
 
-@pytest.mark.parametrize("upsampler_factory", (Bilinear, ConvTranspose))
+@pytest.mark.parametrize("upsampler_factory", (Bilinear, BilinearWNorm, ConvTranspose))
 def test_bilinear(upsampler_factory):
     """
     Instantiate an upsampler factory, create upsampler modules, and ensure that
