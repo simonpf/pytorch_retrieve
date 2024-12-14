@@ -9,6 +9,7 @@ from torch import nn
 
 
 from pytorch_retrieve.tensors import ProbabilityTensor, MaskedTensor
+from pytorch_retrieve.modules.transformations import SquareRoot
 
 
 def test_cat():
@@ -383,3 +384,18 @@ def test_loss():
     with pytest.raises(ValueError):
         weights = torch.zeros((1,))
         loss = tensor_1.loss(tensor_2, weights=weights)
+
+
+def test_transformation():
+    """
+    Ensur that transformations are passed on when new tensors are created.
+    """
+    bins = np.linspace(0, 10, 33)
+    tnsr = ProbabilityTensor(torch.rand(4, 32, 64), bins=bins, transformation=SquareRoot())
+    assert tnsr.__transformation__ is not None
+
+    tnsr_new = tnsr.reshape(4, 32, 8, 8)
+    assert tnsr_new.__transformation__ is not None
+
+    tnsr_new = tnsr_new + tnsr_new
+    assert tnsr_new.__transformation__ is not None

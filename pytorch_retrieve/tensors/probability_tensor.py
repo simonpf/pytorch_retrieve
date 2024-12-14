@@ -41,13 +41,14 @@ class ProbabilityTensor(torch.Tensor, RegressionTensor):
     over a discretized range of values.
     """
 
-    def __new__(cls, tensor, bins, *args, bin_dim=1, **kwargs):
+    def __new__(cls, tensor, bins, *args, bin_dim=1, transformation=None, **kwargs):
         new_tensor = super().__new__(cls, tensor, *args, **kwargs)
 
-        ## Keep reference to original tensor.
-        # if isinstance(tensor, ProbabilityTensor):
-        #    new_tensor.base = tensor.base
-        # else:
+        if transformation is not None:
+            new_tensor.__transformation__ = transformation
+        if not hasattr(new_tensor, "__transformation__") and hasattr(tensor, "__transformation__"):
+            new_tensor.__transformation__ = tensor.__transformation__
+
         new_tensor.base = tensor
 
         new_tensor.bins = torch.as_tensor(bins)
@@ -82,8 +83,7 @@ class ProbabilityTensor(torch.Tensor, RegressionTensor):
             p_args = get_prob_attrs(args)
             if p_args is None:
                 p_args = get_prob_attrs(kwargs)
-            bins, bin_dim = p_args
-            return ProbabilityTensor(result, bins, bin_dim=bin_dim)
+            return ProbabilityTensor(result, **p_args)
 
         return result
 
@@ -217,9 +217,9 @@ def get_base(arg) -> torch.Tensor:
 
 def get_prob_attrs(arg):
     """
-    Extract 'bins' and 'bin_dim' attributes from object.
+    Extract 'bins', 'bin_dim', and 'transformation' attributes from object.
 
-    Return the 'bins' and 'bin_dim' values of the first value in arg
+    Return the 'bins', 'bin_dim', and 'transformation' attributes from the first value in arg
     that is a ProbabilityTensor.
 
     Args:
@@ -227,8 +227,8 @@ def get_prob_attrs(arg):
             from which to extract the ProbabilityTensor attributes.
 
     Return:
-        A tuple ``(bins, bin_dim)`` containing the ``bins`` and ``bin_dim``
-        attributes of the first encountered ProbabilityTensor.
+        A dict  containing the ``bins``, ``bin_dim``, and ``transformation``
+        attributes to construct a new ProbabilityTensor
 
     """
     if isinstance(arg, Sequence):
@@ -242,7 +242,11 @@ def get_prob_attrs(arg):
             if result is not None:
                 return result
     elif isinstance(arg, ProbabilityTensor):
-        return arg.bins, arg.bin_dim
+        return {
+            "bins": arg.bins,
+            "bin_dim": arg.bin_dim,
+            "transformation": getattr(arg, "__transformation__", None)
+        }
     return None
 
 

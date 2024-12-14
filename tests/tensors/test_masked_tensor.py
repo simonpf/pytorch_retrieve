@@ -7,6 +7,7 @@ import torch
 from torch import nn
 
 from pytorch_retrieve.tensors.masked_tensor import MaskedTensor
+from pytorch_retrieve.modules.transformations import SquareRoot
 
 
 def test_cat():
@@ -527,3 +528,18 @@ def test_cpu():
     tensor = tensor.cpu()
     assert tensor.device == torch.device('cpu')
     assert tensor.mask.device == torch.device('cpu')
+
+
+def test_transformation():
+    """
+    Ensur that transformations are passed on when new tensors are created.
+    """
+    mask = torch.rand(4, 32, 64) - 0.5 > 0
+    tnsr = MaskedTensor(torch.rand(4, 32, 64), mask=mask, transformation=SquareRoot)
+    assert tnsr.__transformation__ is not None
+
+    tnsr_new = tnsr.reshape(4, 32, 8, 8)
+    assert tnsr_new.__transformation__ is not None
+
+    tnsr_new = tnsr_new + tnsr_new
+    assert tnsr_new.__transformation__ is not None

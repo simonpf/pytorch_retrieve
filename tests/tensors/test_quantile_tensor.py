@@ -549,3 +549,19 @@ def test_loss():
     with pytest.raises(ValueError):
         weights = torch.zeros((1,))
         loss = tensor_1.loss(tensor_2, weights=weights)
+
+
+def test_transformation():
+    """
+    Ensur that transformations are passed on when new tensors are created.
+    """
+    tau = torch.linspace(0, 1, 34)[1:1]
+
+    tnsr = QuantileTensor(torch.rand(4, 32, 64), tau, transformation=SquareRoot)
+    assert tnsr.__transformation__ is not None
+
+    tnsr_new = tnsr.reshape(4, 32, 8, 8)
+    assert tnsr_new.__transformation__ is not None
+
+    tnsr_new = tnsr_new + tnsr_new
+    assert tnsr_new.__transformation__ is not None

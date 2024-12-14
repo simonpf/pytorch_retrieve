@@ -35,22 +35,30 @@ class MeanTensor(torch.Tensor, RegressionTensor):
     mean of the posterior distribution.
     """
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, *args, transformation=None, **kwargs):
+
         tensor = super().__new__(cls, *args, **kwargs)
+
+        if transformation is not None:
+            tensor.__transformation__ = transformation
 
         # Keep reference to original tensor.
         if isinstance(args[0], MeanTensor):
             tensor.base = args[0].base
+            if not hasattr(tensor, "__transformation__") and hasattr(args[0], "__transformation__"):
+                self.__transformation__ = None
         else:
             tensor.base = args[0]
 
         return tensor
+
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         """ """
         if kwargs is None:
             kwargs = {}
+        attrs = get_tensor_attrs(args)
         args = [get_base(arg) for arg in args]
         kwargs = {key: get_base(val) for key, val in kwargs.items()}
         result = func(*args, **kwargs)
@@ -59,10 +67,10 @@ class MeanTensor(torch.Tensor, RegressionTensor):
             return result
 
         if func == torch.Tensor.unbind or func == torch.unbind:
-            return tuple([MeanTensor(tensor) for tensor in result])
+            return tuple([MeanTensor(tensor, **attrs) for tensor in result])
 
         if isinstance(result, torch.Tensor):
-            return MeanTensor(result)
+            return MeanTensor(result, **attrs)
         return result
 
     def __repr__(self):
@@ -111,6 +119,16 @@ class MeanTensor(torch.Tensor, RegressionTensor):
 
 
 def get_base(arg):
+    """
+    Recursively strip MeanTensor types of arguments.
+
+    Args:
+        An arbitray Python object.
+
+    Return:
+        The same Python object is not a tensor. If a container containing mean tensors,
+        the same container containining regular tensors is returned.
+    """
     if isinstance(arg, tuple):
         return tuple([get_base(elem) for elem in arg])
     elif isinstance(arg, list):
@@ -120,3 +138,35 @@ def get_base(arg):
     elif isinstance(arg, MeanTensor):
         return arg.base
     return arg
+
+
+def get_tensor_attrs(arg):
+    """
+    Extract and 'transformation' attributes from objects.
+
+    Return the 'transformation' attribute of the first value in arg
+    that is a MeanTensor.
+
+    Args:
+        arg: A torch.Tensor, list, or dict containing function arguments
+            from which to extract the tensor attributes.
+
+    Return:
+        A dictionary  containing the ``transformation`` attribute of the
+        first encountered MeanTensor.
+    """
+    if isinstance(arg, Sequence):
+        for elem in arg:
+            result = get_tensor_attrs(elem)
+            if result is not None:
+                return result
+    elif isinstance(arg, Mapping):
+        for elem in arg.values():
+            result = get_mean_attrs(elem)
+            if result is not None:
+                return result
+    elif isinstance(arg, MeanTensor):
+        return {
+            "transformation": getattr(arg, "__transformation__", None)
+        }
+    return None

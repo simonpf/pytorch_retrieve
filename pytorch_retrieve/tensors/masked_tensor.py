@@ -4,6 +4,7 @@ pytorch_retrieve.tensor.masked_tensor
 
 Provides a masked tensor class that allows masking of invalid elements.
 """
+from collections.abc import Sequence, Mapping
 import functools
 
 import numpy as np
@@ -32,9 +33,14 @@ class MaskedTensor(torch.Tensor):
     calculations.
     """
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, *args, transformation=None, **kwargs):
         mask = kwargs.pop("mask", None)
         tensor = super().__new__(cls, *args, **kwargs)
+
+        if transformation is not None:
+            tensor.__transformation__ = transformation
+        if not hasattr(tensor, "__transformation__") and hasattr(args[0], "__transformation__"):
+            new_tensor.__transformation__ = tensor.__transformation__
 
         # Keep reference to original tensor.
         if isinstance(args[0], MaskedTensor):
@@ -71,7 +77,11 @@ class MaskedTensor(torch.Tensor):
         if len(args) == 1 and len(kwargs) == 0:
             result = func(args[0].base)
             if isinstance(result, torch.Tensor):
-                return MaskedTensor(result, mask=args[0].mask)
+                return MaskedTensor(
+                    result,
+                    mask=args[0].mask,
+                    transformation=getattr(args[0], "__transforation__", None)
+                )
 
         if len(args) > 0 and isinstance(args[0], MaskedTensor):
             masked_args = [arg for arg in args[1:] if isinstance(arg, MaskedTensor)]
@@ -87,7 +97,7 @@ class MaskedTensor(torch.Tensor):
         n_tot = self.shape[0]
         all_missing = self.mask.view((n_tot, -1)).all(dim=-1)
         valid = torch.nonzero(~all_missing)[:, 0]
-        return MaskedTensor(self[valid])
+        return MaskedTensor(self[valid], transformation=get_transformation(args))
 
     def __getitem__(self, *args, **kwargs):
         """
@@ -96,6 +106,7 @@ class MaskedTensor(torch.Tensor):
         return MaskedTensor(
             self.strip().__getitem__(*args, **kwargs),
             mask=self.mask.__getitem__(*args, **kwargs),
+            transformation=getattr(self, "__transformation__", None)
         )
 
     def __pow__(self, exp):
@@ -123,7 +134,7 @@ def get_base(tensor: torch.Tensor) -> torch.Tensor:
 
 def get_mask(tensor):
     """
-    Get maks from a tensor.
+    Get mask from a tensor argument.
 
     Generic function to retrieve a mask identifying invalid elements in
     a standard tensor or a masked tensor.
@@ -140,6 +151,32 @@ def get_mask(tensor):
     torch.zeros(1, dtype=bool)
 
 
+def get_transformation(tensor):
+    """
+    Get transformation from tensor arguments.
+
+    Args:
+        tensor: A tensor, a list of tensors, a dict of tensors or an arbitary Python object.
+
+    Return:
+        The transformation object from the first  object that has a __transformation__ attribute.
+    """
+    if isinstance(tensor, Sequence):
+        for elem in tensor:
+            result = get_transformation(elem)
+            if result is not None:
+                return result
+    elif isinstance(tensor, Mapping):
+        for elem in tensor.values():
+            result = get_transformation(elem)
+            if result is not None:
+                return result
+    else:
+        if hasattr(tensor, "__transformation__"):
+            return tensor.__transformation__
+    return None
+
+
 @implements(torch.cat)
 def cat(tensors, dim=0, out=None):
     """
@@ -148,7 +185,7 @@ def cat(tensors, dim=0, out=None):
     if out is None:
         res = torch.cat([get_base(t) for t in tensors], dim=dim)
         mask = torch.cat([get_mask(t) for t in tensors], dim=dim)
-        return MaskedTensor(res, mask=mask)
+        return MaskedTensor(res, mask=mask, transformation=get_transformation(tensors))
     else:
         res = torch.cat([get_base(t) for t in tensors], dim=dim, out=get_base(out))
         mask = torch.cat([get_mask(t) for t in tensors], dim=dim, out=out.mask)
@@ -163,11 +200,11 @@ def stack(tensors, dim=0, out=None):
     if out is None:
         res = torch.stack([get_base(t) for t in tensors], dim=dim)
         mask = torch.stack([get_mask(t) for t in tensors], dim=dim)
-        return MaskedTensor(res, mask=mask)
+        return MaskedTensor(res, mask=mask, transformation=get_transformation(tensors))
     else:
         res = torch.stack([get_base(t) for t in tensors], dim=dim, out=get_base(out))
         mask = torch.stack([get_mask(t) for t in tensors], dim=dim)
-        return MaskedTensor(res, mask=mask)
+        return MaskedTensor(res, mask=mask, transformation=get_transformation(tensors))
 
 
 ###############################################################################
@@ -190,7 +227,7 @@ def add(inpt, other, alpha=1, out=None):
             get_mask(inpt),
             get_mask(other),
         )
-        return MaskedTensor(res, mask=mask)
+        return MaskedTensor(res, mask=mask, transformation=get_transformation(inpt))
     else:
         res = torch.add(get_base(inpt), get_base(other), alpha=alpha, out=get_base(out))
         mask = torch.logical_or(get_mask(inpt), get_mask(other), out=out.mask)
@@ -228,7 +265,7 @@ def sub(inpt, other, alpha=1, out=None):
             alpha=alpha,
         )
         mask = combine_masks(inpt, other, torch.logical_or, shape=res.shape)
-        return MaskedTensor(res, mask=mask)
+        return MaskedTensor(res, mask=mask, transformation=get_transformation(inpt))
     else:
         res = torch.sub(get_base(inpt), get_base(other), alpha=alpha, out=get_base(out))
         mask = torch.logical_or(
@@ -301,7 +338,7 @@ def mul(inpt, other, out=None):
             get_base(other),
         )
         mask = combine_masks(inpt, other, shape=res.shape)
-        return MaskedTensor(res, mask=mask)
+        return MaskedTensor(res, mask=mask, transformation=get_transformation(inpt))
     else:
         res = torch.mul(get_base(inpt), get_base(other), out=get_base(out))
         mask = combine_masks(inpt, other, out=out.mask, shape=res.shape)
@@ -333,27 +370,27 @@ def permute(inpt, dims):
     """
     base = torch.permute(inpt.base, dims)
     mask = torch.permute(inpt.mask, dims)
-    return MaskedTensor(base, mask=mask)
+    return MaskedTensor(base, mask=mask, transformation=get_transformation(inpt))
 
 
 @implements(torch.reshape)
-def reshape(inpt, new_shape):
+def reshape(inpt, *args):
     """
     Reshaping of masked tensors.
     """
-    base = torch.reshape(inpt.base, new_shape)
-    mask = torch.reshape(inpt.mask, new_shape)
-    return MaskedTensor(base, mask=mask)
+    base = torch.reshape(inpt.base, *args)
+    mask = torch.reshape(inpt.mask, *args)
+    return MaskedTensor(base, mask=mask, transformation=get_transformation(inpt))
 
 
 @implements(torch.Tensor.reshape)
-def reshape(inpt, new_shape):
+def reshape(inpt, *args):
     """
     Reshaping of masked tensors.
     """
-    base = inpt.base.reshape(new_shape)
-    mask = inpt.mask.reshape(new_shape)
-    return MaskedTensor(base, mask=mask)
+    base = inpt.base.reshape(*args)
+    mask = inpt.mask.reshape(*args)
+    return MaskedTensor(base, mask=mask, transformation=get_transformation(inpt))
 
 
 @implements(torch.squeeze)
@@ -367,7 +404,7 @@ def squeeze(inpt, dim=None):
     else:
         base = torch.squeeze(inpt.base)
         mask = torch.squeeze(inpt.mask)
-    return MaskedTensor(base, mask=mask)
+    return MaskedTensor(base, mask=mask, transformation=get_transformation(inpt))
 
 
 @implements(torch.Tensor.squeeze)
@@ -381,7 +418,7 @@ def tsqueeze(inpt, dim=None):
     else:
         base = inpt.base.squeeze()
         mask = inpt.mask.squeeze()
-    return MaskedTensor(base, mask=mask)
+    return MaskedTensor(base, mask=mask, transformation=get_transformation(inpt))
 
 
 @implements(torch.unsqueeze)
@@ -391,7 +428,7 @@ def unsqueeze(inpt, dim=None):
     """
     base = torch.unsqueeze(inpt.base, dim=dim)
     mask = torch.unsqueeze(inpt.mask, dim=dim)
-    return MaskedTensor(base, mask=mask)
+    return MaskedTensor(base, mask=mask, transformation=get_transformation(inpt))
 
 
 @implements(torch.Tensor.unsqueeze)
@@ -401,7 +438,7 @@ def unsqueeze(inpt, dim=None):
     """
     base = torch.unsqueeze(inpt.base, dim=dim)
     mask = torch.unsqueeze(inpt.mask, dim=dim)
-    return MaskedTensor(base, mask=mask)
+    return MaskedTensor(base, mask=mask, transformation=get_transformation(inpt))
 
 
 @implements(torch.sum)
@@ -455,7 +492,7 @@ def view(inpt, new_shape):
     """
     base = inpt.base.view(new_shape)
     mask = inpt.mask.view(new_shape)
-    return MaskedTensor(base, mask=mask)
+    return MaskedTensor(base, mask=mask, transformation=get_transformation(inpt))
 
 
 @implements(torch.isclose)
@@ -486,6 +523,7 @@ def eq(inpt, other, **kwargs):
         return MaskedTensor(
             get_base(inpt).__eq__(get_base(other), **kwargs),
             mask=torch.logical_or(get_mask(inpt), get_mask(other)),
+            transformation=get_transformation(inpt)
         )
     return get_base(inpt).__eq__(get_base(other), **kwargs)
 
@@ -502,7 +540,7 @@ def to(inpt, *args, **kwargs):
         args[0] = bool
 
     mask = inpt.mask.to(*args, **kwargs)
-    return MaskedTensor(other, mask=mask)
+    return MaskedTensor(other, mask=mask, transformation=get_transformation(inpt))
 
 
 @implements(torch.Tensor.requires_grad.__set__)
@@ -521,7 +559,7 @@ def where(cond, inpt, other, out=None):
     if out is None:
         base = torch.where(cond, inpt, other)
         mask = torch.where(cond, mask_inpt, mask_other)
-        return MaskedTensor(base, mask=mask)
+        return MaskedTensor(base, mask=mask, transformation=get_transformation(inpt))
 
     base = torch.where(cond, inpt, other, out=out)
     mask = torch.where(cond, mask_inpt, mask_other)
@@ -540,7 +578,7 @@ def ge(inpt, other, out=None):
             get_base(other),
         )
         mask = combine_masks(inpt, other, torch.logical_or, shape=res.shape)
-        return MaskedTensor(res, mask=mask)
+        return MaskedTensor(res, mask=mask, transformation=get_transformation(inpt))
     else:
         res = torch.ge(get_base(inpt), get_base(other), out=get_base(out))
         mask = torch.logical_or(get_mask(inpt), get_mask(other), out=out.mask)
@@ -558,7 +596,7 @@ def tge(inpt, other, out=None):
             get_base(other),
         )
         mask = combine_masks(inpt, other, torch.logical_or, shape=res.shape)
-        return MaskedTensor(res, mask=mask)
+        return MaskedTensor(res, mask=mask, transformation=get_transformation(inpt))
     else:
         res = torch.ge(get_base(inpt), get_base(other), out=get_base(out))
         mask = combine_masks(
@@ -578,7 +616,7 @@ def gt(inpt, other, out=None):
             get_base(other),
         )
         mask = combine_masks(inpt, other, torch.logical_or, shape=res.shape)
-        return MaskedTensor(res, mask=mask)
+        return MaskedTensor(res, mask=mask, transformation=get_transformation(inpt))
     else:
         res = torch.gt(get_base(inpt), get_base(other), out=get_base(out))
         mask = torch.logical_or(get_mask(inpt), get_mask(other), out=out.mask)
@@ -596,7 +634,7 @@ def tgt(inpt, other, out=None):
             get_base(other),
         )
         mask = combine_masks(inpt, other, torch.logical_or, shape=res.shape)
-        return MaskedTensor(res, mask=mask)
+        return MaskedTensor(res, mask=mask, transformation=get_transformation(inpt))
     else:
         res = torch.gt(get_base(inpt), get_base(other), out=get_base(out))
         mask = torch.logical_or(get_mask(inpt), get_mask(other), out=out.mask)
@@ -614,11 +652,11 @@ def le(inpt, other, out=None):
             get_base(other),
         )
         mask = combine_masks(inpt, other, shape=res.shape)
-        return MaskedTensor(res, mask=mask)
+        return MaskedTensor(res, mask=mask, transformation=get_transformation(inpt))
     else:
         res = torch.le(get_base(inpt), get_base(other), out=get_base(out))
         mask = combine_masks(inpt, other, out=out.mask, shape=res.shape)
-        return MaskedTensor(res, mask=mask)
+        return MaskedTensor(res, mask=mask, transformation=get_transformation(inpt))
 
 
 @implements(torch.Tensor.le)
@@ -632,11 +670,11 @@ def tle(inpt, other, out=None):
             get_base(other),
         )
         mask = combine_masks(inpt, other, shape=res.shape)
-        return MaskedTensor(res, mask=mask)
+        return MaskedTensor(res, mask=mask, transformation=get_transformation(inpt))
     else:
         res = torch.le(get_base(inpt), get_base(other), out=get_base(out))
         mask = combine_masks(inpt, other, out=out.mask, shape=res.shape)
-        return MaskedTensor(res, mask=mask)
+        return MaskedTensor(res, mask=mask, transformation=get_transformation(inpt))
 
 
 @implements(torch.lt)
@@ -650,7 +688,7 @@ def lt(inpt, other, out=None):
             get_base(other),
         )
         mask = combine_masks(inpt, other, shape=res.shape)
-        return MaskedTensor(res, mask=mask)
+        return MaskedTensor(res, mask=mask, transformation=get_transformation(inpt))
     else:
         res = torch.lt(get_base(inpt), get_base(other), out=get_base(out))
         mask = combine_masks(inpt, other, out=out.mask, shape=res.shape)
@@ -668,7 +706,7 @@ def tlt(inpt, other, out=None):
             get_base(other),
         )
         mask = combine_masks(inpt, other, shape=res.shape)
-        return MaskedTensor(res, mask=mask)
+        return MaskedTensor(res, mask=mask, transformation=get_transformation(inpt))
     else:
         res = torch.lt(get_base(inpt), get_base(other), out=get_base(out))
         mask = combine_masks(inpt, other, out=out.mask, shape=res.shape)
@@ -699,6 +737,7 @@ def relu(inpt, **kwargs):
     return MaskedTensor(
         torch.nn.functional.relu(inpt.base, **kwargs),
         mask=inpt.mask,
+        transformation=get_transformation(inpt)
     )
 
 
@@ -707,7 +746,11 @@ def pow(inpt, exp, *args, out=None):
     """
     Pow function.
     """
-    return MaskedTensor(torch.pow(inpt.base, exp, *args, out=out), mask=inpt.mask)
+    return MaskedTensor(
+        torch.pow(inpt.base, exp, *args, out=out),
+        mask=inpt.mask,
+        transformation=getattr(inpt, "__transformation__", None)
+    )
 
 @implements(torch.Tensor.pow)
 def tpow(inpt, exp, *args, out=None):
@@ -748,7 +791,7 @@ def maximum(inpt, other, *args):
 
     res = torch.maximum(inpt, other)
     mask = res == min_val
-    return MaskedTensor(res, mask=mask)
+    return MaskedTensor(res, mask=mask, transformation=getattr(inpt, "__transformation__", None))
 
 
 @implements(torch.Tensor.maximum)
@@ -841,7 +884,9 @@ def select(inpt, dim, index):
     Select function.
     """
     return MaskedTensor(
-        torch.select(inpt.base, dim, index), mask=torch.select(inpt.mask, dim, index)
+        torch.select(inpt.base, dim, index),
+        mask=torch.select(inpt.mask, dim, index),
+        transformation=getattr(inpt, "__transformation__", None)
     )
 
 
@@ -854,8 +899,7 @@ def all(inpt, dim=None, keepdim=False, *args, out=None):
         return inpt.base[~inpt.mask].all()
     res = (inpt.base | inpt.mask).all(dim=dim, keepdim=keepdim, *args, out=out)
     mask = inpt.mask.all(dim=dim, keepdim=keepdim, *args, out=out)
-    return MaskedTensor(res, mask=mask)
-
+    return MaskedTensor(res, mask=mask, transformation=getattr(inpt, "__transformation__", None))
 
 @implements(torch.Tensor.all)
 def all(inpt, dim=None, keepdim=False, *args):
@@ -874,7 +918,7 @@ def any(inpt, dim=None, keepdim=False, *args, out=None):
         return inpt.base[~inpt.mask].any()
     res = (inpt.base & ~inpt.mask).any(dim=dim, keepdim=keepdim, *args, out=out)
     mask = inpt.mask.any(dim=dim, keepdim=keepdim, *args, out=out)
-    return MaskedTensor(res, mask=mask)
+    return MaskedTensor(res, mask=mask, transformation=getattr(inpt, "__transformation__", None))
 
 
 @implements(torch.Tensor.any)
@@ -893,6 +937,7 @@ def transpose(inpt, dim1, dim2):
     return MaskedTensor(
         torch.transpose(inpt.base, dim1, dim2),
         mask=torch.transpose(inpt.mask, dim1, dim2),
+        transformation=getattr(inpt, "__transformation__", None)
     )
 
 
@@ -952,13 +997,18 @@ def bucketize(inpt, boundary, *args, **kwargs):
     """
     return MaskedTensor(
         torch.bucketize(inpt.base, boundary, *args, **kwargs),
-        mask=inpt.mask
+        mask=inpt.mask,
+        transformation=getattr(inpt, "__transformation__", None)
     )
 
 
 @implements(torch.Tensor.clone)
 def clone(inpt):
     """
-    Member function version of maximum.
+    Clone masked tensor.
     """
-    return MaskedTensor(inpt.base.clone(), mask=inpt.mask.clone())
+    return MaskedTensor(
+        inpt.base.clone(),
+        mask=inpt.mask.clone(),
+        transformation=getattr(inpt, "__transformation__", None)
+    )

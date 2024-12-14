@@ -62,7 +62,7 @@ class QuantileTensor(torch.Tensor, RegressionTensor):
         new_tensor.base = tensor
         if transformation is not None:
             new_tensor.__transformation__ = transformation
-        if hasattr(tensor, "__transformation__"):
+        if not hasattr(new_tensor, "__transformation__") and hasattr(tensor, "__transformation__"):
             new_tensor.__transformation__ = tensor.__transformation__
 
         new_tensor.tau = torch.as_tensor(tau)
@@ -387,6 +387,16 @@ class QuantileTensor(torch.Tensor, RegressionTensor):
 
 
 def get_base(arg):
+    """
+    Recursively strip QuantileTensor types of arguments.
+
+    Args:
+        An arbitray Python object.
+
+    Return:
+        The same Python object is not a tensor. If a container containing quantile tensors,
+        the same container containining regular tensors is returned.
+    """
     if isinstance(arg, tuple):
         return tuple([get_base(elem) for elem in arg])
     elif isinstance(arg, list):
@@ -400,9 +410,9 @@ def get_base(arg):
 
 def get_quantile_attrs(arg):
     """
-    Extract 'tau' and 'quantile_dim' attributes from object.
+    Extract 'tau' and 'quantile_dim', and 'transformation' attributes from objects.
 
-    Return the 'tau' and 'quantile_dim' values of the first value in arg
+    Return the 'tau', 'quantile_dim', and 'transformation' attributes of the first value in arg
     that is a QuantileTensor.
 
     Args:
