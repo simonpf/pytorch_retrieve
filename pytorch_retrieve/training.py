@@ -96,6 +96,25 @@ def load_weights(path: Path, model: nn.Module) -> None:
         )
 
 
+def freeze_modules(model: nn.Module, freeze: List[str]) -> None:
+    """
+    Freeze list of modules in model.
+
+    Args:
+        model: The model whose modules to freeze
+        freeze: A list containing the names of the modules to freeze.
+    """
+    modules = dict(model.named_modules())
+    for name in freeze:
+        if name in modules:
+            for param in modules[name].parameters():
+                param.requires_grad = False
+        else:
+            LOGGER.warning(
+                "Couldn't freeze module '%s' because it isn't a named module of the model."
+            )
+
+
 class TrainingConfigBase:
     """
     Base functionality for training configuration objects.
@@ -376,6 +395,7 @@ class TrainingConfig(TrainingConfigBase):
     accumulate_grad_batches: int = 1
     load_weights: Optional[str] = None
     n_data_loader_workers: int = 12
+    freeze: Optional[List[str]] = None
     debug: bool = False
 
     @classmethod
@@ -500,6 +520,9 @@ class TrainingConfig(TrainingConfigBase):
         n_data_loader_workers = get_config_attr(
             "n_data_loader_workers", int, config_dict, f"training stage {name}", 12
         )
+        freeze = get_config_attr(
+            "freeze", list, config_dict, f"training state {name}", []
+        )
         debug = get_config_attr(
             "debug", bool, config_dict, f"training stage {name}", False
         )
@@ -528,6 +551,7 @@ class TrainingConfig(TrainingConfigBase):
             accumulate_grad_batches=accumulate_grad_batches,
             load_weights=load_weights,
             n_data_loader_workers=n_data_loader_workers,
+            freeze=freeze,
             debug=debug,
         )
 

@@ -15,6 +15,7 @@ from pytorch_retrieve.training import (
     TrainingConfig,
     parse_training_config,
     run_training,
+    freeze_modules
 )
 from pytorch_retrieve.architectures import load_and_compile_model
 from pytorch_retrieve.lightning import LightningRetrieval
@@ -447,3 +448,148 @@ def test_load_weights_non_strict(
     schedule["warm_up"].load_weights = str(ckpts[0])
     module = LightningRetrieval(model_new, training_schedule=schedule, model_dir=tmp_path)
     run_training(tmp_path, module, compute_config=cpu_compute_config)
+
+
+def test_freeze(
+        monkeypatch,
+        model_config_file,
+        training_config_file,
+        tmp_path,
+        cpu_compute_config
+):
+    """
+    Test that loading of weights from a pre-trained model works.
+    """
+    monkeypatch.chdir(tmp_path)
+    model = load_and_compile_model(model_config_file)
+    schedule = parse_training_config(read_config_file(training_config_file))
+    module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+    run_eda(tmp_path / "stats", model.input_config, model.output_config, schedule["warm_up"])
+
+    model = load_and_compile_model(model_config_file)
+    module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+
+    run_training(tmp_path, module, compute_config=cpu_compute_config)
+
+    schedule["warm_up"].load_weights = str(tmp_path / "retrieval_model.pt")
+    module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+    run_training(tmp_path, module, compute_config=cpu_compute_config)
+
+    # Assert that checkpoint files are created.
+    ckpts = list((tmp_path / "checkpoints").glob("*.ckpt"))
+    assert len(ckpts) > 0
+
+    # Check loading weights from checkpoint.
+    schedule["warm_up"].load_weights = str(ckpts[0])
+    module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+    run_training(tmp_path, module, compute_config=cpu_compute_config)
+
+
+MODEL_CONFIG_EXTRA_INPUTS = """
+[architecture]
+name = "MLP"
+
+[architecture.body]
+hidden_channels = 64
+n_layers = 2
+activation_factory = "GELU"
+normalization_factory = "LayerNorm"
+
+[input.x_1]
+n_features = 1
+normalize = "minmax"
+
+[input.x_2]
+n_features = 1
+
+[output.y]
+kind = "Mean"
+shape = [1,]
+"""
+
+@pytest.fixture
+def model_config_file_extra_inputs(tmp_path):
+    """
+    Provides a path to a training config file in a temporary directory.
+    """
+    output_path = tmp_path / "model_extra_inputs.toml"
+    with open(output_path, "w") as output:
+        output.write(MODEL_CONFIG_EXTRA_INPUTS)
+    return output_path
+
+
+TRAINING_CONFIG_EXTRA_INPUTS = """
+[warm_up]
+dataset_module = "pytorch_retrieve.data.synthetic"
+training_dataset = "Synthetic1dMultiInput"
+training_dataset_args = {"n_samples"=256}
+validation_dataset_args = {"n_samples"=128}
+n_epochs = 2
+batch_size = 64
+optimizer = "SGD"
+optimizer_args = {"lr"= 1e-3}
+metrics = ["Bias", "CorrelationCoef"]
+"""
+
+
+@pytest.fixture
+def training_config_file_extra_inputs(tmp_path):
+    """
+    Provides a path to a trainign config file in a temporary directory.
+    """
+    output_path = tmp_path / "training_extra_inputs.toml"
+    with open(output_path, "w") as output:
+        output.write(TRAINING_CONFIG_EXTRA_INPUTS)
+    return output_path
+
+
+TRAINING_CONFIG_FREEZE = """
+[stage_1]
+dataset_module = "pytorch_retrieve.data.synthetic"
+training_dataset = "Synthetic1d"
+training_dataset_args = {"n_samples"=256}
+validation_dataset_args = {"n_samples"=128}
+n_epochs = 2
+batch_size = 64
+optimizer = "SGD"
+optimizer_args = {"lr"= 1e-3}
+metrics = ["Bias", "CorrelationCoef"]
+freeze = ["body"]
+"""
+
+
+@pytest.fixture
+def training_config_file_freeze(tmp_path):
+    """
+    Provides a path to a trainign config file in a temporary directory.
+    """
+    output_path = tmp_path / "training.toml"
+    with open(output_path, "w") as output:
+        output.write(TRAINING_CONFIG_FREEZE)
+    return output_path
+
+
+def test_freeze_modules(
+        monkeypatch,
+        model_config_file,
+        model_config_file_extra_inputs,
+        training_config_file_freeze,
+        tmp_path,
+        cpu_compute_config
+):
+    """
+    Test freezing of components listed in training config.
+    """
+    monkeypatch.chdir(tmp_path)
+    model = load_and_compile_model(model_config_file)
+    schedule = parse_training_config(read_config_file(training_config_file_freeze))
+
+
+    for param in model.body.parameters():
+        assert param.requires_grad
+
+    freeze = schedule["stage_1"].freeze
+    freeze_modules(model, freeze)
+
+    for param in model.body.parameters():
+        assert not param.requires_grad
