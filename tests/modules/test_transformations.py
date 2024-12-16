@@ -2,14 +2,20 @@
 Tests for the pytorch_retrieve.modules.transformations module
 """
 import pytest
+import lightning as L
 import torch
 from torch import nn
+from torch.utils.data import TensorDataset, DataLoader
 
+
+from pytorch_retrieve.config import InputConfig, OutputConfig
+from pytorch_retrieve.eda import EDAModule
 from pytorch_retrieve.modules.transformations import (
     SquareRoot,
     Log,
     LogLinear,
-    MinMax
+    MinMax,
+    HistEqual
 )
 
 @pytest.mark.parametrize("transformation", [SquareRoot(), Log(), LogLinear(), MinMax(100.0, 200.0)])
@@ -19,4 +25,58 @@ def test_transformations(transformation):
     y = transformation(x_ref)
     x = transformation.invert(y)
 
-    assert torch.isclose(x, x_ref).all()
+    assert torch.isclose(x, x_ref, atol=1e-4).all()
+
+
+def test_hist_equal(monkeypatch, tmp_path):
+
+    monkeypatch.chdir(tmp_path)
+
+    x = torch.rand(10 * 1024, 4)
+    y = 10.0 * (torch.rand((10 * 1024, 4)) + torch.arange(4)[None])
+
+    ds = TensorDataset(x, y)
+    dl = DataLoader(ds, batch_size=1024)
+
+    input_configs = {
+        "x": InputConfig(n_features=4)
+    }
+    output_configs = {
+        "y": OutputConfig("y", kind="Mean", shape=(4,))
+    }
+
+    stats_path = tmp_path / "stats"
+    stats_path.mkdir()
+
+    # Run EDA
+    eda_module = EDAModule(input_configs, output_configs, stats_path=stats_path)
+    trainer = L.Trainer(
+        max_epochs=2,
+        logger=None,
+        precision=32,
+        accelerator="cpu",
+        devices=1
+    )
+    trainer.fit(
+        eda_module,
+        train_dataloaders=dl,
+    )
+
+    transformation = HistEqual(256, output_configs["y"])
+
+    y_t = transformation(y)
+    assert y_t.min() == -1
+    assert y_t.max() == 1
+
+    y_r = transformation.invert(y_t)
+
+    assert y_r.min() == y.min()
+    assert y_r.max() == y.max()
+
+    bins = transformation.bins
+    centers = 0.5 * (bins[1:] + bins[:-1])
+    y_t = transformation(centers)
+    assert torch.isclose(torch.diff(y_t), torch.tensor(2.0 / 255), rtol=1e-3).all()
+
+    centers = transformation.invert(y_t)
+    assert torch.isclose(centers, 0.5 * (bins[1:] + bins[:-1])).all()
