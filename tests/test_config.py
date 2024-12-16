@@ -149,6 +149,8 @@ quantiles = 32
 kind = "Classification"
 shape = 1
 n_classes = 8
+transformation = "HistEqual"
+transformation_args = {"n_steps"=128}
 """
 
 def test_output_config():
@@ -195,6 +197,9 @@ def test_output_config():
     assert len(output_cfgs["y_4"].get_output_dimensions()) == 1
     assert len(output_cfgs["y_4"].get_output_coordinates()) == 1
     assert output_cfgs["y_4"].get_output_shape() == (8,)
+
+    assert isinstance(output_cfgs["y_4"].transformation_args, dict)
+    assert isinstance(output_cfgs["y_4"].to_config_dict()["transformation_args"], dict)
 
 
 MISSING_QUANTILES = """
