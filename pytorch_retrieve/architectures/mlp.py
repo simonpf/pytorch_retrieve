@@ -425,6 +425,16 @@ class MLP(RetrievalModel):
         agg_config = arch_config.get("aggregator", {})
         aggregator_config = AggregatorConfig.parse(agg_config)
 
+        config_dict={
+            "input": {
+                name: cfg.to_config_dict() for name, cfg in input_configs.items()
+            },
+            "output": {
+                name: cfg.to_config_dict() for name, cfg in output_configs.items()
+            },
+            "architecture": arch_config
+        }
+
         return cls(
             stem_configs,
             body_config,
