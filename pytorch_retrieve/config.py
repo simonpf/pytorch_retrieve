@@ -235,6 +235,7 @@ class OutputConfig:
 
         transformation = get_config_attr("transformation", None, cfg, f"output.{name}")
         transformation_args = get_config_attr("transformation_args", dict, cfg, f"output.{name}", {})
+        transformation_args = dict(transformation_args)
         dimensions = get_config_attr(
             "dimensions", None, cfg, f"output.{name}", default=None
         )
@@ -423,7 +424,8 @@ class OutputConfig:
         """
         Return input represented as dictionary.
         """
-        return asdict(self)
+        dct = asdict(self)
+        return dct
 
 
 @dataclass

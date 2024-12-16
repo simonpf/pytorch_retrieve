@@ -123,8 +123,8 @@ class HistEqual(nn.Module):
 
         with xr.open_dataset(stats_path) as stats:
 
-            bin_min = stats["min"].min()
-            bin_max = stats["max"].max()
+            bin_min = stats["min"].data.min()
+            bin_max = stats["max"].data.max()
             new_bins = np.linspace(bin_min, bin_max, self.n_steps + 1)
             cntr = 0.5 * (new_bins[1:] + new_bins[:-1])
 
@@ -172,7 +172,6 @@ class HistEqual(nn.Module):
 
         inds = torch.clamp(torch.bucketize(y, bins, out_int32=True, right=True) - 1, min=0, max=self.n_steps - 1)
         delta = torch.clamp((y - bins[inds]) / incs[inds], 0.0, 1.0)
-        print(delta.min(), delta.max())
         inds = inds.to(dtype=y.dtype) + delta
         y_q = 2.0 * inds / (self.n_steps - 1) - 1.0
         y_q[invalid] = torch.nan
