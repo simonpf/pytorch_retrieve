@@ -385,7 +385,7 @@ class OutputConfig:
             try:
                 transformation = getattr(
                     pytorch_retrieve.modules.transformations, transformation
-                )(**self.transformation_args)
+                )(**self.transformation_args, output_config=self)
             except AttributeError:
                 raise ValueError(
                     f"The transformation {transformation} is not known. Please refere to the "
