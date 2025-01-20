@@ -553,6 +553,7 @@ class LightningRetrieval(L.LightningModule):
                     metric = metric.to(device=pred.device)
                     metric.update(pred, target)
 
+        self.log("Validation loss", tot_loss)
         return tot_loss
 
     def validation_step(self, batch: tuple, batch_idx: int, dataloader_idx=0):
