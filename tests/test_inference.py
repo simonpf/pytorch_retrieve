@@ -21,8 +21,10 @@ from pytorch_retrieve.inference import (
     to_rec,
     InferenceConfig,
     run_inference,
+    InferenceRunner,
 )
 from pytorch_retrieve.tensors import QuantileTensor
+from pytorch_retrieve.modules.output import Quantiles
 
 
 def test_batch_size_rec():
@@ -132,6 +134,78 @@ def test_batch_processor_irregular(tmp_path):
     assert torch.isclose(x, results).all()
 
 
+class TabularInputLoader:
+    """
+    An input loader that loads data that will not be tiled.
+    """
+
+    def __init__(self, n_samples: int, n_features: int):
+        self.data = np.broadcast_to(
+            np.arange(n_samples).reshape(-1, 1), (n_samples, n_features)
+        )
+
+    def __len__(self) -> int:
+        return 8
+
+    def __getitem__(self, ind):
+        batch_size = self.data.shape[0] // len(self)
+        start = ind * batch_size
+        end = start + batch_size
+        return torch.tensor(self.data[start:end])
+
+    def __iter__(self):
+        start = 0
+        for ind in range(len(self)):
+            end = start + (self.data.shape[0] // len(self))
+            yield torch.tensor(self.data[start:end])
+            start = end
+
+
+INFERENCE_CONFIG = """
+batch_size = 256
+"""
+
+
+def test_run_inference_tabular(tmp_path):
+    """
+    Test running inference with tabular data.
+    """
+    inference_config = toml.loads(INFERENCE_CONFIG)
+    output_config = {}
+    inference_config = InferenceConfig.parse(output_config, inference_config)
+    model = nn.Identity()
+    input_loader = TabularInputLoader(2048, 12)
+
+    runner = InferenceRunner(model, input_loader, inference_config=inference_config)
+
+    results = runner.run(output_path=tmp_path, device="cpu", dtype=torch.float32)
+
+    assert len(results) == 8
+    for res in results:
+        assert res.exists()
+
+
+def test_run_inference_multiple_input_loaders(tmp_path):
+    """
+    Test running inference with multiple input loaders.
+    """
+    inference_config = toml.loads(INFERENCE_CONFIG)
+    output_config = {}
+    inference_config = InferenceConfig.parse(output_config, inference_config)
+    model = nn.Identity()
+    input_loader = TabularInputLoader(2048, 12)
+
+    runner = InferenceRunner(
+        model, input_loader, inference_config=inference_config, n_input_loaders=4
+    )
+
+    results = runner.run(output_path=tmp_path, device="cpu", dtype=torch.float32)
+
+    assert len(results) == 8
+    for res in results:
+        assert res.exists()
+
+
 class QuantileTensorLoader:
     """
     An input data loader that loads a tensor containing quantile of a
@@ -178,17 +252,12 @@ def test_run_inference_quantiles():
         "surface_precip": OutputConfig("surface_precip", kind="Quantiles", shape=(32,))
     }
     inference_config = InferenceConfig.parse(output_config, inference_config)
-    model = nn.Identity()
+    model = Quantiles("output", 1, np.linspace(0, 1, 33)[1:-1])
     input_loader = QuantileTensorLoader(4, 234, 453)
 
-    results = run_inference(
-        model,
-        input_loader,
-        inference_config=inference_config,
-        output_path=None,
-        device="cpu",
-        dtype=torch.float32,
-    )
+    runner = InferenceRunner(model, input_loader, inference_config=inference_config)
+
+    results = runner.run(output_path=None, device="cpu", dtype=torch.float32)
 
     assert len(results) == 4
     assert "surface_precip_terciles" in results
@@ -199,6 +268,84 @@ def test_run_inference_quantiles():
     assert np.isclose(
         results[0]["surface_precip_mean"].data[-1], input_loader.n_rows - 1, atol=1e-3
     ).all()
+
+
+
+class TiledDataLoader:
+    """
+    This data loader loads spatial data and an additonal mask that should not be tiled.
+    """
+
+    def __init__(self, n_inputs: int, n_rows: int, n_cols: int):
+        self.n_inputs = n_inputs
+        self.n_rows = n_rows
+        self.n_cols = n_cols
+
+    def __len__(self) -> int:
+        return self.n_inputs
+
+    def __iter__(self):
+        quantiles = np.linspace(0, 1, 33)[1:-1]
+        tensor = norm.ppf(quantiles).astype(np.float32)[..., None, None]
+        tensor = np.broadcast_to(tensor, (31, self.n_rows, self.n_cols))
+        offsets = np.arange(self.n_rows)[None, :, None]
+        tensor = torch.tensor(tensor + offsets)#QuantileTensor(torch.tensor(tensor + offsets), tau=quantiles)
+        cntr = 0
+        for ind in range(self.n_inputs):
+            cntr += 1
+            yield {
+                "input": tensor[None],
+                "mask": torch.isfinite(tensor[None]).any(-1).any(-1)
+            }
+
+
+TILED_INFERENCE_CONFIG = """
+tile_size = 128
+spatial_overlap = 32
+batch_size = 2
+exclude_from_tiling = ["mask"]
+
+[retrieval_output.surface_precip]
+surface_precip_terciles = {retrieval_output="Quantiles", tau=[0.33, 0.67]}
+surface_precip_mean = "ExpectedValue"
+pop = {retrieval_output="ExceedanceProbability", threshold=0}
+"""
+
+class MaskedQuantileOutput(Quantiles):
+    """
+    Specialized quantile output class that can handle input dicts.
+    """
+    def forward(self, inpts):
+        return super().forward(inpts["input"])
+
+@pytest.mark.skip(reason="Tensor creation causes deadlock.")
+def test_run_inference_tiled():
+    """
+    This tests running inference on tiled input including inputs. In particular, it ensures
+    that input that should be exluded from tiling are excluded.
+    """
+    inference_config = toml.loads(TILED_INFERENCE_CONFIG)
+    output_config = {
+        "surface_precip": OutputConfig("surface_precip", kind="Quantiles", shape=(32,))
+    }
+    inference_config = InferenceConfig.parse(output_config, inference_config)
+    model = MaskedQuantileOutput("output", 1, np.linspace(0, 1, 33)[1:-1])
+    input_loader = TiledDataLoader(4, 234, 453)
+
+    runner = InferenceRunner(model, input_loader, inference_config=inference_config)
+
+    results = runner.run(output_path=None, device="cpu", dtype=torch.float32)
+
+    assert len(results) == 4
+    assert "surface_precip_terciles" in results
+    assert "surface_precip_mean" in results
+    assert "pop" in results
+
+    assert np.isclose(results[0]["pop"].data[0], 0.5).all()
+    assert np.isclose(
+        results[0]["surface_precip_mean"].data[-1], input_loader.n_rows - 1, atol=1e-3
+    ).all()
+
 
 
 MLP_INFERENCE_CFG = """

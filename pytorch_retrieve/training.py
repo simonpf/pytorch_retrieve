@@ -10,6 +10,7 @@ import importlib
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
+import sys
 
 import click
 import lightning as L
@@ -129,7 +130,12 @@ class TrainingConfigBase:
              A tuple ``(train, val)`` containing the training and validation datasets.
         """
         try:
-            module = importlib.import_module(self.dataset_module)
+            if self.dataset_module.startswith("."):
+                sys.path.append(".")
+                dataset_module = self.dataset_module[1:]
+            else:
+                dataset_module = self.dataset_module
+            module = importlib.import_module(dataset_module)
             dataset_class = getattr(module, self.training_dataset)
             dataset = dataset_class(**self.training_dataset_args)
         except ImportError:
@@ -153,7 +159,12 @@ class TrainingConfigBase:
             return self.get_training_and_validation_splits()[0]
 
         try:
-            module = importlib.import_module(self.dataset_module)
+            if self.dataset_module.startswith("."):
+                sys.path.append(".")
+                dataset_module = self.dataset_module[1:]
+            else:
+                dataset_module = self.dataset_module
+            module = importlib.import_module(dataset_module)
             dataset_class = getattr(module, self.training_dataset)
             dataset = dataset_class(**self.training_dataset_args)
         except ImportError:
@@ -196,7 +207,12 @@ class TrainingConfigBase:
                 return None
             return self.get_training_and_validation_splits()[1]
         try:
-            module = importlib.import_module(self.dataset_module)
+            if self.dataset_module.startswith("."):
+                sys.path.append(".")
+                dataset_module = self.dataset_module[1:]
+            else:
+                dataset_module = self.dataset_module
+            module = importlib.import_module(dataset_module)
             dataset_class = getattr(module, self.training_dataset)
             return dataset_class(**self.validation_dataset_args)
         except ImportError:

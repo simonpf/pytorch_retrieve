@@ -364,7 +364,7 @@ class OutputConfig:
             if isinstance(quantiles, int):
                 quantiles = np.linspace(0, 1, quantiles + 2)[1:-1]
             elif isinstance(quantiles, list):
-                quantiles = np.array(list)
+                quantiles = np.array(quantiles)
             return {f"tau_{self.target}": quantiles}
         if self.kind == "RandomSample":
             return {}
@@ -401,7 +401,7 @@ class OutputConfig:
             if isinstance(quantiles, int):
                 quantiles = np.linspace(0, 1, quantiles + 2)[1:-1]
             elif isinstance(quantiles, list):
-                quantiles = np.array(list)
+                quantiles = np.array(quantiles)
             return output.Quantiles(
                 self.target, self.shape, tau=quantiles, transformation=transformation
             )
@@ -585,6 +585,7 @@ class InferenceConfig:
     input_loader: Optional[str] = None
     input_loader_args: Optional[Dict[str, Any]] = None
     retrieval_output: Optional[Dict[str, Dict[str, RetrievalOutputConfig]]] = None
+    exclude_from_tiling: Optional[List[str]] = None
 
     @staticmethod
     def parse(
@@ -652,6 +653,12 @@ class InferenceConfig:
             }
             retrieval_output[model_output] = outputs
 
+        exclude_from_tiling = get_config_attr(
+            "exclude_from_tiling", None, config_dict, "inference config", default=None
+        )
+        if exclude_from_tiling is not None:
+            exclude_from_tiling = [elem for elem in exclude_from_tiling]
+
         return InferenceConfig(
             batch_size=batch_size,
             tile_size=tile_size,
@@ -660,6 +667,7 @@ class InferenceConfig:
             input_loader=input_loader,
             input_loader_args=input_loader_args,
             retrieval_output=retrieval_output,
+            exclude_from_tiling=exclude_from_tiling
         )
 
     def to_dict(self) -> Dict[str, Any]:
