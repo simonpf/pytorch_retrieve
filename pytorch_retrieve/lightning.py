@@ -2,6 +2,7 @@
 pytorch_retrieve.lightning
 
 """
+
 import copy
 import logging
 from pathlib import Path
@@ -286,7 +287,6 @@ class LightningRetrieval(L.LightningModule):
                         "Model predicts a sequence but the reference data is not."
                     )
 
-
                 if weights_k is None:
                     weights_k = [None] * len(target_k)
 
@@ -354,13 +354,9 @@ class LightningRetrieval(L.LightningModule):
                     torch.save(self.target_prev, filename)
                     filename = f"preds_prev_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
                     torch.save(self.pred_prev, filename)
-                    filename = (
-                        f"inputs_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
-                    )
+                    filename = f"inputs_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
                     torch.save(inputs, filename)
-                    filename = (
-                        f"targets_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
-                    )
+                    filename = f"targets_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
                     torch.save(target, filename)
                     filename = (
                         f"preds_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
@@ -527,7 +523,7 @@ class LightningRetrieval(L.LightningModule):
                         metric.update(pred_s, target_s)
 
             if tot_samples > 0:
-                tot_loss =  tot_loss / tot_samples
+                tot_loss = tot_loss / tot_samples
 
             for metric in other_metrics:
                 metric = metric.to(device=pred_s.device)
@@ -645,7 +641,6 @@ class LightningRetrieval(L.LightningModule):
                         for metric in scalar_metrics:
                             metric = metric.to(device=pred_k_s.device)
                             metric.update(pred_k_s, target_k_s)
-
 
                 if tot_samples > 0:
                     tot_loss = tot_loss / tot_samples
