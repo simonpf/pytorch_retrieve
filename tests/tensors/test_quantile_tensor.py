@@ -540,10 +540,28 @@ def test_loss():
     loss = tensor_1.loss(tensor_2)
     assert torch.isclose(loss, 0.5 * (tensor_1 - tensor_2).abs().mean())
 
+    # Test weighted loss
     weights = torch.ones_like(tensor_2)
     weights[50:] = 0.0
     loss = tensor_1.loss(tensor_2, weights=weights)
     assert not torch.isclose(loss, 0.5 * (tensor_1 - tensor_2).abs().mean())
+    assert torch.isclose(loss, 0.5 * (tensor_1[:50] - tensor_2[:50]).abs().mean())
+
+    # Test masked loss
+    mask = torch.repeat_interleave(torch.arange(100)[..., None], 100, 1)
+    mask = mask >= 50
+    tensor_2 = MaskedTensor(100 * torch.rand(100, 100), mask=mask)
+    tensor_2 = tensor_2[:, None]
+
+    loss = tensor_1.loss(tensor_2)
+    assert not torch.isclose(loss, 0.5 * (tensor_1 - tensor_2.base).abs().mean())
+    assert torch.isclose(loss, 0.5 * (tensor_1[:50] - tensor_2[:50]).abs().mean())
+
+    weights = torch.ones_like(tensor_2)
+    weights[50:] = 100.0
+    loss = tensor_1.loss(tensor_2.base, weights=weights)
+    print(weights.sum())
+    assert not torch.isclose(loss, 0.5 * (tensor_1 - tensor_2.base).abs().mean())
     assert torch.isclose(loss, 0.5 * (tensor_1[:50] - tensor_2[:50]).abs().mean())
 
     with pytest.raises(ValueError):

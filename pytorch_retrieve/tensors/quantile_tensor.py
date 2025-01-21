@@ -122,6 +122,8 @@ class QuantileTensor(torch.Tensor, RegressionTensor):
         if y_true.ndim < self.ndim:
             new_shape = y_true.shape[:1] + (1,) * (self.ndim - y_true.ndim) + y_true.shape[1:]
             y_true = y_true.reshape(new_shape)
+            if weights is not None:
+                weights = weights.reshape(new_shape)
 
         delta = y_true - self.base
 
