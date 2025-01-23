@@ -197,6 +197,8 @@ class LightningRetrieval(L.LightningModule):
                 if mask.any():
                     target_s = torch.nan_to_num(target_s, 0.0)
                     target_s = MaskedTensor(target_s, mask=mask)
+                    if weights_s is not None:
+                        weights_s = MaskedTensor(weights_s, mask=mask)
                 loss += pred_s.loss(target_s, weights=weights_s)
 
             if name is not None:
@@ -209,6 +211,9 @@ class LightningRetrieval(L.LightningModule):
         if mask.any():
             target = torch.nan_to_num(target, 0.0)
             target = MaskedTensor(target, mask=mask)
+            if weights is not None:
+                weights = MaskedTensor(weights, mask=mask)
+
         loss = pred.loss(target, weights=weights)
 
         if name is not None:
@@ -298,6 +303,9 @@ class LightningRetrieval(L.LightningModule):
                     if mask.any():
                         target_k_s = torch.nan_to_num(target_k_s, 0.0)
                         target_k_s = MaskedTensor(target_k_s, mask=mask)
+                        if weights_k_s is not None:
+                            weights_k_s = MaskedTensor(weights_k_s, mask=mask)
+
                     if mask.all() or torch.isnan(pred_k_s).any():
                         continue
 
@@ -317,6 +325,8 @@ class LightningRetrieval(L.LightningModule):
                 if mask.any():
                     target_k = torch.nan_to_num(target_k, 0.0)
                     target_k = MaskedTensor(target_k, mask=mask)
+                    if weights_k is not None:
+                        weights_k = MaskedTensor(weights_k, mask=mask)
 
                 n_samples = (~mask).sum()
                 loss_k = pred[name].loss(target_k, weights=weights_k)
@@ -623,6 +633,8 @@ class LightningRetrieval(L.LightningModule):
                     mask = torch.isnan(target_k_s)
                     if mask.any():
                         target_k_s = MaskedTensor(target_k_s, mask=mask)
+                        if weights_k_s is not None:
+                            weights_k_s = MaskedTensor(weights_k_s, mask=mask)
                     if mask.all():
                         continue
 
@@ -653,6 +665,8 @@ class LightningRetrieval(L.LightningModule):
                 mask = torch.isnan(target_k)
                 if mask.any():
                     target_k = MaskedTensor(target_k, mask=mask)
+                    if weights_k is not None:
+                        weights_k = MaskedTensor(weights_k, mask=mask)
                     n_samples = (~mask).sum()
                 else:
                     n_samples = target_k.numel()

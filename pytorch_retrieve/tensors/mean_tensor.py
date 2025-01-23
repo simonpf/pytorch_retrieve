@@ -79,7 +79,7 @@ class MeanTensor(torch.Tensor, RegressionTensor):
 
     def expected_value(self) -> torch.Tensor:
         if hasattr(self, "__transformation__"):
-            return self.invert(self.base)
+            return self.__transformation__.invert(self.base)
         return self.base
 
     def loss(self, y_true, weights: Optional[torch.Tensor] = None):
@@ -96,14 +96,18 @@ class MeanTensor(torch.Tensor, RegressionTensor):
             y_true = self.__transformation__(y_true)
 
         if y_true.dim() < self.dim():
-            y_true = y_true.unsqueeze(1)
+            new_shape = y_true.shape[:1] + (1,) * (self.ndim - y_true.ndim) + y_true.shape[1:]
+            y_true = y_true.reshape(new_shape)
+            if weights is not None:
+                weights = weights.reshape(new_shape)
 
         if weights is None:
             return ((self.base - y_true) ** 2).mean()
 
         if weights.shape != y_true.shape:
             raise ValueError(
-                "If provided, 'weights' must match the reference tensor 'y_true'."
+                f"If provided, the shape of 'weights' {weights.shape} must "
+                f"match the reference tensor 'y_true' {y_true.shape}."
             )
 
         if weights.dim() < self.dim():
