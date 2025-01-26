@@ -104,6 +104,7 @@ class Bias(ScalarMetric, tm.Metric):
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
+        weights: Optional[torch.Tensor] = None,
         conditional: Dict[str, torch.Tensor] = None,
     ) -> None:
         """
@@ -112,25 +113,34 @@ class Bias(ScalarMetric, tm.Metric):
                 retrieval model.
             target: A tensor containing the reference values corresponding
                 to 'pred'.
+            weights: Optional weight tensor used to weigh the contribution of each
+                sample to the overall bias.
             conditional: An optional dictionary containing values to
                 condition the calculation of the bias onto.
         """
         pred = pred.squeeze()
         target = target.squeeze()
+        if weights is None:
+            weights = torch.ones_like(target)
+        else:
+            weights = weights.squeeze()
 
         mask = None
         if isinstance(target, MaskedTensor):
             mask = target.mask
             target = target.base
+            if isinstance(weights, MaskedTensor):
+                weights = weights.base
             if isinstance(pred, MaskedTensor):
                 mask = mask | pred.mask
                 pred = pred.base
             pred = pred[~mask]
             target = target[~mask]
+            weights = weights[~mask]
 
         if self.conditional is None:
-            self.error += (pred - target).sum()
-            self.counts += pred.numel()
+            self.error += ((pred - target) * weights).sum()
+            self.counts += weights.sum()
             return None
 
         device = torch.device("cpu")
@@ -152,10 +162,10 @@ class Bias(ScalarMetric, tm.Metric):
 
         coords = torch.stack(coords, -1).to(device=device)
 
-        wgts = (pred - target).to(device=device)
+        wgts = ((pred - target) * weights).to(device=device)
         bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
         self.error += torch.histogramdd(coords, bins=bins, weight=wgts)[0]
-        self.counts += torch.histogramdd(coords, bins=bins)[0]
+        self.counts += torch.histogramdd(coords, bins=bins, weight=weights)[0]
 
     def compute(self) -> torch.Tensor:
         """
@@ -190,6 +200,7 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
+        weights: Optional[torch.Tensor] = None,
         conditional: Optional[Dict[str, torch.Tensor]] = None,
     ):
         """
@@ -198,33 +209,41 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
                 retrieval model.
             target: A tensor containing the reference values corresponding
                 to 'pred'.
+            weights: An optional tensor containing weights to apply to each
+                sample.
             conditional: An optional dictionary containing values to
                 condition the calculation of the bias onto.
         """
         pred = pred.squeeze()
         target = target.squeeze()
+        if weights is None:
+            weights = torch.ones_like(target)
+        else:
+            weights = weights.squeeze()
 
         mask = None
         if isinstance(target, MaskedTensor):
             mask = target.mask
             target = target.base
+            weights = weights.base
             if isinstance(pred, MaskedTensor):
                 mask = mask | pred.mask
                 pred = pred.base
             pred = pred[~mask]
             target = target[~mask]
+            weights = weights[~mask]
 
         if pred.dim() >= 2:
             pred = pred.flatten()
             target = target.flatten()
 
         if self.conditional is None:
-            self.x += pred.sum()
-            self.x2 += (pred**2).sum()
-            self.xy += (pred * target).sum()
-            self.y += target.sum()
-            self.y2 += (target**2).sum()
-            self.counts += torch.numel(target)
+            self.x += (pred * weights).sum()
+            self.x2 += ((pred**2) * weights).sum()
+            self.xy += (pred * target * weights).sum()
+            self.y += (target * weights).sum()
+            self.y2 += ((target**2) * weights).sum()
+            self.counts += weights.sum()
         else:
             device = torch.device("cpu")
             self.to(device=device)
@@ -250,12 +269,18 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
             pred = pred.to(device=device)
             target = target.to(device=device)
 
-            self.x += torch.histogramdd(coords, bins=bins, weight=pred)[0]
-            self.x2 += torch.histogramdd(coords, bins=bins, weight=pred**2)[0]
-            self.xy += torch.histogramdd(coords, bins=bins, weight=pred * target)[0]
-            self.y += torch.histogramdd(coords, bins=bins, weight=target)[0]
-            self.y2 += torch.histogramdd(coords, bins=bins, weight=target**2)[0]
-            self.counts += torch.histogramdd(coords, bins=bins)[0]
+            self.x += torch.histogramdd(coords, bins=bins, weight=pred * weights)[0]
+            self.x2 += torch.histogramdd(
+                coords, bins=bins, weight=(pred**2) * weights
+            )[0]
+            self.xy += torch.histogramdd(
+                coords, bins=bins, weight=pred * target * weights
+            )[0]
+            self.y += torch.histogramdd(coords, bins=bins, weight=target * weights)[0]
+            self.y2 += torch.histogramdd(
+                coords, bins=bins, weight=(target**2) * weights
+            )[0]
+            self.counts += torch.histogramdd(coords, bins=bins, weight=weights)[0]
 
     def compute(self) -> torch.Tensor:
         """
@@ -299,6 +324,7 @@ class MSE(ScalarMetric, tm.Metric):
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
+        weights: Optional[torch.Tensor] = None,
         conditional: Optional[Dict[str, torch.Tensor]] = None,
     ) -> None:
         """
@@ -307,28 +333,36 @@ class MSE(ScalarMetric, tm.Metric):
                 retrieval model.
             target: A tensor containing the reference values corresponding
                 to 'pred'.
+            weights: An optional tensor of weights to apply to all validation samples.
             conditional: An optional dictionary containing values to
                 condition the calculation of the bias onto.
         """
         pred = pred.squeeze()
         target = target.squeeze()
+        if weights is None:
+            weights = torch.ones_like(target)
+        else:
+            weights = weights.squeeze()
 
         if isinstance(target, MaskedTensor):
             mask = target.mask
             target = target.base
+            if isinstance(weights, MaskedTensor):
+                weights = weights.base
             if isinstance(pred, MaskedTensor):
                 mask = mask | pred.mask
                 pred = pred.base
             pred = pred[~mask]
             target = target[~mask]
+            weights = weights[~mask]
 
         if pred.dim() > 2:
             pred = pred.flatten()
             target = target.flatten()
 
         if self.conditional is None:
-            self.error += ((pred - target) ** 2).sum()
-            self.counts += torch.numel(pred)
+            self.error += (((pred - target) ** 2) * weights).sum()
+            self.counts += weights.sum()
         else:
             device = torch.device("cpu")
             self.to(device)
@@ -352,9 +386,9 @@ class MSE(ScalarMetric, tm.Metric):
             pred = pred.to(device=device)
             target = target.to(device=device)
             self.error += torch.histogramdd(
-                coords, bins=bins, weight=(pred - target) ** 2
+                coords, bins=bins, weight=((pred - target) ** 2) * weights
             )[0]
-            self.counts += torch.histogramdd(coords, bins=bins)[0]
+            self.counts += torch.histogramdd(coords, bins=bins, weight=weights)[0]
 
     def compute(self) -> torch.Tensor:
         """
@@ -382,6 +416,7 @@ class MAE(ScalarMetric, tm.Metric):
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
+        weights: Optional[torch.Tensor] = None,
         conditional: Optional[Dict[str, torch.Tensor]] = None,
     ) -> None:
         """
@@ -390,28 +425,38 @@ class MAE(ScalarMetric, tm.Metric):
                 retrieval model.
             target: A tensor containing the reference values corresponding
                 to 'pred'.
+            weights: An optional tensor of weights to apply to all validation samples.
             conditional: An optional dictionary containing values to
                 condition the calculation of the bias onto.
         """
         pred = pred.squeeze()
         target = target.squeeze()
+        if weights is None:
+            weights = torch.ones_like(target)
+        else:
+            weights = weights.squeeze()
 
         if isinstance(target, MaskedTensor):
             mask = target.mask
             target = target.base
+            if isinstance(weights, MaskedTensor):
+                weights = weights.base
+
             if isinstance(pred, MaskedTensor):
                 mask = mask | pred.mask
                 pred = pred.base
             pred = pred[~mask]
             target = target[~mask]
+            weights = weights[~mask]
 
         if pred.dim() > 2:
             pred = pred.flatten()
             target = target.flatten()
+            weights = weights.flatten()
 
         if self.conditional is None:
-            self.error += torch.abs(pred - target).sum()
-            self.counts += torch.numel(pred)
+            self.error += (torch.abs(pred - target) * weights).sum()
+            self.counts += weights.sum()
         else:
             device = torch.device("cpu")
             self.to(device)
@@ -435,9 +480,9 @@ class MAE(ScalarMetric, tm.Metric):
             pred = pred.to(device=device)
             target = target.to(device=device)
             self.error += torch.histogramdd(
-                coords, bins=bins, weight=torch.abs(pred - target)
+                coords, bins=bins, weight=torch.abs(pred - target) * weights
             )[0]
-            self.counts += torch.histogramdd(coords, bins=bins)[0]
+            self.counts += torch.histogramdd(coords, bins=bins, weight=weights)[0]
 
     def compute(self) -> torch.Tensor:
         """
@@ -448,7 +493,7 @@ class MAE(ScalarMetric, tm.Metric):
 
 class SMAPE(ScalarMetric, tm.Metric):
     """
-    The mean absolute error.
+    The Symmetric Mean Absolute Percentage Error (SMAPE)
     """
 
     name = "SMAPE"
@@ -468,6 +513,7 @@ class SMAPE(ScalarMetric, tm.Metric):
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
+        weights: Optional[torch.Tensor] = None,
         conditional: Optional[Dict[str, torch.Tensor]] = None,
     ) -> None:
         """
@@ -476,20 +522,28 @@ class SMAPE(ScalarMetric, tm.Metric):
                 retrieval model.
             target: A tensor containing the reference values corresponding
                 to 'pred'.
+            weights: An optional tensor of weights to apply to all validation samples.
             conditional: An optional dictionary containing values to
                 condition the calculation of the bias onto.
         """
         pred = pred.squeeze()
         target = target.squeeze()
+        if weights is None:
+            weights = torch.ones_like(target)
+        else:
+            weights = weights.squeeze()
 
         if isinstance(target, MaskedTensor):
             mask = target.mask
             target = target.base
+            if isinstance(weights, MaskedTensor):
+                weights = weights.base
             if isinstance(pred, MaskedTensor):
                 mask = mask | pred.mask
                 pred = pred.base
             pred = pred[~mask]
             target = target[~mask]
+            weights = weights[~mask]
 
         if pred.dim() > 2:
             pred = pred.flatten()
@@ -499,28 +553,30 @@ class SMAPE(ScalarMetric, tm.Metric):
             valid = target >= self.threshold
             pred = pred[valid]
             target = target[valid]
+            weights = weights[valid]
             smape = torch.abs(pred - target) / (
                 0.5 * (torch.abs(pred) + torch.abs(target))
             )
-            self.error += smape.sum()
-            self.counts += torch.numel(pred)
-        else:
-            device = torch.device("cpu")
-            self.to(device)
+            self.error += (smape * weights).sum()
+            self.counts += weights.sum()
+            return None
 
-            coords = []
-            for cond in self.conditional:
-                if mask is None:
-                    coords.append(conditional[cond].squeeze().flatten())
-                else:
-                    mask = mask.to(device=device)
-                    cond_s = conditional[cond].squeeze()
-                    mask_s = mask.squeeze()
-                    # Expand channel dimension if necessary
-                    if cond_s.ndim < mask_s.ndim:
-                        cond_s = cond_s[:, None]
-                        cond_s = torch.broadcast_to(cond_s, mask_s.shape)
-                    coords.append(cond_s[~mask_s])
+        device = torch.device("cpu")
+        self.to(device)
+
+        coords = []
+        for cond in self.conditional:
+            if mask is None:
+                coords.append(conditional[cond].squeeze().flatten())
+            else:
+                mask = mask.to(device=device)
+                cond_s = conditional[cond].squeeze()
+                mask_s = mask.squeeze()
+                # Expand channel dimension if necessary
+                if cond_s.ndim < mask_s.ndim:
+                    cond_s = cond_s[:, None]
+                    cond_s = torch.broadcast_to(cond_s, mask_s.shape)
+                coords.append(cond_s[~mask_s])
 
             coords = torch.stack(coords, -1).to(device=device)
             bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
@@ -531,11 +587,14 @@ class SMAPE(ScalarMetric, tm.Metric):
             pred = pred[valid]
             target = target[valid]
             coords = coords[valid]
+            weights = weights[valid]
             smape = torch.abs(pred - target) / (
                 0.5 * (torch.abs(pred) + torch.abs(target))
             )
-            self.error += torch.histogramdd(coords, bins=bins, weight=smape)[0]
-            self.counts += torch.histogramdd(coords, bins=bins)[0]
+            self.error += torch.histogramdd(coords, bins=bins, weight=smape * weights)[
+                0
+            ]
+            self.counts += torch.histogramdd(coords, bins=bins, weight=weights)[0]
 
     def compute(self) -> torch.Tensor:
         """

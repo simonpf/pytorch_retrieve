@@ -2,6 +2,7 @@ from conftest import data_loader_1d, data_loader_3d
 
 try:
     import matplotlib
+
     HAS_MATPLOTLIB = True
 except ImportError:
     HAS_MATPLOTLIB = False
@@ -64,6 +65,35 @@ def test_bias():
     assert torch.isclose(result, torch.tensor(0.0)).all()
 
 
+def test_weighted_bias():
+    """
+    Test that weighting of samples is handled correctly.
+    """
+    bias = Bias()
+    data_loader = data_loader_1d(1024, 128)
+
+    for x, y in data_loader:
+        mask = torch.rand(y.shape) > 0.5
+        y_pred = torch.clone(y)
+        y_pred[mask] += 1.0
+        weights = 1.0 - mask.to(torch.float32)
+        assert torch.isclose((y_pred - y) * weights, torch.tensor(0.0)).all()
+        bias.update(y, y_pred, weights=weights)
+
+    result = bias.compute()
+    assert torch.isclose(result, torch.tensor(0.0))
+
+    for x, y in data_loader:
+        mask = torch.rand(y.shape) > 0.5
+        y_pred = torch.clone(y)
+        y_pred[mask] += 1.0
+        bias.update(y, y_pred)
+
+    result = bias.compute()
+    assert not torch.isclose(result, torch.tensor(0.0))
+
+    bias = Bias()
+
 
 def test_correlation_coef():
     """
@@ -105,6 +135,36 @@ def test_correlation_coef():
     assert torch.isclose(result, torch.tensor(1.0)).all()
 
 
+def test_correlation_coef_weighted():
+    """
+    Test calculation of the weighted correlation coefficient.
+    """
+    corr = CorrelationCoef()
+    data_loader = data_loader_1d(1024, 128)
+
+    for x, y in data_loader:
+        mask = torch.rand(y.shape) > 0.5
+        y_pred = torch.clone(y)
+        y_pred[mask] += 1.0
+        corr.update(y_pred, y)
+
+    result = corr.compute()
+    assert not torch.isclose(result, torch.tensor(1.0))
+
+    corr = CorrelationCoef()
+    data_loader = data_loader_1d(1024, 128)
+
+    for x, y in data_loader:
+        mask = torch.rand(y.shape) > 0.5
+        y_pred = torch.clone(y)
+        y_pred[mask] += 1.0
+        weights = 1.0 - mask.to(torch.float32)
+        corr.update(y_pred, y, weights=weights)
+
+    result = corr.compute()
+    assert torch.isclose(result, torch.tensor(1.0))
+
+
 def test_mse():
     """
     Test that calculating the MSE works with masked tensors.
@@ -135,6 +195,35 @@ def test_mse():
     result = mse.compute()
     assert result.shape == (4,)
     assert torch.isclose(result, torch.tensor(1.0), atol=0.2).all()
+
+
+def test_weighted_mse():
+    """
+    Test weighted MSE.
+    """
+    mse = MSE()
+    data_loader = data_loader_1d(10 * 1024, 128)
+
+    for x, y in data_loader:
+        mask = torch.rand(y.shape) > 0.5
+        y_pred = torch.clone(y)
+        y_pred[mask] += 1.0
+        mse.update(y_pred, y)
+
+    result = mse.compute()
+    assert torch.isclose(result, torch.tensor(0.5), rtol=1e-1)
+
+    mse = MSE()
+
+    for x, y in data_loader:
+        mask = torch.rand(y.shape) > 0.5
+        weights = 1.0 - 0.5 * mask.to(torch.float32)
+        y_pred = torch.clone(y)
+        y_pred[mask] += 1.0
+        mse.update(y_pred, y, weights=weights)
+
+    result = mse.compute()
+    assert torch.isclose(result, torch.tensor(1 / 3), rtol=1e-1)
 
 
 def test_mae():
@@ -169,6 +258,35 @@ def test_mae():
     assert torch.isclose(result, torch.tensor(0.798), atol=0.2).all()
 
 
+def test_weighted_mae():
+    """
+    Test weighted MAE.
+    """
+    mae = MAE()
+    data_loader = data_loader_1d(10 * 1024, 128)
+
+    for x, y in data_loader:
+        mask = torch.rand(y.shape) > 0.5
+        y_pred = torch.clone(y)
+        y_pred[mask] += 1.0
+        mae.update(y_pred, y)
+
+    result = mae.compute()
+    assert torch.isclose(result, torch.tensor(0.5), rtol=1e-1)
+
+    mae = MAE()
+
+    for x, y in data_loader:
+        mask = torch.rand(y.shape) > 0.5
+        weights = 1.0 - 0.5 * mask.to(torch.float32)
+        y_pred = torch.clone(y)
+        y_pred[mask] += 1.0
+        mae.update(y_pred, y, weights=weights)
+
+    result = mae.compute()
+    assert torch.isclose(result, torch.tensor(1 / 3), rtol=1e-1)
+
+
 def test_smape():
     """
     Test that calculating the SMAPE works with masked tensors.
@@ -199,6 +317,24 @@ def test_smape():
     result = smape.compute()
     assert result.shape == (4,)
     assert torch.isclose(result, result_ref, atol=0.2).all()
+
+
+def test_weighted_smape():
+    """
+    Test weighted SMAPE.
+    """
+    smape = SMAPE()
+    data_loader = data_loader_1d(1024, 128)
+
+    for x, y in data_loader:
+        mask = torch.rand(y.shape) > 0.5
+        y_pred = torch.clone(y)
+        y_pred[mask] += 1.0
+        weights = 1.0 - mask.to(torch.float32)
+        smape.update(y_pred, y, weights=weights)
+
+    result = smape.compute()
+    assert torch.isclose(result, torch.tensor(0.0))
 
 
 @pytest.mark.skipif(not HAS_MATPLOTLIB, reason="needs matplotlib")
