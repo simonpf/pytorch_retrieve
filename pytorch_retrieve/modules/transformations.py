@@ -39,14 +39,26 @@ class Log(nn.Module):
     This transformation can be used in an output layer to predict the logarithm of the
     target quantity instead of the original quantity.
     """
-    def __init__(self, **kwargs):
+    def __init__(self, threshold=1e-3, **kwargs):
         super().__init__()
+        self.threshold = torch.tensor(threshold)
 
     def forward(self, x):
-        return torch.log(x)
+        dtype = x.dtype
+        device = x.device
+        threshold = self.threshold.to(dtype=dtype, device=device)
+        x[x < threshold] = threshold
+        x = x.to(dtype=torch.float32)
+        return torch.log(x).to(dtype=dtype)
 
     def invert(self, x: torch.Tensor):
-        return torch.exp(x)
+        dtype = x.dtype
+        device = x.device
+        threshold = self.threshold.to(dtype=dtype, device=device)
+        inverted = torch.exp(x.to(torch.float32)).to(dtype)
+        zero = inverted < threshold
+        inverted[zero] = 0.0
+        return inverted
 
 
 class LogLinear(nn.Module):
@@ -56,14 +68,22 @@ class LogLinear(nn.Module):
     This transformation can be used in an output layer to predict the logarithm of the
     target quantity instead of the original quantity.
     """
-    def __init__(self, **kwargs):
+    def __init__(self, threshold: float = 1e-3, **kwargs):
         super().__init__()
+        self.threshold = torch.tensor(threshold)
 
     def forward(self, x):
-        return torch.where(x > 1, x - 1, torch.log(x))
+        dtype = x.dtype
+        device = x.device
+        threshold = self.threshold.to(dtype=dtype, device=device)
+        x[x < threshold] = threshold
+        x = x.to(dtype=torch.float32)
+        return torch.where(x > 1, x - 1, torch.log(x).to(dtype=dtype))
+
 
     def invert(self, x: torch.Tensor):
-        return torch.where(x > 0, x + 1, torch.exp(x))
+        dtype = x.dtype
+        return torch.where(x > 0, x + 1, torch.exp(x).to(dtype=dtype))
 
 
 class MinMax(nn.Module):
@@ -82,7 +102,7 @@ class MinMax(nn.Module):
         dtype = x.dtype
         x_min = self.x_min.to(device=device, dtype=dtype)
         x_max = self.x_max.to(device=device, dtype=dtype)
-        return -1.0 + 2.0 * (x - x_min) / (x_max - x_min)
+        return (x - x_min) / (x_max - x_min) * 2.0 - 1.0
 
     def invert(self, x: torch.Tensor) -> torch.Tensor:
         device = x.device

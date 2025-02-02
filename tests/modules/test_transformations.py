@@ -7,9 +7,9 @@ import torch
 from torch import nn
 from torch.utils.data import TensorDataset, DataLoader
 
-
 from pytorch_retrieve.config import InputConfig, OutputConfig
 from pytorch_retrieve.eda import EDAModule
+from pytorch_retrieve.tensors import MaskedTensor
 from pytorch_retrieve.modules.transformations import (
     SquareRoot,
     Log,
@@ -21,11 +21,17 @@ from pytorch_retrieve.modules.transformations import (
 @pytest.mark.parametrize("transformation", [SquareRoot(), Log(), LogLinear(), MinMax(100.0, 200.0)])
 def test_transformations(transformation):
 
-    x_ref = 1e3 * torch.rand(10, 10, 10) + 1e-6
+    x_ref = 1e3 * torch.rand(10, 10, 10) + 1e-3
     y = transformation(x_ref)
     x = transformation.invert(y)
 
     assert torch.isclose(x, x_ref, atol=1e-4).all()
+
+    x_ref = MaskedTensor(x_ref, mask=torch.rand(x_ref.shape) > 0.5)
+    y = transformation(x_ref)
+
+    assert isinstance(y, MaskedTensor)
+    assert (x_ref.mask == y.mask).all()
 
 
 def test_hist_equal(monkeypatch, tmp_path):
