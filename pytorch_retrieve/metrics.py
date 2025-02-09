@@ -5,7 +5,7 @@ pytorch_retrieve.metrics
 Provides TorchMetrics metrics modules that handle pytorch_retrieve's
 probabilistic outputs.
 """
-
+import io
 import logging
 from typing import Dict, Optional, Tuple, Union
 
@@ -690,6 +690,17 @@ class PlotSamples(tm.Metric):
     def log(
         self, lightning_module: LightningModule, output_name: Optional[str] = None
     ) -> None:
+        try:
+            import matplotlib.pyplot as plt
+            from matplotlib import colormaps
+            from matplotlib.cm import ScalarMappable
+            from matplotlib.colors import LogNorm, Normalize
+        except ImportError:
+            LOGGER.warning(
+                "Could not import 'matplotlib', which is required by the PlotSamples"
+                "metric. Not producing any plots."
+            )
+            return {}
         sequences = self.compute()
         if len(sequences) == 0:
             LOGGER.warning(
@@ -718,7 +729,7 @@ class PlotSamples(tm.Metric):
             lightning_module.logger.experiment.add_image(name, img, self.step)
         else:
             LOGGER.warning(
-                "Logger has not image logging functionality. Not logging output "
+                "Logger has no image logging functionality. Not logging output "
                 "from PlotSamples metric."
             )
 
@@ -849,3 +860,129 @@ class PlotSamples(tm.Metric):
             sequences.append(images)
 
         return sequences
+
+
+class PlotMeans(tm.Metric):
+    """
+    Plots images of the mean retrieved quantities calculated along the spatial dimension.
+    """
+    name = "Means"
+
+    def __init__(self):
+        """
+        Args:
+            n_samples: The number of samples to display.
+
+        """
+        super().__init__()
+        self.sum_v = None
+        self.sum_h = None
+        self.cts_v = None
+        self.cts_h = None
+        self.step = 0
+
+    def reset(self):
+        """
+        Reset metric.
+        """
+        self.sum_v = None
+        self.sum_h = None
+        self.cts_v = None
+        self.cts_h = None
+        self.step += 1
+
+    @rank_zero_only
+    def update(self, pred: torch.Tensor, target: torch.Tensor):
+        """
+        Args:
+            pred: A tensor containing the point predictions from the
+                retrieval model.
+            target: A tensor containing the reference values corresponding
+                to 'pred'.
+        """
+        if not isinstance(pred, list):
+            pred = [pred]
+
+        for pred_s in pred:
+
+            dim_v = pred_s.dim() - 2
+            dim_h = pred_s.dim() - 1
+
+            pred_s_f = torch.nan_to_num(pred_s, nan=0.0).float()
+
+            dims_v = [dim for dim in range(pred_s.dim()) if dim != dim_v]
+            cts_v = torch.isfinite(pred_s).to(torch.float32).sum(dim=dims_v)
+            sum_v = pred_s_f.sum(dim=dims_v)
+
+            dims_h = [dim for dim in range(pred_s.dim()) if dim != dim_h]
+            cts_h = torch.isfinite(pred_s).to(torch.float32).sum(dim=dims_h)
+            sum_h = pred_s_f.sum(dim=dims_h)
+
+            if self.sum_v is None:
+                self.sum_v = sum_v.cpu()
+                self.cts_v = cts_v.cpu()
+                self.sum_h = sum_h.cpu()
+                self.cts_h = cts_h.cpu()
+            else:
+                self.sum_v += sum_v.cpu()
+                self.cts_v += cts_v.cpu()
+                self.sum_h += sum_h.cpu()
+                self.cts_h += cts_h.cpu()
+
+
+    @rank_zero_only
+    def log(
+        self, lightning_module: LightningModule, output_name: Optional[str] = None
+    ) -> None:
+
+        try:
+            import matplotlib.pyplot as plt
+            from PIL import Image
+        except ImportError:
+            LOGGER.warning(
+                "Could not import 'matplotlib', which is required by the PlotMeans"
+                "metric. Not producing any plots."
+            )
+            return {}
+
+        if self.sum_v is None:
+            LOGGER.warning(
+                "PlotMeans metric did not return any images for output '%s'.",
+                output_name,
+            )
+            return None
+
+        fig = plt.Figure(figsize=(4, 4))
+        ax = fig.add_subplot(1, 1, 1)
+        ax.plot(self.sum_v / self.cts_v, label="Vertical mean")
+        ax.plot(self.sum_h / self.cts_h, label="Horizontal mean")
+        ax.legend()
+        name = f"{self.name}  ({output_name})"
+
+        buf = io.BytesIO()
+        fig.savefig("test.jpg", format='jpeg', bbox_inches='tight')
+        fig.savefig(buf, format='jpeg', bbox_inches='tight')
+        buf.seek(0)
+        img = np.array(Image.open(buf)) / 255.0
+        img = np.transpose(img, [2, 0, 1])
+        lightning_module.logger.experiment.add_image(name, img, self.step)
+        del fig
+        del ax
+
+        if hasattr(lightning_module.logger.experiment, "log_image"):
+            lightning_module.logger.experiment.log_image(name, img)
+        elif isinstance(lightning_module.logger, loggers.wandb.WandbLogger):
+            lightning_module.logger.log_image(
+                key=name, images=[(255 * img[:3]).to(dtype=torch.uint8)]
+            )
+        elif hasattr(lightning_module.logger.experiment, "add_image"):
+            lightning_module.logger.experiment.add_image(name, img, self.step)
+        else:
+            LOGGER.warning(
+                "Logger has no image logging functionality. Not logging output "
+                "from PlotMeans metric."
+            )
+
+    @rank_zero_only
+    def compute(self) -> Dict[str, torch.Tensor]:
+        pass
