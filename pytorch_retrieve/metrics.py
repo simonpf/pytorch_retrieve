@@ -236,6 +236,7 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
         if pred.dim() >= 2:
             pred = pred.flatten()
             target = target.flatten()
+            weights = weights.flatten()
 
         if self.conditional is None:
             self.x += (pred * weights).sum()
@@ -359,6 +360,7 @@ class MSE(ScalarMetric, tm.Metric):
         if pred.dim() > 2:
             pred = pred.flatten()
             target = target.flatten()
+            weights = weights.flatten()
 
         if self.conditional is None:
             self.error += (((pred - target) ** 2) * weights).sum()
@@ -548,6 +550,7 @@ class SMAPE(ScalarMetric, tm.Metric):
         if pred.dim() > 2:
             pred = pred.flatten()
             target = target.flatten()
+            weights = weights.flatten()
 
         if self.conditional is None:
             valid = target >= self.threshold
