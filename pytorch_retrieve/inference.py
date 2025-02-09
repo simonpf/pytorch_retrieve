@@ -355,6 +355,7 @@ def load_input_parallel(
         n_workers: The number of total workers.
         input_queue: The queue in which the loaded input samples are placed.
     """
+    torch.set_num_threads(1)
     assert hasattr(input_loader, "__getitem__") and hasattr(input_loader, "__len__")
     for ind in range(worker_offset, len(input_loader), n_workers):
         try:
@@ -377,6 +378,8 @@ def load_input_sequential(input_loader: Any, input_queue: Queue) -> None:
         input_loader: The input loader object implementing the data loading.
         input_queue: The queue in which the loaded input samples are placed.
     """
+    torch.set_num_threads(1)
+
     input_iterator = iter(input_loader)
     while True:
         try:
@@ -819,9 +822,9 @@ def run_inference(
         If no output path is provided, the retrieval results are returned as a list of xarray.Datasets.
     """
     runner = InferenceRunner(
-        model, input_loader, inference_config, exclude_from_tiling=exclude_from_tiling
+        model, input_loader, inference_config
     )
-    runner.run(output_path=output_path, device=device, dtype=dtype)
+    return runner.run(output_path=output_path, device=device, dtype=dtype)
 
 
 @click.argument(
