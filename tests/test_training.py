@@ -259,7 +259,13 @@ def test_training(
     model = load_and_compile_model(model_config_file)
     schedule = parse_training_config(read_config_file(training_config_file))
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
-    run_eda(tmp_path / "stats", model.input_config, model.output_config, schedule["warm_up"])
+    run_eda(
+        tmp_path / "stats",
+        model.input_config,
+        model.output_config,
+        schedule["warm_up"],
+        compute_config=cpu_compute_config
+    )
 
     model = load_and_compile_model(model_config_file)
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
@@ -284,11 +290,21 @@ def test_training_multi_output(
     model = load_and_compile_model(multi_output_model_config_file)
     schedule = parse_training_config(read_config_file(multi_output_training_config_file))
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
-    run_eda(tmp_path / "stats", model.input_config, model.output_config, schedule["warm_up"])
+    run_eda(
+        tmp_path / "stats",
+        model.input_config,
+        model.output_config,
+        schedule["warm_up"],
+        compute_config=cpu_compute_config
+    )
 
     model = load_and_compile_model(multi_output_model_config_file)
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
-    run_training(tmp_path, module, compute_config=cpu_compute_config)
+    run_training(
+        tmp_path,
+        module,
+        compute_config=cpu_compute_config
+    )
 
     # Assert that checkpoint files are created.
     ckpts = list((tmp_path / "checkpoints").glob("*.ckpt"))
@@ -307,7 +323,13 @@ def test_training_encoder_decoder(
     model = load_and_compile_model(encoder_decoder_model_config_file)
     schedule = parse_training_config(read_config_file(encoder_decoder_training_config_file))
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
-    run_eda(tmp_path / "stats", model.input_config, model.output_config, schedule["warm_up"])
+    run_eda(
+        tmp_path / "stats",
+        model.input_config,
+        model.output_config,
+        schedule["warm_up"],
+        compute_config=cpu_compute_config
+    )
     run_training(tmp_path, module, compute_config=cpu_compute_config)
 
     # Assert that checkpoint files are created.
@@ -330,7 +352,12 @@ def test_load_weights(
     model = load_and_compile_model(model_config_file)
     schedule = parse_training_config(read_config_file(training_config_file))
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
-    run_eda(tmp_path / "stats", model.input_config, model.output_config, schedule["warm_up"])
+    run_eda(
+        tmp_path / "stats",
+        model.input_config,
+        model.output_config, schedule["warm_up"],
+        compute_config=cpu_compute_config
+    )
 
     model = load_and_compile_model(model_config_file)
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
@@ -426,7 +453,13 @@ def test_load_weights_non_strict(
     model = load_and_compile_model(model_config_file)
     schedule = parse_training_config(read_config_file(training_config_file))
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
-    run_eda(tmp_path / "stats", model.input_config, model.output_config, schedule["warm_up"])
+    run_eda(
+        tmp_path / "stats",
+        model.input_config,
+        model.output_config,
+        schedule["warm_up"],
+        compute_config=cpu_compute_config
+    )
 
     model = load_and_compile_model(model_config_file)
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
@@ -464,7 +497,13 @@ def test_freeze(
     model = load_and_compile_model(model_config_file)
     schedule = parse_training_config(read_config_file(training_config_file))
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
-    run_eda(tmp_path / "stats", model.input_config, model.output_config, schedule["warm_up"])
+    run_eda(
+        tmp_path / "stats",
+        model.input_config,
+        model.output_config,
+        schedule["warm_up"],
+        compute_config=cpu_compute_config
+    )
 
     model = load_and_compile_model(model_config_file)
     module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)

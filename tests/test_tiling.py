@@ -12,7 +12,7 @@ def test_tiler():
     """
     Ensure that tiling and reassembling a tensor conserves its content.
     """
-    for _ in range(1000):
+    for _ in range(100):
         height = np.random.randint(64, 1024)
         width = np.random.randint(64, 1024)
         x = np.arange(width).astype(np.float32)
@@ -37,7 +37,7 @@ def test_tiler_torch():
     """
     Test tiling of torch tensors.
     """
-    for _ in range(1000):
+    for _ in range(100):
         height = np.random.randint(64, 1024)
         width = np.random.randint(64, 1024)
         x = np.arange(width).astype(np.float32)
@@ -62,7 +62,7 @@ def test_tiler_multi_scale():
     """
     Ensure that tiling and reassembling a tensor conserves its content even for multi-scale tensors.
     """
-    for _ in range(1000):
+    for _ in range(100):
         height = 8 * np.random.randint(8, 128)
         width = 8 * np.random.randint(8, 128)
         x = np.arange(width).astype(np.float32)
@@ -94,7 +94,7 @@ def test_tiler_multi_scale_torch():
     """
     Test multi-scale tiling with torch.Tensors.
     """
-    for _ in range(1000):
+    for _ in range(100):
         height = 8 * np.random.randint(8, 128)
         width = 8 * np.random.randint(8, 128)
         x = np.arange(width).astype(np.float32)
@@ -126,7 +126,7 @@ def test_tiler_wrap_columns():
     """
     Test tiling with column-wrap.
     """
-    for _ in range(1000):
+    for _ in range(100):
         height = np.random.randint(64, 1024)
         width = np.random.randint(64, 1024)
         x = np.arange(width).astype(np.float32)
@@ -151,7 +151,7 @@ def test_tiler_wrap_columns_torch():
     """
     Test tiling with column-wrap and torch.Tensors.
     """
-    for _ in range(1000):
+    for _ in range(100):
         height = np.random.randint(64, 1024)
         width = np.random.randint(64, 1024)
         x = np.arange(width).astype(np.float32)

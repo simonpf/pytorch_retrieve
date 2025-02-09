@@ -191,7 +191,7 @@ class TrainingConfigBase:
             batch_size=self.batch_size,
             num_workers=self.n_data_loader_workers,
             pin_memory=True,
-            persistent_workers=True
+            persistent_workers=self.persistent_workers
         )
         return data_loader
 
@@ -235,7 +235,7 @@ class TrainingConfigBase:
             batch_size=self.batch_size,
             num_workers=self.n_data_loader_workers,
             pin_memory=True,
-            persistent_workers=True
+            persistent_workers=self.persistent_workers
         )
         return data_loader
 
@@ -316,6 +316,15 @@ class TrainingConfigBase:
             )
             return optimizer, scheduler
 
+        if scheduler == "ReduceLROnPlateau":
+            print("OPTIM :: ", optimizer)
+            monitor = self.scheduler_args.pop("monitor", "Validation loss")
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer, **self.scheduler_args
+            )
+            lr_scheduler = {"scheduler": scheduler, "strict": True, "monitor": monitor}
+            return optimizer, scheduler
+
         scheduler = getattr(torch.optim.lr_scheduler, scheduler)
         scheduler_args = self.scheduler_args
         if scheduler_args is None:
@@ -349,7 +358,14 @@ class TrainingConfigBase:
 
         cbs = [checkpoint_cb]
         if self.minimum_lr is not None:
-            cbs.append(callbacks.EarlyStopping(monitor="Learning rate", strict=True))
+            cbs.append(
+                callbacks.EarlyStopping(
+                    monitor="Learning rate",
+                    stopping_threshold=self.minimum_lr,
+                    patience=self.n_epochs,
+                    strict=True
+                )
+            )
         return cbs
 
     def get_metrics_dict(self, outputs: List[str]) -> Dict[str, Any]:
@@ -411,6 +427,7 @@ class TrainingConfig(TrainingConfigBase):
     accumulate_grad_batches: int = 1
     load_weights: Optional[str] = None
     n_data_loader_workers: int = 12
+    persistent_workers: bool = True
     freeze: Optional[List[str]] = None
     debug: bool = False
 
@@ -536,6 +553,9 @@ class TrainingConfig(TrainingConfigBase):
         n_data_loader_workers = get_config_attr(
             "n_data_loader_workers", int, config_dict, f"training stage {name}", 12
         )
+        persistent_workers = get_config_attr(
+            "persistent_workers", bool, config_dict, f"training stage {name}", True
+        )
         freeze = get_config_attr(
             "freeze", list, config_dict, f"training state {name}", []
         )
@@ -567,6 +587,7 @@ class TrainingConfig(TrainingConfigBase):
             accumulate_grad_batches=accumulate_grad_batches,
             load_weights=load_weights,
             n_data_loader_workers=n_data_loader_workers,
+            persistent_workers=persistent_workers,
             freeze=freeze,
             debug=debug,
         )

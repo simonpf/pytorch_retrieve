@@ -29,7 +29,8 @@ def data_loader_3d(n_samples: int, batch_size: int) -> DataLoader:
 
 CPU_COMPUTE_CONFIG = """
 accelerator="cpu"
-precision="bf16-mixed"
+precision=32
+devices=1
 strategy="auto"
 """
 
@@ -70,6 +71,8 @@ batch_size = 8
 optimizer = "SGD"
 optimizer_args = {"lr"= 1e-3}
 metrics = ["Bias", "CorrelationCoef"]
+n_data_loader_workers = 0
+persistent_workers = false
 """
 
 
@@ -147,6 +150,8 @@ batch_size = 8
 optimizer = "SGD"
 optimizer_args = {"lr"= 1e-3}
 metrics = ["Bias", "CorrelationCoef", "PlotSamples"]
+n_data_loader_workers = 0
+persistent_workers = false
 """
 
 
