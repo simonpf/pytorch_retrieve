@@ -66,6 +66,16 @@ def test_add():
     assert (masked_tensor_2.mask == (torch.logical_or(mask_1, mask_2))).all()
     assert torch.isclose(masked_tensor_2, 2.0 * tensor).all()
 
+    tensor = torch.rand(10, 10, 10)
+    mask_1 = torch.rand(10, 10, 10) - 0.5 > 0
+    masked_tensor_1 = MaskedTensor(tensor, mask=mask_1)
+
+    masked_tensor_3 = tensor + masked_tensor_1
+    assert isinstance(masked_tensor_3, MaskedTensor)
+
+    masked_tensor_4 = (torch.tensor(1.0) - masked_tensor_1) / torch.tensor(0.5)
+    assert isinstance(masked_tensor_4, MaskedTensor)
+
 
 def test_sub():
     """

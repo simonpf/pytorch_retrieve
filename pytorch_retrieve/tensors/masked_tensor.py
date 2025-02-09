@@ -330,7 +330,7 @@ def combine_masks(tensor_1, tensor_2, op=torch.logical_or, out=None, shape=None)
 @implements(torch.mul)
 def mul(inpt, other, out=None):
     """
-    Concatenate tensors and their masks.
+    Multiplicate tensors and combine their masks using 'and'.
     """
     if out is None:
         res = torch.mul(
@@ -348,7 +348,7 @@ def mul(inpt, other, out=None):
 @implements(torch.Tensor.mul)
 def tmul(inpt, other, out=None):
     """
-    Concatenate tensors and their masks.
+    Multiplication class method.
     """
     return mul(inpt, other, out=out)
 
@@ -356,12 +356,47 @@ def tmul(inpt, other, out=None):
 @implements(torch.Tensor.mul_)
 def imul(inpt, other):
     """
-    Concatenate tensors and their masks.
+    Inplace multiplication.
     """
     get_base(inpt).mul_(other)
     if isinstance(inpt, MaskedTensor):
         inpt.mask = torch.logical_or(get_mask(inpt), get_mask(other))
 
+
+@implements(torch.div)
+def div(inpt, other, out=None):
+    """
+    Divide tensors and combine their masks using 'and'.
+    """
+    if out is None:
+        res = torch.div(
+            get_base(inpt),
+            get_base(other),
+        )
+        mask = combine_masks(inpt, other, shape=res.shape)
+        return MaskedTensor(res, mask=mask, transformation=get_transformation(inpt))
+    else:
+        res = torch.div(get_base(inpt), get_base(other), out=get_base(out))
+        mask = combine_masks(inpt, other, out=out.mask, shape=res.shape)
+        return res
+
+
+@implements(torch.Tensor.div)
+def tdiv(inpt, other, out=None):
+    """
+    Division class method.
+    """
+    return div(inpt, other, out=out)
+
+
+@implements(torch.Tensor.div_)
+def idiv(inpt, other):
+    """
+    Inplace division.
+    """
+    get_base(inpt).div_(other)
+    if isinstance(inpt, MaskedTensor):
+        inpt.mask = torch.logical_or(get_mask(inpt), get_mask(other))
 
 @implements(torch.permute)
 def permute(inpt, dims):
