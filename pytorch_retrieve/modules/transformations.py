@@ -17,7 +17,7 @@ from pytorch_retrieve.modules.input import _ensure_loaded
 
 class SquareRoot(nn.Module):
     """
-    SquareRoot transformation.
+    Square root transformation.
 
     This transformation can be used in an output layer to predict the square root of the
     target quantity instead of the original quantity.
@@ -30,6 +30,22 @@ class SquareRoot(nn.Module):
 
     def invert(self, x: torch.Tensor):
         return x ** 2
+
+class CubeRoot(nn.Module):
+    """
+    Cube root transformation.
+
+    This transformation can be used in an output layer to predict the cube root of the
+    target quantity instead of the original quantity.
+    """
+    def __init__(self, **kwargs):
+        super().__init__()
+
+    def forward(self, x):
+        return torch.pow(x, 1/3)
+
+    def invert(self, x: torch.Tensor):
+        return x ** 3
 
 
 class Log(nn.Module):
@@ -156,6 +172,9 @@ class HistEqual(nn.Module):
                 tot_counts += y_i
 
             x_i = np.linspace(-1, 1, self.n_steps)
+            x_i = np.concatenate([[0.0], np.flip(1.0 - np.logspace(-6, 0, self.n_steps - 1)[:-1]), [1.0]])
+            x_i = 2.0 * x_i - 1.0
+
             x_f = np.concatenate([np.array([0.0]), np.cumsum(tot_counts)])
             x_f /= x_f[-1]
             x_f = x_f * 2 - 1.0
@@ -179,6 +198,8 @@ class HistEqual(nn.Module):
         Set bins from state dict.
         """
         self.bins = _ensure_loaded(state["bins"])
+        incs = torch.diff(self.bins)
+        self.incs = torch.cat([incs, incs[-1:]])
 
 
     def forward(self, y) -> torch.Tensor:

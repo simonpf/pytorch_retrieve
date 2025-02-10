@@ -194,7 +194,7 @@ class QuantileTensor(torch.Tensor, RegressionTensor):
         x_0 = select(x_cdf, qdim, slice(0, 1))
         x_1 = select(x_cdf, qdim, slice(1, 2))
         d_x = x_1 - x_0
-        x_l = x_0 - 3.0 * self.tau[0] * d_x / d_y
+        x_l = 0.0 * (x_0 - 3.0 * self.tau[0] * d_x / d_y)
 
         d_y = self.tau[-1] - self.tau[-2]
         x_0 = select(x_cdf, qdim, slice(-2, -1))

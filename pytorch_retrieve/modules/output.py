@@ -3,7 +3,7 @@ pytorch_retrieve.modules.output
 ===============================
 
 """
-from typing import Optional, Union, Tuple
+from typing import List, Optional, Union, Tuple
 import torch
 from torch import nn
 
@@ -98,6 +98,61 @@ class Quantiles(stats.StatsTracker, nn.Module):
         return result
 
 
+class BinnedProbability(stats.StatsTracker, nn.Module):
+    """
+    The Quantiles layer produces tensors that represent probabilistic regression
+    outputs.
+    """
+    def __init__(
+            self,
+            name: str,
+            shape: Union[int, Tuple[int]],
+            n_bins: torch.Tensor,
+            x_min: float,
+            x_max: float,
+            scale: str = "linear",
+            bins: Optional[List[float]] = None,
+            transformation: Optional[nn.Module] = None
+    ):
+        """
+        Create an output layer for a binned probability distribution.
+
+        Args:
+            name: The name of the output produced by this output layer.
+            shape: The shape of the output tensor,
+            n_bins: The number of probability bins.
+            x_min: The smallest bin boundary.
+            x_max: The largest bin boundary.
+            scale: 'linear' or 'log' for linear or logarithmically spaced bins.
+            bins: A list containing the bin boundaries.
+            transformation: An optional transformation module that will be applied to the
+                reference values prior to calculating the losses.
+        """
+        self.name = name
+        nn.Module.__init__(self)
+        if isinstance(shape, int):
+            n_features = shape
+        else:
+            n_features = shape[0]
+        stats.StatsTracker.__init__(self, n_features)
+        self.tau = torch.tensor(tau, dtype=torch.float32)
+        self.transformation = transformation
+
+    def forward(self, x):
+        """
+        Produces a QuantileTensor from a model output.
+        """
+        tau = self.tau.to(device=x.device)
+        if self.training:
+            result = QuantileTensor(x, tau=tau, transformation=self.transformation)
+        else:
+            if self.transformation is not None:
+                result = QuantileTensor(self.transformation.invert(x), tau=tau, transformation=None)
+            else:
+                result = QuantileTensor(x, tau=tau, transformation=None)
+        return result
+
+
 class Classification(stats.StatsTracker, nn.Module):
     """
     The Classification layer produces tensors that represent a classficiation.
@@ -125,7 +180,7 @@ class Classification(stats.StatsTracker, nn.Module):
 
     def forward(self, x):
         """
-        Produces a QuantileTensor from a model output.
+        Produces a ClassificationTensor from the model output.
         """
         result = ClassificationTensor(x)
         return result
@@ -158,7 +213,7 @@ class Detection(stats.StatsTracker, nn.Module):
 
     def forward(self, x):
         """
-        Produces a QuantileTensor from a model output.
+        Produces a probability of detection tensor from the model output.
         """
         result = DetectionTensor(x)
         return result

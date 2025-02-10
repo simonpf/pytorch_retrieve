@@ -44,7 +44,7 @@ class StatsTracker:
     def __init__(
         self,
         n_features: int,
-        n_bins: int = 100,
+        n_bins: int = 1024,
     ):
         """
         Args:

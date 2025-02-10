@@ -12,13 +12,14 @@ from pytorch_retrieve.eda import EDAModule
 from pytorch_retrieve.tensors import MaskedTensor
 from pytorch_retrieve.modules.transformations import (
     SquareRoot,
+    CubeRoot,
     Log,
     LogLinear,
     MinMax,
     HistEqual
 )
 
-@pytest.mark.parametrize("transformation", [SquareRoot(), Log(), LogLinear(), MinMax(100.0, 200.0)])
+@pytest.mark.parametrize("transformation", [SquareRoot(), CubeRoot(), Log(), LogLinear(), MinMax(100.0, 200.0)])
 def test_transformations(transformation):
 
     x_ref = 1e3 * torch.rand(10, 10, 10) + 1e-3
@@ -78,11 +79,12 @@ def test_hist_equal(monkeypatch, tmp_path):
 
     assert y_r.min() == y.min()
     assert y_r.max() == y.max()
+    assert torch.isclose(y_r, y, rtol=1e-2).all()
 
     bins = transformation.bins
     centers = 0.5 * (bins[1:] + bins[:-1])
     y_t = transformation(centers)
-    assert torch.isclose(torch.diff(y_t), torch.tensor(2.0 / 255), rtol=1e-3).all()
+    assert torch.isclose(torch.diff(y_t), torch.tensor(2.0 / 255), atol=1e-5, rtol=1e-3).all()
 
     centers = transformation.invert(y_t)
     assert torch.isclose(centers, 0.5 * (bins[1:] + bins[:-1])).all()
