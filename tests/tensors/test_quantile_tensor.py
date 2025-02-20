@@ -348,7 +348,7 @@ def test_pdf():
     x_pdf = x_pdf[0, 0, :, 0, 0]
     y_pdf_ref = norm.pdf(x_pdf)
 
-    assert np.all(np.isclose(y_pdf[1:-1].numpy(), y_pdf_ref[1:-1], atol=1e-2))
+    assert np.all(np.isclose(y_pdf.numpy(), y_pdf_ref, atol=1e-2))
 
 
 def test_cdf():

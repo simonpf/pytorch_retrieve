@@ -417,7 +417,7 @@ class EncoderConfig:
                 architecture.
 
         Return:
-             An 'EncoderConfig' object reprsenting the encoder configuration
+             An 'EncoderConfig' object representing the encoder configuration
              parsed from the provided encoder-decoder architecture.
         """
         input_scales = [config.out_scale for config in stem_configs.values()]
@@ -786,7 +786,7 @@ class HeadConfig:
 @dataclass
 class EncoderDecoderConfig:
     """
-    Dataclass reprsentation the configuration of an encoder-decoder model.
+    Dataclass representation the configuration of an encoder-decoder model.
     """
 
     stem_configs: Dict[str, StemConfig]

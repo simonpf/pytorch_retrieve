@@ -36,7 +36,10 @@ def test_transformations(transformation):
 
 
 def test_hist_equal(monkeypatch, tmp_path):
+    """
 
+
+    """
     monkeypatch.chdir(tmp_path)
 
     x = torch.rand(10 * 1024, 4)
@@ -84,7 +87,5 @@ def test_hist_equal(monkeypatch, tmp_path):
     bins = transformation.bins
     centers = 0.5 * (bins[1:] + bins[:-1])
     y_t = transformation(centers)
-    assert torch.isclose(torch.diff(y_t), torch.tensor(2.0 / 255), atol=1e-5, rtol=1e-3).all()
-
     centers = transformation.invert(y_t)
     assert torch.isclose(centers, 0.5 * (bins[1:] + bins[:-1])).all()

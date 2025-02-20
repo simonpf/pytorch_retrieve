@@ -59,6 +59,10 @@ def compile_architecture(config_dict) -> nn.Module:
         model = MetNet.from_config_dict(config_dict)
     elif arch_name == "Satformer":
         model = Satformer.from_config_dict(config_dict)
+    elif arch_name == "PrithviWxC":
+        from . import prithvi_wxc
+        model = prithvi_wxc.PrithviWcCModel.from_config_dict(config_dict)
+
     else:
         raise RuntimeError(
             f"The architecture '{arch_name}' is currently not supported."

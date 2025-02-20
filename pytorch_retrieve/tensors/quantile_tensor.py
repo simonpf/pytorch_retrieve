@@ -194,7 +194,7 @@ class QuantileTensor(torch.Tensor, RegressionTensor):
         x_0 = select(x_cdf, qdim, slice(0, 1))
         x_1 = select(x_cdf, qdim, slice(1, 2))
         d_x = x_1 - x_0
-        x_l = 0.0 * (x_0 - 3.0 * self.tau[0] * d_x / d_y)
+        x_l = x_0 - 3.0 * self.tau[0] * d_x / d_y
 
         d_y = self.tau[-1] - self.tau[-2]
         x_0 = select(x_cdf, qdim, slice(-2, -1))
@@ -230,31 +230,11 @@ class QuantileTensor(torch.Tensor, RegressionTensor):
 
         y_pdf = d_y / d_x
         x_pdf = 0.5 * (
-            select(x_cdf, qdim, slice(1, None)) + select(x_cdf, qdim, slice(0, -1))
+            select(x_cdf, qdim, slice(1, None))
+            + select(x_cdf, qdim, slice(0, -1))
         )
         return x_pdf, y_pdf
 
-        y_pdf = d_y / d_x
-        slices = [
-            0.5 * select(y_pdf, qdim, 0).unsqueeze(qdim),
-            y_pdf,
-            0.5 * select(y_pdf, qdim, -1).unsqueeze(qdim),
-        ]
-        y_pdf = torch.cat(slices, qdim)
-
-        x_pdf = 0.5 * (
-            select(self.base, qdim, slice(1, None))
-            + select(self.base, qdim, slice(0, -1))
-        )
-        slices = [
-            2.0 * select(x_pdf, qdim, slice(0, 1)) - select(x_pdf, qdim, slice(1, 2)),
-            x_pdf,
-            2.0 * select(x_pdf, qdim, slice(-1, None))
-            - select(x_pdf, qdim, slice(-2, -1)),
-        ]
-        x_pdf = torch.cat(slices, qdim)
-
-        return x_pdf, y_pdf
 
     def expected_value(self):
         r"""
