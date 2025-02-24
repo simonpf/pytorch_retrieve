@@ -286,6 +286,18 @@ def test_expected_value():
     assert np.isclose(exp, torch.tensor(0.05)).all()
 
 
+def test_maximum_probability():
+    """
+    Test that the expected value is calculated correctly.
+    """
+    bins = np.linspace(0, 1, 11)
+    probabilities = torch.zeros(10, 10, 10)
+    probabilities[:, 0] = 100.0
+    prob_tensor = ProbabilityTensor(probabilities, bins=bins, bin_dim=1)
+    exp = prob_tensor.maximum_probability()
+    assert np.isclose(exp, torch.tensor(0.05)).all()
+
+
 def test_probability_less_and_greater_than():
     bins = np.linspace(0, 10, 11)
     # Uniform distribution

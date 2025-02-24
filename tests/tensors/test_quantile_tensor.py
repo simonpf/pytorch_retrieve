@@ -393,6 +393,31 @@ def test_expected_value():
     assert np.all(np.isclose(x_mean, 2.0))
 
 
+def test_maximum_probability():
+    """
+    Test the calculation of the maximum probability estimator of a Gaussian distribution represented using a
+    quantile tensor.
+    """
+    tau = np.linspace(0, 1, 34)[1:-1]
+    quantiles = torch.tensor(norm.ppf(tau))
+
+    quantiles = torch.broadcast_to(
+        quantiles[None, None, ..., None, None], [3, 4, 32, 5, 6]
+    )
+    quantile_tensor = QuantileTensor(quantiles, tau=tau, quantile_dim=2)
+
+    x_mean = quantile_tensor.maximum_probability()
+    assert np.all(np.isclose(x_mean, 0.0))
+
+    quantile_tensor = QuantileTensor(quantiles + 1.0, tau=tau, quantile_dim=2)
+    x_mean = quantile_tensor.maximum_probability()
+    assert np.all(np.isclose(x_mean, 1.0))
+
+    quantile_tensor = QuantileTensor(2.0 * (quantiles + 1.0), tau=tau, quantile_dim=2)
+    x_mean = quantile_tensor.maximum_probability()
+    assert np.all(np.isclose(x_mean, 2.0))
+
+
 def test_random_sample():
     """
     Test the calculation of random samples from a Normal distribution represented using a quantile

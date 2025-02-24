@@ -175,6 +175,20 @@ class ProbabilityTensor(torch.Tensor, RegressionTensor):
         exp = torch.sum(probs * x_c[dim_pad], dim=self.bin_dim)
         return exp
 
+    def maximum_probability(self):
+        """
+        Calculate the value corresponding to the maximum of the propability density represented
+        by this tensor.
+
+        Return:
+            A tensor containing the values that maximize the probability density of the distribution
+            represented by this tensor.
+        """
+        x_pdf, y_pdf = self.pdf()
+        inds = y_pdf.max(dim=self.bin_dim, keepdim=True)[1]
+        pdf_max = torch.gather(x_pdf, self.bin_dim, inds)
+        return select(pdf_max, dim=self.bin_dim, ind=0)
+
     def probability_less_than(self, thresh):
         """
         A mean tensor alone is not a probabilistic estimate.

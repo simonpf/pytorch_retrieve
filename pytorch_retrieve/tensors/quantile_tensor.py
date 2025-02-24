@@ -306,6 +306,22 @@ class QuantileTensor(torch.Tensor, RegressionTensor):
         """
         return 1.0 - self.probability_less_than(thresh)
 
+
+    def maximum_probability(self):
+        """
+        Calculate the value corresponding to the maximum of the propability density represented
+        by this quantile tensor.
+
+        Return:
+            A tensor containing the values that maximize the probability density of the distribution
+            represented by this tensor.
+        """
+        x_pdf, y_pdf = self.pdf()
+        inds = y_pdf.max(dim=self.quantile_dim, keepdim=True)[1]
+        pdf_max = torch.gather(x_pdf, self.quantile_dim, inds)
+        return select(pdf_max, dim=self.quantile_dim, ind=0)
+
+
     def quantiles(self, tau: Union[List[float], torch.Tensor]) -> "QuantileTensor":
         """
         Calculate arbitrary quantiles by linear interpolation of existing
