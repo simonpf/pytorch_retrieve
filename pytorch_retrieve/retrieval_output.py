@@ -294,3 +294,42 @@ class RandomSample(RetrievalOutput):
         if isinstance(preds, list):
             return [self.compute(pred) for pred in preds]
         return preds.random_sample(n_samples=self.n_samples)
+
+
+class MaximumProbability(RetrievalOutput):
+    """
+    Maximum probability estimator from probabilistic regression results.
+    """
+    def __init__(
+        self,
+        model_output: OutputConfig,
+        dim_name: Optional[str] = None,
+    ):
+        """
+        Args:
+            model_output: The output config describing the model output.
+        """
+        dimensions = model_output.get_output_dimensions()
+        coordinates = model_output.get_output_coordinates()
+        extra_dims = model_output.extra_dimensions
+        coodinates = {
+            name: coords
+            for name, coords in coordinates.items()
+            if name not in extra_dims
+        }
+        super().__init__(dimensions[1:], coordinates)
+
+
+    def compute(self, preds: torch.Tensor) -> torch.Tensor:
+        """
+        Compute retrieval output from model outputs.
+
+        Args:
+            preds: A torch.Tensor containing the raw model output.
+
+        Return:
+            A tensor containing the retrieval output computed from 'preds'.
+        """
+        if isinstance(preds, list):
+            return [self.compute(pred) for pred in preds]
+        return preds.maximum_probability()

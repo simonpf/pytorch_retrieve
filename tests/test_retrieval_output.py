@@ -23,7 +23,8 @@ from pytorch_retrieve.retrieval_output import (
     ExpectedValue,
     ExceedanceProbability,
     ClassProbability,
-    RandomSample
+    RandomSample,
+    MaximumProbability
 )
 
 def get_normal_mean_tensor() -> MeanTensor:
@@ -140,7 +141,7 @@ def test_class_probability(pred: torch.Tensor):
 
 def test_random_sample():
     """
-    Ensure that calculation of expected yields 0.
+    Ensure that random samples have a mean of 0.0.
     """
     quantiles = np.linspace(0, 1, 1026)[1:-1]
     tensor = norm.ppf(quantiles)
@@ -150,5 +151,21 @@ def test_random_sample():
     )
     output_config = OutputConfig("y", "RandomSample", shape=(1,))
     output = RandomSample(output_config, n_samples=2500)
+    rand = output.compute(tensor)
+    assert torch.isclose(rand.mean(), torch.tensor(0.0), atol=0.08)
+
+
+def test_maximum_probability():
+    """
+    Ensure that maximum probability of a Gaussian distribution.
+    """
+    quantiles = np.linspace(0, 1, 1026)[1:-1]
+    tensor = norm.ppf(quantiles)
+    tensor = QuantileTensor(
+        torch.tensor(tensor)[None].to(torch.float32),
+        tau=torch.tensor(quantiles).to(torch.float32)
+    )
+    output_config = OutputConfig("y", "RandomSample", shape=(1,))
+    output = MaximumProbability(output_config)
     rand = output.compute(tensor)
     assert torch.isclose(rand.mean(), torch.tensor(0.0), atol=0.08)
