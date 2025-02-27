@@ -433,7 +433,7 @@ def finalize_results_tiled(
 
         if hasattr(input_loader, "finalize_results"):
             try:
-                results = input_loader.finalize_results(results_assembled, *args)
+                results = input_loader.finalize_results(results_assembled, *args, output_path=output_path)
             except Exception as exc:
                 LOGGER.exception("An error occurred when finalizing the results.")
                 trb = traceback.format_exc()
@@ -464,13 +464,16 @@ def finalize_results_tiled(
             results = xr.Dataset(results)
 
         filename = f"results_{cntr}.nc"
-        if isinstance(results, tuple):
-            results, filename = results
-        if output_path is not None:
-            results.to_netcdf(output_path / filename)
-            result_queue.put(output_path / filename)
-        else:
+        if isinstance(results, (str, Path)):
             result_queue.put(results)
+        else:
+            if isinstance(results, tuple):
+                results, filename = results
+            if output_path is not None:
+                results.to_netcdf(output_path / filename)
+                result_queue.put(output_path / filename)
+            else:
+                result_queue.put(results)
 
 
 def finalize_results_no_tiling(
@@ -510,7 +513,7 @@ def finalize_results_no_tiling(
 
         if hasattr(input_loader, "finalize_results"):
             try:
-                results = input_loader.finalize_results(results, *args)
+                results = input_loader.finalize_results(results, *args, output_path=output_path)
             except Exception as exc:
                 trb = traceback.format_exc()
                 exc._traceback = trb
@@ -528,14 +531,17 @@ def finalize_results_no_tiling(
                 results[key] = (("samples",) + tuple(dims), tensor)
             results = xr.Dataset(results)
 
-        filename = f"results_{cntr}.nc"
-        if isinstance(results, tuple):
-            results, filename = results
-        if output_path is not None:
-            results.to_netcdf(output_path / filename)
-            result_queue.put(output_path / filename)
-        else:
+        if isinstance(results, (str, Path)):
             result_queue.put(results)
+        else:
+            filename = f"results_{cntr}.nc"
+            if isinstance(results, tuple):
+                results, filename = results
+            if output_path is not None:
+                results.to_netcdf(output_path / filename)
+                result_queue.put(output_path / filename)
+            else:
+                result_queue.put(results)
 
 
 class InferenceRunner:

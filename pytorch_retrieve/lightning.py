@@ -411,6 +411,7 @@ class LightningRetrieval(L.LightningModule):
         """
         Validation step for a sequence prediction with a single output.
         """
+        weights = None
         if isinstance(target, dict):
             if len(target) > 1:
                 raise RuntimeError(
@@ -431,7 +432,7 @@ class LightningRetrieval(L.LightningModule):
                 "Metrics for more than two outputs are defined but "
                 "the model provided only a single, unnamed output."
             )
-            metrics = next(iter(metrics.values()))
+        metrics = next(iter(metrics.values()))
 
         if not isinstance(target, list):
             raise ValueError("Prediction is a sequence but target is not.")
@@ -439,12 +440,23 @@ class LightningRetrieval(L.LightningModule):
         scalar_metrics = [
             metric for metric in metrics if isinstance(metric, ScalarMetric)
         ]
+        # Other metrics
+        other_metrics = [
+            metric for metric in metrics if not isinstance(metric, ScalarMetric)
+        ]
 
         if weights is None:
             weights = [None] * len(target)
 
         loss = 0.0
         for pred_s, target_s, weights_s in zip(pred, target, weights):
+
+            mask = torch.isnan(target_s)
+            if mask.any():
+                target_s = MaskedTensor(target_s, mask=mask)
+            if mask.all():
+                continue
+
             loss += pred_s.loss(target_s, weights=weights_s)
 
             if hasattr(pred_s, "expected_value"):
@@ -452,6 +464,10 @@ class LightningRetrieval(L.LightningModule):
                 for metric in scalar_metrics:
                     metric = metric.to(device=scalar_pred.device)
                     metric.update(scalar_pred, target_s)
+
+        for metric in other_metrics:
+            metric = metric.to(device=pred_s.device)
+            metric.update(pred, target)
 
         return loss
 
@@ -582,7 +598,10 @@ class LightningRetrieval(L.LightningModule):
         pred = self.model(inputs)
 
         if not isinstance(pred, dict):
-            return self.validation_step_single_pred(pred, target)
+            if isinstance(pred, list):
+                return self.validation_step_single_sequence(pred, target)
+            else:
+                return self.validation_step_single_pred(pred, target)
 
         if not isinstance(target, dict):
             if len(pred) > 1:
@@ -593,7 +612,10 @@ class LightningRetrieval(L.LightningModule):
                     " be associated with."
                 )
             pred = next(iter(pred.values()))
-            return self.validation_step_single_pred(pred, target)
+            if isinstance(pred, list):
+                return self.validation_step_single_sequence(pred, target)
+            else:
+                return self.validation_step_single_pred(pred, target)
 
             raise RuntimeError(
                 "If the model output is a 'dict' the reference data must also "

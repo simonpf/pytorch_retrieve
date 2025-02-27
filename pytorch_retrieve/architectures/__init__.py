@@ -61,7 +61,7 @@ def compile_architecture(config_dict) -> nn.Module:
         model = Satformer.from_config_dict(config_dict)
     elif arch_name == "PrithviWxC":
         from . import prithvi_wxc
-        model = prithvi_wxc.PrithviWcCModel.from_config_dict(config_dict)
+        model = prithvi_wxc.PrithviWxCModel.from_config_dict(config_dict)
 
     else:
         raise RuntimeError(

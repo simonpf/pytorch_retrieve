@@ -256,7 +256,7 @@ def cli(
 
     input_configs = {
         name: InputConfig.parse(name, cfg)
-        for name, cfg in model_config["input"].items()
+        for name, cfg in model_config.get("input", {}).items()
     }
 
     # Ensure that stats for meta data input are recorded.
