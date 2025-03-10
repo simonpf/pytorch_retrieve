@@ -193,10 +193,7 @@ class Quantiles(RetrievalOutput):
         """
         if isinstance(preds, list):
             return [self.compute(pred) for pred in preds]
-        quantiles = []
-        for qf in self.tau:
-            quantiles.append(1.0 - preds.probability_greater_than(qf))
-        return torch.stack(quantiles, 1)
+        return preds.quantiles(tau=self.tau)
 
 
 class ClassProbability(RetrievalOutput):
