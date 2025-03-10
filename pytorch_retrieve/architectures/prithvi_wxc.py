@@ -402,20 +402,23 @@ class PrithviWxCModel(RetrievalModel):
         """
         return list(self.heads.keys())
 
-    def forward(
+    def forward_unroll(
         self, x: Dict[str, torch.Tensor]
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
         """
-        Forward tensor through network.
+        Creates a prediction by unrolling.
+
+        Unrolled forecasts should contain static data and lead_time inputs with an additional
+        time dimension.
 
         Args:
             x: A dictionary containing the expected model inputs.
 
         Return:
+            A dictionary mapping output names to corresponding lists of output tensors.
         """
         assert x["static"].ndim == 5
         n_steps = x["static"].shape[1]
-
 
         latent_preds = []
 
@@ -436,6 +439,29 @@ class PrithviWxCModel(RetrievalModel):
 
         preds = {
             name: [head(y_step) for y_step in latent_preds] for name, head in self.heads.items()
+        }
+        if self.return_latent:
+            preds["y"] = latent_preds
+
+        return preds
+
+    def forward(
+        self, x: Dict[str, torch.Tensor]
+    ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
+        """
+        Forward tensor through network.
+
+        Args:
+            x: A dictionary containing the expected model inputs.
+
+        Return:
+        """
+        if x["static"].ndim == 5:
+            return self.forward_unroll(x)
+
+        y = self.backbone(x)
+        preds = {
+            name: head(y) for name, head in self.heads.items()
         }
         if self.return_latent:
             preds["y"] = latent_preds
