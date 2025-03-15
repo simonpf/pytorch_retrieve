@@ -4,12 +4,16 @@ Tests for the pytorch_retrieve.utils module.
 import logging
 import os
 
+import torch
+from torch.utils.data import DataLoader, TensorDataset
+
 from pytorch_retrieve.utils import (
     read_model_config,
     read_training_config,
     read_compute_config,
     find_most_recent_checkpoint,
     update_recursive,
+    InterleaveDatasets
 )
 
 
@@ -187,3 +191,26 @@ def test_update_recursive():
     }
     res = update_recursive(dest, src)
     assert res["c"]["a"] == 1
+
+
+def test_inverleave_datasets():
+    """
+    Ensure that interleave datasets dataset works as expected.
+    """
+    x = torch.arange(0, 100, 2)
+    ds_1 = TensorDataset(x, x)
+    y = torch.arange(1, 100, 2)
+    ds_2 = TensorDataset(y, y)
+    dataset = InterleaveDatasets([ds_1, ds_2])
+    data_loader = DataLoader(
+        dataset,
+        batch_size=8,
+        collate_fn=dataset.collate_fn,
+        drop_last=True
+    )
+
+    for batch in data_loader:
+        x, y = batch
+        assert x.shape[0] == 16
+        assert ((x[::2] % 2) == 0).all()
+        assert ((x[1::2] % 2) == 1).all()
