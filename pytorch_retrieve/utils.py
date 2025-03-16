@@ -12,6 +12,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+import torch
 from torch.utils.data import Dataset, default_collate
 
 from .config import read_config_file, ComputeConfig
@@ -247,17 +248,39 @@ class InterleaveDatasets(Dataset):
         """
         The number of samples in the dataset is the maximum length of the two datasets.
         """
-        return max([len(dataset) for dataset in self.datasets])
+        return len(self.datasets[0])
 
-    def __getitem__(self, ind_1: int) -> List[Any]:
+    def __getitem__(self, ind: int) -> List[Any]:
         """
         Returns list containing a sample from each dataset.
 
         Args:
-            ind_1: Index used to select the sample from the first dataset.
+            ind: Index used to select the sample from the first dataset.
         """
-        sample = [self.datasets[0][ind_1 % len(self.datasets[0])]]
+        fill_values = {}
+        samples = []
+
+        sample = self.datasets[0][ind]
+        for target in sample[1:]:
+            if isinstance(target, dict):
+                for name, tnsr in target.items():
+                    fill_values[name] = torch.nan * torch.zeros_like(tnsr)
+        samples.append(sample)
+
         for dataset in self.datasets[1:]:
             ind = self.rng.integers(0, len(dataset))
-            sample.append(dataset[ind])
-        return sample
+            sample = dataset[ind]
+            for target in sample[1:]:
+                if isinstance(target, dict):
+                    for name, tnsr in target.items():
+                        fill_values[name] = torch.nan * torch.zeros_like(tnsr)
+            samples.append(sample)
+
+        for smpl in samples:
+            for target in smpl[1:]:
+                if isinstance(target, dict):
+                    for name, tnsr in fill_values.items():
+                        if name not in target:
+                            target[name] = tnsr
+
+        return samples
