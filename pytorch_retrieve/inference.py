@@ -785,6 +785,7 @@ class InferenceRunner:
             outputs = []
             while self.output_worker.is_alive() or self.result_queue.qsize() > 0:
                 output = self.result_queue.get()
+                print(output)
                 if output is None:
                     break
                 if isinstance(output, Exception):
@@ -798,6 +799,308 @@ class InferenceRunner:
                 outputs.append(output)
 
             return outputs
+
+
+class SequentialInferenceRunner:
+    """
+    Inference runner that doesn't use any parallel processing.
+    """
+    def __init__(
+        self,
+        model: nn.Module,
+        input_loader: Any,
+        inference_config: InferenceConfig,
+    ):
+        """
+        Args:
+            model: The retrieval model to perform inference with.
+            input_loader: An input-loader object to load the retrieval input data.
+            inference_config: The inference configuration.
+        """
+        self.model = model
+        self.input_loader = input_loader
+        self.inference_config = inference_config
+
+    def process_simple(
+            self,
+            counter: int,
+            input_data: Dict[str, torch.Tensor],
+            input_args: List[Any],
+            processor: BatchProcessor,
+            input_loader: "InputLoader",
+            output_config: OutputConfig,
+            output_path: Optional[Path]
+    ):
+        """
+        Processes inputs without tiling.
+
+        Uses the batch_processor to batch inputs and process them. The results are finalized
+        using either the input_loader's 'finalize_results' method or converted to an xarray.Dataset.
+        The results are stored in NetCDF4 to output_path if given otherwise the xarray.Dataset
+        is returned directly.
+
+        Args:
+            counter: A counter tracking which input sample is being processed.
+            input_data: The input data for the current sample.
+            input_args: The auxiliary arguments returned from the data loader.
+            processor: The batch processor to use for processing.
+            input_loader: The input laoder.
+            output_config: The output config of the retrieval model. Used to infer dimensions of
+                the output results.
+            output_path: Optional path to which to write the outputs.
+
+        Return:
+            An xarray.Dataset containing the results or a path pointing to the file to which
+            the retrieval results were written.
+        """
+        results_stack = processor.process(input_data)
+        results_stack += processor.process(None)
+        for results in results_stack:
+            if hasattr(input_loader, "finalize_results"):
+                try:
+                    results = input_loader.finalize_results(results, input_args, output_path=output_path)
+                except Exception as exc:
+                    LOGGER.exception(
+                        "Encoutered an error when finalizing retrieval results."
+                    )
+            else:
+                results = {}
+                for key, tensor in results.items():
+                    dims = get_dimensions(key, output_config, self.inference_config)
+                    if dims is None:
+                        dims = tuple([f"{key}_dim_{ind}" for ind in range(tensor.ndim - 2)])
+                    if len(dims) < tensor.ndim:
+                        tensor = torch.squeeze(tensor)
+
+                    results[key] = (("samples",) + tuple(dims), tensor)
+                results = xr.Dataset(results)
+
+            if isinstance(results, (str, Path)):
+                return results
+
+            filename = f"results_{counter}.nc"
+            if isinstance(results, tuple):
+                results, filename = results
+            if output_path is not None:
+                results.to_netcdf(output_path / filename)
+                return output_path / filename
+
+            return results
+
+    def process_tiled(
+            self,
+            counter: int,
+            input_data: Dict[str, torch.Tensor],
+            input_args: List[Any],
+            processor: BatchProcessor,
+            input_loader: "InputLoader",
+            output_config: OutputConfig,
+            output_path: Path,
+            tile_size: Tuple[int, int],
+            overlap: Optional[int] = None,
+            exclude_from_tiling: Optional[List[str]] = None
+    ):
+        """
+        Processes inputs with tiling.
+
+        Tiles the input data, processes each tile an re-assembles the outputs. The assembled results
+        are finalized using either the input_loader's 'finalize_results' method or converted to an xarray.Dataset.
+        The results are stored in NetCDF4 to output_path if given otherwise the xarray.Dataset
+        is returned directly.
+
+        Args:
+            counter: A counter tracking which input sample is being processed.
+            input_data: The input data for the current sample.
+            input_args: The auxiliary arguments returned from the data loader.
+            processor: The batch processor to use for processing.
+            input_loader: The input laoder.
+            output_config: The output config of the retrieval model. Used to infer dimensions of
+                the output results.
+            output_path: Optional path to which to write the outputs.
+            tile_size: A tuple defining the tile size to use for the processing.
+            overlap: The size of the overlap between neighboring tiles.
+            exclude_from_tiling: Names of the variables to exlude from tiling.
+
+        Return:
+            An xarray.Dataset containing the results or a path pointing to the file to which
+            the retrieval results were written.
+        """
+        if overlap is None:
+            overlap = (tile_size[0] // 8, tile_size[1] // 8)
+
+        if exclude_from_tiling is not None:
+            not_tiled = {
+                name: input_data.pop(name)
+                for name in exclude_from_tiling
+            }
+        else:
+            not_tiled = {}
+        tiler = Tiler(input_data, tile_size=tile_size, overlap=overlap)
+
+        results_tiled = np.array([[None] * tiler.N] * tiler.M)
+        tile_stack = []
+
+        for row_ind in range(tiler.M):
+            for col_ind in range(tiler.N):
+                tiled_input = tiler.get_tile(row_ind, col_ind)
+                if len(not_tiled) > 0:
+                    tiled_input.update(not_tiled)
+
+                results_s = processor.process(tiled_input)
+                tile_stack.append((row_ind, col_ind))
+                for output in results_s:
+                    tile_inds, *tile_stack = tile_stack
+                    results_tiled.__setitem__(tile_inds, output)
+
+        results_s = processor.process(None)
+        for output in results_s:
+            tile_inds, *tile_stack = tile_stack
+            results_tiled.__setitem__(tile_inds, output)
+
+        assert len(tile_stack) == 0
+
+        results_ass = tiler.assemble(results_tiled)
+
+        if hasattr(input_loader, "finalize_results"):
+            try:
+                results = input_loader.finalize_results(results_ass, input_args, output_path=output_path)
+            except Exception as exc:
+                LOGGER.exception("An error occurred when finalizing the results.")
+        else:
+            results = {}
+            for key, tensor in results_ass.items():
+                dims = get_dimensions(key, output_config, self.inference_config)
+                if dims is None:
+                    dims = tuple([f"{key}_dim_{ind}" for ind in range(tensor.ndim - 2)])
+
+                # Discard dummy dimensions if necessary.
+                if isinstance(tensor, list):
+                    tensor = [
+                        t_i.squeeze() if len(dims) < t_i.ndim else t_i for t_i in tensor
+                    ]
+                    results[key] = (
+                        tuple(dims) + (f"{key}_step", "x", "y"),
+                        np.stack(tensor),
+                    )
+                elif len(dims) < tensor.ndim:
+                    tensor = torch.squeeze(tensor)
+                    results[key] = (tuple(dims) + ("x", "y"), tensor)
+                    results = xr.Dataset(results)
+
+        filename = f"results_{counter}.nc"
+        if isinstance(results, (str, Path)):
+            return results
+        if isinstance(results, tuple):
+            results, filename = results
+        if output_path is not None:
+            results.to_netcdf(output_path / filename)
+            return output_path / filename
+        return results
+
+
+    def run(
+        self,
+        output_path,
+        device: torch.device = torch.device("cpu"),
+        dtype: torch.dtype = torch.float32,
+    ) -> List[Union[Path, xr.Dataset]]:
+        """
+        Run inference.
+
+        This iterates over all inputs provided by the input loader, processes them using the
+        given model, and finalizes the results.
+
+        Args:
+            output_path: An optional output path to which to write the retrieval results.
+                If 'None', retrieval results will be returned as xr.Datasets.
+            device: The device to run the ML inference on.
+            dtype: The dtype to use for the processing.
+            n_input_loaders: The number of concurrent processes to use to load the input.
+
+        Return:
+            If 'output_path' is not None, a list of the produced output files is returned.
+            If 'output_path' is None, a list containing the retrieval results as xarray.Datasets
+            is returned.
+        """
+        outputs = []
+        arg_stack = []
+        cntr = 1
+
+        model = self.model.eval()
+        if isinstance(model, RetrievalModel):
+            output_cfg = model.output_config
+        else:
+            output_cfg = None
+
+        exclude_from_tiling = self.inference_config.exclude_from_tiling
+        if exclude_from_tiling is None:
+            exclude_from_tiling = []
+
+        input_iterator = iter(self.input_loader)
+        cntr = 0
+
+        with Progress() as progress:
+            task = progress.add_task(
+                "Processing input:", total=len(self.input_loader)
+            )
+
+            while True:
+                try:
+                    input_data = next(input_iterator)
+                except StopIteration:
+                    break
+                except Exception as exc:
+                    LOGGER.exception(
+                        "Encountered an error when loading input data."
+                    )
+
+                args = []
+                if isinstance(input_data, (list, tuple)):
+                    input_data, *args = input_data
+                tile_size = self.inference_config.tile_size
+                overlap = self.inference_config.spatial_overlap
+                batch_size = self.inference_config.batch_size
+
+                processor = BatchProcessor(
+                    model,
+                    batch_size=batch_size,
+                    inference_config=self.inference_config,
+                    device=device,
+                    dtype=dtype,
+                )
+
+                if tile_size is not None:
+                    outputs.append(
+                        self.process_tiled(
+                            cntr,
+                            input_data,
+                            args,
+                            processor,
+                            self.input_loader,
+                            output_cfg,
+                            output_path,
+                            tile_size=tile_size,
+                            overlap=overlap,
+                            exclude_from_tiling=exclude_from_tiling
+                        )
+                    )
+                else:
+                    outputs.append(
+                        self.process_simple(
+                            cntr,
+                            input_data,
+                            args,
+                            processor,
+                            self.input_loader,
+                            output_cfg,
+                            output_path
+                        )
+                    )
+
+                cntr += 1
+                progress.update(task, advance=1.0)
+
+        return outputs
 
 
 def run_inference(
@@ -827,7 +1130,7 @@ def run_inference(
         If an output path is provided, a list of the output files that were written is returned.
         If no output path is provided, the retrieval results are returned as a list of xarray.Datasets.
     """
-    runner = InferenceRunner(
+    runner = SequentialInferenceRunner(
         model, input_loader, inference_config
     )
     return runner.run(output_path=output_path, device=device, dtype=dtype)
