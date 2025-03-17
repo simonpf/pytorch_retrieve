@@ -858,7 +858,7 @@ class SequentialInferenceRunner:
         for results in results_stack:
             if hasattr(input_loader, "finalize_results"):
                 try:
-                    results = input_loader.finalize_results(results, input_args, output_path=output_path)
+                    results = input_loader.finalize_results(results, *input_args, output_path=output_path)
                 except Exception as exc:
                     LOGGER.exception(
                         "Encoutered an error when finalizing retrieval results."
@@ -898,7 +898,8 @@ class SequentialInferenceRunner:
             output_path: Path,
             tile_size: Tuple[int, int],
             overlap: Optional[int] = None,
-            exclude_from_tiling: Optional[List[str]] = None
+            exclude_from_tiling: Optional[List[str]] = None,
+            progress_bar: Optional[Progress] = None
     ):
         """
         Processes inputs with tiling.
@@ -920,6 +921,8 @@ class SequentialInferenceRunner:
             tile_size: A tuple defining the tile size to use for the processing.
             overlap: The size of the overlap between neighboring tiles.
             exclude_from_tiling: Names of the variables to exlude from tiling.
+            progress_bar: An optional rich.Progress object to use to track the progress of the tile
+                processing.
 
         Return:
             An xarray.Dataset containing the results or a path pointing to the file to which
@@ -940,6 +943,14 @@ class SequentialInferenceRunner:
         results_tiled = np.array([[None] * tiler.N] * tiler.M)
         tile_stack = []
 
+        total = tiler.M * tiler.N
+
+        if progress_bar is not None:
+            task = progress_bar.add_task(f"[bold hot_pink3] >>> Processing tile: 1/{total}", total=total)
+        else:
+            task = None
+
+        tile_ctr = 0
         for row_ind in range(tiler.M):
             for col_ind in range(tiler.N):
                 tiled_input = tiler.get_tile(row_ind, col_ind)
@@ -949,13 +960,29 @@ class SequentialInferenceRunner:
                 results_s = processor.process(tiled_input)
                 tile_stack.append((row_ind, col_ind))
                 for output in results_s:
+                    tile_ctr += 1
                     tile_inds, *tile_stack = tile_stack
                     results_tiled.__setitem__(tile_inds, output)
+                    if progress_bar is not None:
+                        progress_bar.update(
+                            task,
+                            description=f"[bold hot_pink3] >>> Processing tile: {tile_ctr + 1}/{total}",
+                            advance=1.0
+                        )
+
+
 
         results_s = processor.process(None)
         for output in results_s:
+            tile_ctr += 1
             tile_inds, *tile_stack = tile_stack
             results_tiled.__setitem__(tile_inds, output)
+            if progress_bar is not None:
+                progress_bar.update(
+                    task,
+                    description=f"[bold hot_pink3] >>> Processing tile: {tile_ctr + 1}/{total}",
+                    advance=1.0
+                )
 
         assert len(tile_stack) == 0
 
@@ -963,9 +990,10 @@ class SequentialInferenceRunner:
 
         if hasattr(input_loader, "finalize_results"):
             try:
-                results = input_loader.finalize_results(results_ass, input_args, output_path=output_path)
+                results = input_loader.finalize_results(results_ass, *input_args, output_path=output_path)
             except Exception as exc:
                 LOGGER.exception("An error occurred when finalizing the results.")
+                return None
         else:
             results = {}
             for key, tensor in results_ass.items():
@@ -1022,6 +1050,9 @@ class SequentialInferenceRunner:
             If 'output_path' is None, a list containing the retrieval results as xarray.Datasets
             is returned.
         """
+        if output_path is not None:
+            output_path = Path(output_path)
+
         outputs = []
         arg_stack = []
         cntr = 1
@@ -1039,9 +1070,14 @@ class SequentialInferenceRunner:
         input_iterator = iter(self.input_loader)
         cntr = 0
 
+        try:
+            total = len(self.input_loader)
+        except AttributeError:
+            total = "?"
+
         with Progress() as progress:
             task = progress.add_task(
-                "Processing input:", total=len(self.input_loader)
+                f"[bold dark_orange]Processing retrieval input: 1/{total}", total=len(self.input_loader)
             )
 
             while True:
@@ -1081,7 +1117,8 @@ class SequentialInferenceRunner:
                             output_path,
                             tile_size=tile_size,
                             overlap=overlap,
-                            exclude_from_tiling=exclude_from_tiling
+                            exclude_from_tiling=exclude_from_tiling,
+                            progress_bar=progress
                         )
                     )
                 else:
@@ -1098,7 +1135,11 @@ class SequentialInferenceRunner:
                     )
 
                 cntr += 1
-                progress.update(task, advance=1.0)
+                progress.update(
+                    task,
+                    description=f"[bold dark_orange] Processing retrieval input: {cntr + 1}/{total}",
+                    advance=1.0
+                )
 
         return outputs
 
