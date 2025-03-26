@@ -5,11 +5,15 @@ pytorch_retrieve.utils
 Shared utility functions.
 """
 import logging
+from itertools import chain
+import os
 from pathlib import Path
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
+import torch
+from torch.utils.data import Dataset, default_collate
 
 from .config import read_config_file, ComputeConfig
 
@@ -212,3 +216,71 @@ def update_recursive(dest: Dict[Any, Any], src: Dict[Any, Any]) -> Dict[Any, Any
         else:
             res[key] = value
     return res
+
+
+class InterleaveDatasets(Dataset):
+    """
+    This special dataset class combines two datasets be interleaving them. This doubles the effective
+    batch size of the data but ensures that each batch contains an even number of samples from each
+    dataset.
+    """
+    def __init__(
+            self,
+            datasets: List[Dataset]
+    ):
+        """
+        Args:
+            datasets: List of the datasets to interleave.
+        """
+        self.datasets = datasets
+        seed = int.from_bytes(os.urandom(4), "big")
+        self.rng = np.random.default_rng(seed)
+
+    def collate_fn(self, batch):
+        """
+        Special collate function that handles the nested samples returned from the dataset.
+
+        """
+        full_batch = list(chain.from_iterable(batch))
+        return default_collate(full_batch)
+
+    def __len__(self) -> int:
+        """
+        The number of samples in the dataset is the maximum length of the two datasets.
+        """
+        return len(self.datasets[0])
+
+    def __getitem__(self, ind: int) -> List[Any]:
+        """
+        Returns list containing a sample from each dataset.
+
+        Args:
+            ind: Index used to select the sample from the first dataset.
+        """
+        fill_values = {}
+        samples = []
+
+        sample = self.datasets[0][ind]
+        for target in sample[1:]:
+            if isinstance(target, dict):
+                for name, tnsr in target.items():
+                    fill_values[name] = torch.nan * torch.zeros_like(tnsr)
+        samples.append(sample)
+
+        for dataset in self.datasets[1:]:
+            ind = self.rng.integers(0, len(dataset))
+            sample = dataset[ind]
+            for target in sample[1:]:
+                if isinstance(target, dict):
+                    for name, tnsr in target.items():
+                        fill_values[name] = torch.nan * torch.zeros_like(tnsr)
+            samples.append(sample)
+
+        for smpl in samples:
+            for target in smpl[1:]:
+                if isinstance(target, dict):
+                    for name, tnsr in fill_values.items():
+                        if name not in target:
+                            target[name] = tnsr
+
+        return samples

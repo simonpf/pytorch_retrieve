@@ -5,6 +5,7 @@ pytorch_retrieve.architecture.satformer
 The SatFormer is a hybrid convolutional transformer architecture for image to
 image mapping of satellite imagery.
 """
+
 from copy import copy
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -17,12 +18,13 @@ from pytorch_retrieve.config import (
     InputConfig,
     OutputConfig,
     read_config_file,
-    get_config_attr
+    get_config_attr,
 )
 
 from pytorch_retrieve.modules.mlp import MLP
 from pytorch_retrieve.modules.conv import blocks
 from pytorch_retrieve.modules.conv.utils import Scale
+from pytorch_retrieve.modules.encodings import FourierEncoding
 from pytorch_retrieve.modules.input import StandardizationLayer
 from pytorch_retrieve.modules.normalization import get_normalization_factory
 from pytorch_retrieve.modules.activation import get_activation_factory
@@ -43,6 +45,7 @@ class FlipDims(nn.Module):
     [batch, chans], applies the base_module, and reshapes the data to its
     original shape.
     """
+
     def __init__(self, base_module: nn.Module):
         """
         base_module: A torch Module defining the module to apply to the reshaped
@@ -63,7 +66,6 @@ class FlipDims(nn.Module):
         return y
 
 
-
 @dataclass
 class EncoderConfig:
     """
@@ -81,6 +83,7 @@ class EncoderConfig:
         downsampling_factory: Name of the factory class to use to create the
             downsampling modules.
     """
+
     token_length: int
     channels: List[int]
     stage_depths: List[int]
@@ -91,10 +94,10 @@ class EncoderConfig:
 
     @classmethod
     def parse(
-            cls,
-            stem_configs: dict[str, StemConfig],
-            config_dict: Dict[str, object],
-            token_length: int,
+        cls,
+        stem_configs: dict[str, StemConfig],
+        config_dict: Dict[str, object],
+        token_length: int,
     ) -> "EncoderConfig":
         """
         Parse encoder config from configuration dict.
@@ -199,7 +202,9 @@ class EncoderConfig:
         """
         block_factory = blocks.Satformer()
         if isinstance(self.block_factory_args, list):
-            block_factory = [blocks.Satformer(**args) for args in self.block_factory_args]
+            block_factory = [
+                blocks.Satformer(**args) for args in self.block_factory_args
+            ]
             stage_factory = [SequentialWKeywordsStage] * len(block_factory)
         else:
             block_factory = blocks.Satformer(self.block_factory_args)
@@ -215,7 +220,7 @@ class EncoderConfig:
             self.stage_depths,
             downsampling_factors=self.downsampling_factors,
             block_factory=block_factory,
-            stage_factory=stage_factory
+            stage_factory=stage_factory,
         )
 
 
@@ -236,6 +241,7 @@ class DecoderConfig:
         block_factory_args: Dictionary containing the argument passed to
             the block factory.
     """
+
     output_embed_dim: int
     channels: List[int]
     stage_depths: List[int]
@@ -277,16 +283,17 @@ class DecoderConfig:
             if not isinstance(block_factory_args, list):
                 block_factory_args = [block_factory_args] * len(block_factory)
             else:
-                if len(block_factory) != len(channels) - 1 or len(block_factory_args) != len(channels) - 1:
+                if (
+                    len(block_factory) != len(channels) - 1
+                    or len(block_factory_args) != len(channels) - 1
+                ):
                     raise RuntimeError(
                         "If 'block_factory' and 'block_factory_args' are provided as lists, they must "
                         "have the same length as the number of stages in the decoder."
                     )
 
         skip_connections = encoder_config.skip_connections
-        skip_connections = {
-            key.scale: value for key, value in skip_connections.items()
-        }
+        skip_connections = {key.scale: value for key, value in skip_connections.items()}
 
         return DecoderConfig(
             output_embed_dim,
@@ -300,6 +307,18 @@ class DecoderConfig:
     @property
     def out_channels(self):
         return self.channels[-1]
+
+    def get_scales(self, base_scale) -> List[int]:
+        """
+        List of the scales corresponding to the output of all stages of the
+        encoder.
+        """
+        scale = base_scale
+        scales = [scale]
+        for f_d in self.upsampling_factors:
+            scale = scale // f_d
+            scales.append(scale)
+        return scales
 
     def to_config_dict(self) -> Dict[str, object]:
         """
@@ -324,7 +343,9 @@ class DecoderConfig:
 
         block_factory = blocks.Satformer()
         if isinstance(self.block_factory_args, list):
-            block_factory = [blocks.Satformer(**args) for args in self.block_factory_args]
+            block_factory = [
+                blocks.Satformer(**args) for args in self.block_factory_args
+            ]
             stage_factory = [SequentialWKeywordsStage] * len(block_factory)
         else:
             block_factory = blocks.Satformer(self.block_factory_args)
@@ -335,7 +356,8 @@ class DecoderConfig:
         if skip_connections:
             skip_connections = self.skip_connections
             skip_connections = {
-                Scale(key): self.output_embed_dim for key, value in skip_connections.items()
+                Scale(key): self.output_embed_dim
+                for key, value in skip_connections.items()
             }
         else:
             skip_connections = None
@@ -365,6 +387,8 @@ class EncodingConfig:
     """
     Configuration of an encoding layer.
     """
+
+    kind: str
     channels_in: int
     channels_out: int
     depth: int
@@ -375,23 +399,44 @@ class EncodingConfig:
     residual_connections: Optional[str] = None
 
     @classmethod
-    def parse(
-        cls, name: str, config_dict: Dict[str, object]
-    ) -> "EncodingConfig":
+    def parse(cls, name: str, config_dict: Dict[str, object]) -> "EncodingConfig":
+        kind = get_config_attr(
+            "kind",
+            str,
+            config_dict,
+            f"architecture.encoding.{name}",
+            default="mlp",
+        )
         channels_in = get_config_attr(
-            "channels_in", int, config_dict, f"architecture.encoding.{name}", required=True
+            "channels_in",
+            int,
+            config_dict,
+            f"architecture.encoding.{name}",
+            required=True,
         )
         channels_out = get_config_attr(
-            "channels_out", int, config_dict, f"architecture.encoding.{name}", required=True
+            "channels_out",
+            int,
+            config_dict,
+            f"architecture.encoding.{name}",
+            required=True,
         )
         depth = get_config_attr(
-            "depth", int, config_dict, f"architecture.encoding.{name}", required=True
+            "depth", int, config_dict, f"architecture.encoding.{name}", default=1
         )
         normalize = get_config_attr(
-            "normalize", str, config_dict, f"architecture.encoding.{name}", default=None,
+            "normalize",
+            str,
+            config_dict,
+            f"architecture.encoding.{name}",
+            default=None,
         )
         input_name = get_config_attr(
-            "input_name", str, config_dict, f"architecture.encoding.{name}", default=None,
+            "input_name",
+            str,
+            config_dict,
+            f"architecture.encoding.{name}",
+            default=None,
         )
         if normalize is not None and input_name is None:
             raise ValueError(
@@ -400,22 +445,36 @@ class EncodingConfig:
             )
 
         activation_factory = get_config_attr(
-            "activation_factory", str, config_dict, f"architecture.encoder.{name}", default="GELU"
+            "activation_factory",
+            str,
+            config_dict,
+            f"architecture.encoder.{name}",
+            default="GELU",
         )
         normalization_factory = get_config_attr(
-            "normalization_factory", str, config_dict, f"architecture.encoder.{name}", default="LayerNorm"
+            "normalization_factory",
+            str,
+            config_dict,
+            f"architecture.encoder.{name}",
+            default="LayerNorm",
         )
         residual_connections = get_config_attr(
-            "residual_connections", str, config_dict, f"architecture.encoder.{name}", default="simple"
+            "residual_connections",
+            str,
+            config_dict,
+            f"architecture.encoder.{name}",
+            default="simple",
         )
         return EncodingConfig(
+            kind=kind,
             channels_in=channels_in,
             channels_out=channels_out,
             depth=depth,
             normalize=normalize,
             input_name=input_name,
             activation_factory=activation_factory,
-            normalization_factory=normalization_factory, residual_connections=residual_connections
+            normalization_factory=normalization_factory,
+            residual_connections=residual_connections,
         )
 
     def to_config_dict(self):
@@ -427,29 +486,43 @@ class EncodingConfig:
         Compile encoding.
         """
         from pytorch_retrieve.modules.normalization import LayerNormFirst
-        activation_factory = get_activation_factory(self.activation_factory)
-        normalization_factory = get_normalization_factory(self.normalization_factory)
+
         blocks = []
         if self.normalize is not None and self.normalize != "none":
             blocks.append(
-                StandardizationLayer(kind=self.normalize, name=self.input_name, n_features=self.channels_in)
+                StandardizationLayer(
+                    kind=self.normalize,
+                    name=self.input_name,
+                    n_features=self.channels_in,
+                )
             )
-        blocks.append(
-            FlipDims(MLP(
-                in_channels=self.channels_in,
-                out_channels=self.channels_out,
-                n_layers=self.depth,
-                activation_factory=activation_factory,
-                normalization_factory=normalization_factory,
-                residual_connections=self.residual_connections
-            ))
-        )
-        return nn.Sequential(*blocks, LayerNormFirst(self.channels_out))
 
+        if self.kind.lower() == "fourier":
+            blocks.append(FourierEncoding(self.channels_in, self.channels_out, dim=1))
+        else:
+            activation_factory = get_activation_factory(self.activation_factory)
+            normalization_factory = get_normalization_factory(
+                self.normalization_factory
+            )
+            blocks += [
+                FlipDims(
+                    MLP(
+                        in_channels=self.channels_in,
+                        out_channels=self.channels_out,
+                        n_layers=self.depth,
+                        activation_factory=activation_factory,
+                        normalization_factory=normalization_factory,
+                        residual_connections=self.residual_connections,
+                    )
+                ),
+                LayerNormFirst(self.channels_out),
+            ]
+
+        return nn.Sequential(*blocks)
 
 
 @dataclass
-class SatformerConfig():
+class SatformerConfig:
     """
     Configuration for a Satformer.
 
@@ -463,6 +536,7 @@ class SatformerConfig():
         decoder_config: The configuration for the decoder.
         head_configs: The configuration for the network heads.
     """
+
     token_length: int
     output_embed_dim: int
     stem_configs: Dict[str, StemConfig]
@@ -479,7 +553,14 @@ class SatformerConfig():
         arch_config: Dict[str, object],
     ):
         token_length = len(input_configs)
-        output_embed_dim = get_config_attr("output_embed_dim", int, arch_config, "architecture", required=False, default=32)
+        output_embed_dim = get_config_attr(
+            "output_embed_dim",
+            int,
+            arch_config,
+            "architecture",
+            required=False,
+            default=32,
+        )
 
         stem_config_dict = arch_config.get("stem", {})
         stem_configs = {}
@@ -498,11 +579,17 @@ class SatformerConfig():
         for name, enc_config in enc_config_dict.items():
             enc_configs[name] = EncodingConfig.parse(name, enc_config)
 
-        encoder_config = get_config_attr("encoder", dict, arch_config, "architecture", required=True)
+        encoder_config = get_config_attr(
+            "encoder", dict, arch_config, "architecture", required=True
+        )
         encoder_config = EncoderConfig.parse(stem_configs, encoder_config, token_length)
 
-        decoder_config = get_config_attr("decoder", dict, arch_config, "architecture", required=True)
-        decoder_config = DecoderConfig.parse(output_embed_dim, encoder_config, decoder_config)
+        decoder_config = get_config_attr(
+            "decoder", dict, arch_config, "architecture", required=True
+        )
+        decoder_config = DecoderConfig.parse(
+            output_embed_dim, encoder_config, decoder_config
+        )
 
         head_config_dict = arch_config.get("head", {})
         individual = head_config_dict.get("individual", True)
@@ -515,13 +602,17 @@ class SatformerConfig():
                     config_dict = head_config_dict.get("default", {})
                 head_configs[name] = HeadConfig.parse(
                     decoder_config.out_channels + encoder_config.token_length,
-                    output_config, name, config_dict
+                    output_config,
+                    name,
+                    config_dict,
                 )
         else:
             head_configs = {
                 name: HeadConfig.parse(
                     decoder_config.out_channels + encoder_config.token_length,
-                    output_config, "head", head_config_dict
+                    output_config,
+                    "head",
+                    head_config_dict,
                 )
                 for name, output_config in output_configs.items()
             }
@@ -641,9 +732,10 @@ class CondPerceiver(nn.Module):
         x, _ = self.att(x_in, x_att, x_att, key_padding_mask=key_padding_mask)
 
         n_batch, _, n_y, n_x = x_cond.shape
-        x = torch.permute(x.unflatten(0, (n_batch, n_y, n_x)), (0, 4, 3, 1, 2)).select(2, 0)
+        x = torch.permute(x.unflatten(0, (n_batch, n_y, n_x)), (0, 4, 3, 1, 2)).select(
+            2, 0
+        )
         return x
-
 
 
 class Satformer(RetrievalModel):
@@ -678,17 +770,17 @@ class Satformer(RetrievalModel):
         config = SatformerConfig.parse(
             input_configs=input_config,
             output_configs=output_config,
-            arch_config=arch_config
+            arch_config=arch_config,
         )
         return cls(
             input_config=input_config, output_config=output_config, arch_config=config
         )
 
     def __init__(
-            self,
-            input_config: Dict[str, InputConfig],
-            output_config: Dict[str, OutputConfig],
-            arch_config: SatformerConfig,
+        self,
+        input_config: Dict[str, InputConfig],
+        output_config: Dict[str, OutputConfig],
+        arch_config: SatformerConfig,
     ):
         super().__init__(
             config_dict={
@@ -705,9 +797,16 @@ class Satformer(RetrievalModel):
         self.meta_data = {name: cfg.meta_data for name, cfg in input_config.items()}
         self.encoding_map = {name: cfg.encoding for name, cfg in input_config.items()}
         self.input_names = list(self.input_config)
-        self.masks = {name: cfg.mask for name, cfg in input_config.items() if cfg.mask is not None}
-        self.masks.update({name: cfg.mask for name, cfg in output_config.items() if cfg.mask is not None})
-
+        self.masks = {
+            name: cfg.mask for name, cfg in input_config.items() if cfg.mask is not None
+        }
+        self.masks.update(
+            {
+                name: cfg.mask
+                for name, cfg in output_config.items()
+                if cfg.mask is not None
+            }
+        )
 
         perceivers = {}
         self.outputs = {}
@@ -716,19 +815,19 @@ class Satformer(RetrievalModel):
             if output_cfg.encoding is not None and output_cfg.encoding != "None":
                 self.encoding_map[output_name] = output_cfg.encoding
             if output_cfg.encoding is None or output_cfg.encoding == "None":
-                perceivers[output_name] = Perceiver(arch_config.encoder_config.channels[-1])
+                perceivers[output_name] = Perceiver(
+                    arch_config.encoder_config.channels[-1]
+                )
             else:
                 perceivers[output_name] = CondPerceiver(
                     arch_config.output_embed_dim,
-                    arch_config.encoder_config.channels[-1]
+                    arch_config.encoder_config.channels[-1],
                 )
-
 
         self.perceivers = nn.ModuleDict(perceivers)
         self.token_length = len(self.input_names)
 
         n_chans = arch_config.encoder_config.channels[0]
-
 
         self.stems = nn.ModuleDict(
             {name: cfg.compile() for name, cfg in arch_config.stem_configs.items()}
@@ -738,24 +837,29 @@ class Satformer(RetrievalModel):
         )
         self.encoder = arch_config.encoder_config.compile()
         skip_connections = copy(self.encoder.skip_connections)
-        self.enc_norms = nn.ModuleDict({
-            str(scl): LayerNormFirst(chans) for scl, chans in skip_connections.items()
-        })
-        self.decoders = nn.ModuleDict({
-            name: arch_config.decoder_config.compile(
-                token_length=self.token_length,
-                skip_connections=cfg.conditional is not None and cfg.conditional != "None",
-            ) for name, cfg in output_config.items()
-        })
+        self.enc_norms = nn.ModuleDict(
+            {str(scl): LayerNormFirst(chans) for scl, chans in skip_connections.items()}
+        )
+        self.decoders = nn.ModuleDict(
+            {
+                name: arch_config.decoder_config.compile(
+                    token_length=self.token_length,
+                    skip_connections=cfg.conditional is not None
+                    and cfg.conditional != "None",
+                )
+                for name, cfg in output_config.items()
+            }
+        )
 
         scales = arch_config.encoder_config.scales
-        channels = arch_config.encoder_config.channels
+        max_scale = max(scales)
+        scales = arch_config.decoder_config.get_scales(max_scale)
         base_scale = min(scales)
 
         downsamplers = []
         downsampler_scales = []
 
-        for scale, n_chans in zip(scales, channels):
+        for scale in scales:
             f_d = (scale // base_scale).scale[1:]
             downsamplers.append(nn.AvgPool2d(f_d, f_d))
             downsampler_scales.append(scale)
@@ -766,7 +870,6 @@ class Satformer(RetrievalModel):
         self.heads = nn.ModuleDict(
             {name: cfg.compile() for name, cfg in arch_config.head_configs.items()}
         )
-
 
     def forward(self, x: Dict[str, torch.Tensor]) -> List[torch.Tensor]:
 
@@ -791,10 +894,10 @@ class Satformer(RetrievalModel):
                 attn_mask += [False] * inpt.shape[2]
 
                 n_batch, n_chans_in, n_seq, n_y, n_x = inpt.shape
-                token = token_index  * torch.zeros(
+                token = token_index * torch.zeros(
                     (n_batch, self.token_length, n_seq, n_y, n_x),
                     device=inpt.device,
-                    dtype=inpt.dtype
+                    dtype=inpt.dtype,
                 )
                 token[:, token_index] = 1.0
                 tokens.append(token)
@@ -802,12 +905,15 @@ class Satformer(RetrievalModel):
                 if name in self.masks:
                     masks.append(x[self.masks[name]])
                 else:
-                    masks.append(torch.zeros((n_batch, n_seq), device=inpt.device, dtype=torch.bool))
+                    masks.append(
+                        torch.zeros(
+                            (n_batch, n_seq), device=inpt.device, dtype=torch.bool
+                        )
+                    )
 
                 seq_start += n_seq
 
             token_index += 1
-
 
         input_sequence = torch.cat(sequence_elements, 2)
         tokens = torch.cat(tokens, 2)
@@ -815,9 +921,7 @@ class Satformer(RetrievalModel):
         inpt = torch.cat((tokens, input_sequence), 1)
 
         encs = self.encoder(inpt, mask=mask)
-        encs = {
-            scl: self.enc_norms[str(scl)](enc) for scl, enc in encs.items()
-        }
+        encs = {scl: self.enc_norms[str(scl)](enc) for scl, enc in encs.items()}
 
         outputs = {}
         for name, cond in self.outputs.items():
@@ -826,13 +930,13 @@ class Satformer(RetrievalModel):
                 n_batch, _, n_seq = output.shape[:3]
                 output = torch.permute(output, (0, 2, 1, 3, 4)).flatten(0, 1)
                 output_scaled = {}
-                for downsample, scale in zip(self.downsamplers, self.downsampler_scales):
+                for downsample, scale in zip(
+                    self.downsamplers, self.downsampler_scales
+                ):
                     output_scaled[scale] = downsample(output)
-                min_scale = max(list(encs.keys()))
+                min_scale = max(self.downsampler_scales)
                 output_scaled[min_scale] = self.perceivers[name](
-                    output_scaled[min_scale],
-                    encs[min_scale],
-                    key_padding_mask=mask
+                    output_scaled[min_scale], encs[min_scale], key_padding_mask=mask
                 )
             else:
                 min_scale = max(list(encs.keys()))
@@ -846,14 +950,18 @@ class Satformer(RetrievalModel):
             output = head(
                 dec(
                     output_scaled,
-                    stage_kwargs={scl: {"x_in": tnsr.repeat_interleave(n_seq, 0)} for scl, tnsr in encs.items()},
-                    mask=mask.repeat_interleave(n_seq, 0)
+                    stage_kwargs={
+                        scl: {"x_in": tnsr.repeat_interleave(n_seq, 0)}
+                        for scl, tnsr in encs.items()
+                    },
+                    mask=mask.repeat_interleave(n_seq, 0),
                 )
             )
-            outputs[name] = list(torch.unbind(torch.unflatten(output, 0, (n_batch, n_seq)), 1))
+            outputs[name] = list(
+                torch.unbind(torch.unflatten(output, 0, (n_batch, n_seq)), 1)
+            )
 
         return outputs
-
 
     @property
     def output_names(self) -> List[str]:

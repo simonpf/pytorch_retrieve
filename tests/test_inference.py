@@ -22,6 +22,7 @@ from pytorch_retrieve.inference import (
     InferenceConfig,
     run_inference,
     InferenceRunner,
+    SequentialInferenceRunner,
 )
 from pytorch_retrieve.tensors import QuantileTensor
 from pytorch_retrieve.modules.output import Quantiles
@@ -185,6 +186,25 @@ def test_run_inference_tabular(tmp_path):
         assert res.exists()
 
 
+def test_run_inference_tabular_sequential(tmp_path):
+    """
+    Test running inference with tabular data.
+    """
+    inference_config = toml.loads(INFERENCE_CONFIG)
+    output_config = {}
+    inference_config = InferenceConfig.parse(output_config, inference_config)
+    model = nn.Identity()
+    input_loader = TabularInputLoader(2048, 12)
+
+    runner = SequentialInferenceRunner(model, input_loader, inference_config=inference_config)
+
+    results = runner.run(output_path=tmp_path, device="cpu", dtype=torch.float32)
+
+    assert len(results) == 8
+    for res in results:
+        assert res.exists()
+
+
 def test_run_inference_multiple_input_loaders(tmp_path):
     """
     Test running inference with multiple input loaders.
@@ -333,6 +353,33 @@ def test_run_inference_tiled():
     input_loader = TiledDataLoader(4, 234, 453)
 
     runner = InferenceRunner(model, input_loader, inference_config=inference_config)
+
+    results = runner.run(output_path=None, device="cpu", dtype=torch.float32)
+
+    assert len(results) == 4
+    assert "surface_precip_terciles" in results
+    assert "surface_precip_mean" in results
+    assert "pop" in results
+
+    assert np.isclose(results[0]["pop"].data[0], 0.5).all()
+    assert np.isclose(
+        results[0]["surface_precip_mean"].data[-1], input_loader.n_rows - 1, atol=1e-3
+    ).all()
+
+
+def test_run_inference_tiled_sequential(tmp_path):
+    """
+    Test running inference with tabular data.
+    """
+    inference_config = toml.loads(TILED_INFERENCE_CONFIG)
+    output_config = {
+        "surface_precip": OutputConfig("surface_precip", kind="Quantiles", shape=(32,))
+    }
+    inference_config = InferenceConfig.parse(output_config, inference_config)
+    model = MaskedQuantileOutput("output", 1, np.linspace(0, 1, 33)[1:-1])
+    input_loader = TiledDataLoader(4, 234, 453)
+
+    runner = SequentialInferenceRunner(model, input_loader, inference_config=inference_config)
 
     results = runner.run(output_path=None, device="cpu", dtype=torch.float32)
 
