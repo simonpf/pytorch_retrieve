@@ -12,7 +12,7 @@ Defines the PrithviWxC architecture for use within pytorch_retrieve.
 """
 from dataclasses import dataclass, asdict
 import os
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from pathlib import Path
 
 import torch
@@ -46,6 +46,8 @@ class BackboneConfig:
     drop_path: int = 0.0
     parameter_dropout: int = 0.0
     positional_encoding: str = "fourier"
+    obs_patch_size: Optional[Tuple[int, int]] = None,
+    obs_features: Optional[int] = None
 
 
     @classmethod
@@ -67,12 +69,17 @@ class BackboneConfig:
         mask_unit_size_px = get_config_attr("mask_unit_size_px", list, backbone_config, "backbone", default=[30, 32])
         embed_dim = get_config_attr("embed_dim", int, backbone_config, "backbone", default=1024)
         n_blocks_encoder = get_config_attr("n_blocks_encoder", int, backbone_config, "backbone", default=12)
+        n_blocks_decoder = get_config_attr("n_blocks_decoder", int, backbone_config, "backbone", default=2)
         mlp_multiplier = get_config_attr("mlp_multiplier", int, backbone_config, "backbone", default=4)
         n_heads = get_config_attr("n_heads", int, backbone_config, "backbone", default=16)
         dropout = get_config_attr("dropout", float, backbone_config, "backbone", default=0.0)
         drop_path = get_config_attr("drop_path", float, backbone_config, "backbone", default=0.0)
         parameter_dropout = get_config_attr("parameter_dropout", float, backbone_config, "backbone", default=0.0)
         positional_encoding = get_config_attr("positional_encoding", str, backbone_config, "backbone", default="fourier")
+        obs_patch_size = get_config_attr("obs_patch_size", list, backbone_config, "backbone", required=False)
+        if obs_patch_size is not None:
+            obs_patch_size = tuple(obs_patch_size)
+        obs_features = get_config_attr("obs_features", int, backbone_config, "backbone", required=False)
 
         return BackboneConfig(
             in_channels=in_channels,
@@ -86,12 +93,15 @@ class BackboneConfig:
             mask_unit_size_px=mask_unit_size_px,
             embed_dim=embed_dim,
             n_blocks_encoder=n_blocks_encoder,
+            n_blocks_decoder=n_blocks_decoder,
             mlp_multiplier=mlp_multiplier,
             n_heads=n_heads,
             dropout=dropout,
             drop_path=drop_path,
             parameter_dropout=parameter_dropout,
-            positional_encoding=positional_encoding
+            positional_encoding=positional_encoding,
+            obs_patch_size=obs_patch_size,
+            obs_features=obs_features
         )
 
     def to_config_dict(self) -> Dict[str, object]:
@@ -168,10 +178,12 @@ class BackboneConfig:
             "drop_path": self.drop_path,
             "parameter_dropout": self.parameter_dropout,
             "positional_encoding": self.positional_encoding,
+            "obs_patch_size": self.obs_patch_size,
+            "obs_features": self.obs_features,
             "decoder_shifting": True,
             "mask_ratio_inputs": 0.99,
             "residual": 'ignore',
-            "masking_mode": "both"
+            "masking_mode": "both",
         }
 
         kwargs["input_scalers_mu"] = in_mu
@@ -180,7 +192,7 @@ class BackboneConfig:
         kwargs["static_input_scalers_sigma"] = static_sig
         kwargs["output_scalers"] = output_sig ** 0.5
         kwargs["masking_mode"] = "local"
-        kwargs["decoder_shifting"] = True
+        kwargs["decoder_shifting"] = False
         kwargs["mask_ratio_inputs"] = 0.0
 
         model = PrithviWxC(**kwargs)
@@ -459,7 +471,7 @@ class PrithviWxCModel(RetrievalModel):
         if x["static"].ndim == 5:
             return self.forward_unroll(x)
 
-        y = self.backbone(x)
+        y = self.backbone(x, apply_residual=False)
         preds = {
             name: head(y) for name, head in self.heads.items()
         }
