@@ -564,12 +564,16 @@ class ResNeXtBlock(nn.Module, ParamCount):
         # Actual body
         blocks = []
 
+        activation_kwargs = {}
+        if activation_factory == nn.ReLU:
+            activation_kwargs["inplace"] = True
+
         blocks += [
             nn.Conv2d(
                 in_channels, out_channels // bottleneck, kernel_size=1, bias=bias
             ),
             normalization_factory(out_channels // bottleneck),
-            activation_factory(inplace=True),
+            activation_factory(**activation_kwargs),
             padding_factory(padding),
             nn.Conv2d(
                 out_channels // bottleneck,
@@ -581,7 +585,7 @@ class ResNeXtBlock(nn.Module, ParamCount):
                 stride=stride if not anti_aliasing else 1,
             ),
             normalization_factory(out_channels // bottleneck),
-            activation_factory(inplace=True),
+            activation_factory(**activation_kwargs),
         ]
 
         if anti_aliasing:
@@ -597,7 +601,7 @@ class ResNeXtBlock(nn.Module, ParamCount):
                 out_channels // bottleneck, out_channels, kernel_size=1, bias=bias
             ),
             normalization_factory(out_channels),
-            activation_factory(inplace=True),
+            activation_factory(**activation_kwargs),
         ]
         self.body = nn.Sequential(*blocks)
 
