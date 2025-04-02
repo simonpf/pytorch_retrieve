@@ -10,20 +10,19 @@ import toml
 
 import torch
 
-from pytorch_retrieve.models.prithvi_wxc import PrithviWxCObs
-
 
 try:
     import PrithviWxC
+    from PrithviWxC.dataloaders.merra2 import (
+        input_scalers,
+        output_scalers,
+        static_input_scalers,
+    )
+
+    from pytorch_retrieve.models.prithvi_wxc import PrithviWxCObs
     HAS_PRITHVI = True
 except ImportError:
     HAS_PRITHVI = False
-
-from PrithviWxC.dataloaders.merra2 import (
-    input_scalers,
-    output_scalers,
-    static_input_scalers,
-)
 
 
 NEEDS_PRITHVI = pytest.mark.skipif(not HAS_PRITHVI, reason="Needs PrithviWxC module installed.")
