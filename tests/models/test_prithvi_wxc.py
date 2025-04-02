@@ -31,7 +31,6 @@ NEEDS_PRITHVI_DATA = pytest.mark.skipif(
     reason="Needs PrithviWxC data."
 )
 
-
 def compile_prithvi_wxc_obs():
     """
     Compiles a slimmed-down PrithviWxC model.
@@ -115,6 +114,7 @@ def compile_prithvi_wxc_obs():
     return model
 
 
+@pytest.mark.skipif(not HAS_PRITHVI, reason="Needs PrithviWxC package installed.")
 def test_prithvi_wxc_obs():
     """
     Test the PrithviWxC obs model.
