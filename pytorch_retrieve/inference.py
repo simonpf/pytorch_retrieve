@@ -785,7 +785,6 @@ class InferenceRunner:
             outputs = []
             while self.output_worker.is_alive() or self.result_queue.qsize() > 0:
                 output = self.result_queue.get()
-                print(output)
                 if output is None:
                     break
                 if isinstance(output, Exception):
