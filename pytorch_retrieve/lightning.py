@@ -243,7 +243,9 @@ class LightningRetrieval(L.LightningModule):
         pred = self.model(inputs)
 
         if not isinstance(pred, dict):
-            return self.training_step_single_pred(pred, target)
+            loss = self.training_step_single_pred(pred, target)
+            self.track_mean_loss(inputs, pred, target, loss)
+            return loss
 
         if not isinstance(target, dict):
             if len(pred) > 1:
@@ -254,7 +256,10 @@ class LightningRetrieval(L.LightningModule):
                     " be associated with."
                 )
             pred = next(iter(pred.values()))
-            return self.training_step_single_pred(pred, target)
+            loss = self.training_step_single_pred(pred, target)
+            self.track_mean_loss(inputs, pred, target, loss)
+
+            return loss
 
             raise RuntimeError(
                 "If the model output is a 'dict' the reference data must also "
@@ -340,6 +345,8 @@ class LightningRetrieval(L.LightningModule):
         else:
             tot_loss = tot_loss + 0.0 * pred_k_s.sum()
 
+        self.track_mean_loss(inputs, pred, target, tot_loss)
+
         log_dict = {}
         for name, loss in losses.items():
             log_dict[f"Training loss ({name})"] = loss
@@ -347,45 +354,63 @@ class LightningRetrieval(L.LightningModule):
         self.log("Training loss", tot_loss)
         losses["loss"] = tot_loss
 
+        return losses
+
+    def track_mean_loss(
+            self,
+            inputs: Dict[str, torch.Tensor],
+            pred: Dict[str, torch.Tensor],
+            target: Dict[str, torch.Tensor],
+            loss: torch.Tensor
+    ) -> None:
+        """
+        Track mean loss.
+
+        Args:
+            inputs: The model input for this training step.
+            pred: The model prediction.
+            target: The target data for this training step.
+            loss: The calculated loss.
+
+        """
+
         if self.mean_loss is not None:
             self.log("Mean loss", self.mean_loss, on_step=True, prog_bar=True)
 
         if self.mean_loss is None:
-            self.mean_loss = tot_loss.item()
+            self.mean_loss = loss.item()
         else:
             # Check if loss is anomalous
             try:
                 if self.debug and (
-                    tot_loss > 5 * self.mean_loss or torch.isnan(tot_loss).all()
+                    loss > 5 * self.mean_loss or torch.isnan(loss).all()
                 ):
-                    filename = f"inputs_prev_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
+                    filename = f"inputs_prev_{self.global_rank}_{self.global_step}_{loss:.2f}.pt"
                     torch.save(self.inputs_prev, filename)
-                    filename = f"targets_prev_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
+                    filename = f"targets_prev_{self.global_rank}_{self.global_step}_{loss:.2f}.pt"
                     torch.save(self.target_prev, filename)
-                    filename = f"preds_prev_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
+                    filename = f"preds_prev_{self.global_rank}_{self.global_step}_{loss:.2f}.pt"
                     torch.save(self.pred_prev, filename)
-                    filename = f"inputs_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
+                    filename = f"inputs_{self.global_rank}_{self.global_step}_{loss:.2f}.pt"
                     torch.save(inputs, filename)
-                    filename = f"targets_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
+                    filename = f"targets_{self.global_rank}_{self.global_step}_{loss:.2f}.pt"
                     torch.save(target, filename)
                     filename = (
-                        f"preds_{self.global_rank}_{self.global_step}_{tot_loss:.2f}.pt"
+                        f"preds_{self.global_rank}_{self.global_step}_{loss:.2f}.pt"
                     )
                     torch.save(pred, filename)
                 self.mean_loss = (
-                    self.alpha * self.mean_loss + (1.0 - self.alpha) * tot_loss.item()
+                    self.alpha * self.mean_loss + (1.0 - self.alpha) * loss.item()
                 )
 
                 if self.debug:
-                    if torch.isnan(tot_loss).all():
+                    if torch.isnan(loss).all():
                         raise ValueError("NAN encountered in training.")
                     self.inputs_prev = inputs
                     self.target_prev = target
                     self.pred_prev = pred
             except AttributeError:
                 pass
-
-        return losses
 
     def on_train_start(self):
         current_config = self.current_training_config
