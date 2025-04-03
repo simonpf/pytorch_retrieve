@@ -219,6 +219,7 @@ def compile_prithvi_wxc_xobs():
     return model
 
 
+NEEDS_PRITHVI = pytest.mark.skipif(not HAS_PRITHVI, reason="Needs PrithviWxC module installed.")
 def test_prithvi_wxc_xobs():
     """
     Test the PrithviWxC obs model.
