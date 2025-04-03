@@ -2,12 +2,6 @@
 pytorch_retrieve.architectures.prithvi_wxc
 ==========================================
 
-The PrithviWxC model.
-"""
-"""
-pytorch_retrieve.architectures.prithvi_wxc
-==========================================
-
 Defines the PrithviWxC architecture for use within pytorch_retrieve.
 """
 from dataclasses import dataclass, asdict
@@ -48,6 +42,11 @@ class BackboneConfig:
     positional_encoding: str = "fourier"
     obs_patch_size: Optional[Tuple[int, int]] = None,
     obs_features: Optional[int] = None
+    mask_ratio_targets: float = 0.0
+    residual: str = "ignore"
+    variant: Optional[str] = None
+    checkpoint_encoder: Optional[List[int]] = ()
+    checkpoint_decoder: Optional[List[int]] = ()
 
 
     @classmethod
@@ -61,8 +60,8 @@ class BackboneConfig:
         in_channels = get_config_attr("in_channels", int, backbone_config, "backbone", default=160)
         input_size_time = get_config_attr("input_size_time", int, backbone_config, "backbone", default=2)
         in_channels_static = get_config_attr("in_channels_static", int, backbone_config, "backbone", default=8)
-        input_scalers_epsilon = get_config_attr("input_scalers_epsilon", float, backbone_config, "backbone", default=0.0)
-        static_input_scalers_epsilon = get_config_attr("static_input_scalers_epsilon", float, backbone_config, "backbone", default=0.0)
+        input_scalers_epsilon = get_config_attr("input_scalers_epsilon", float, backbone_config, "backbone", default=1e-3)
+        static_input_scalers_epsilon = get_config_attr("static_input_scalers_epsilon", float, backbone_config, "backbone", default=1e-3)
         n_lats_px = get_config_attr("n_lats_px", int, backbone_config, "backbone", default=360)
         n_lons_px = get_config_attr("n_lons_px", int, backbone_config, "backbone", default=576)
         patch_size_px = get_config_attr("patch_size_px", list, backbone_config, "backbone", default=[2, 2])
@@ -80,6 +79,10 @@ class BackboneConfig:
         if obs_patch_size is not None:
             obs_patch_size = tuple(obs_patch_size)
         obs_features = get_config_attr("obs_features", int, backbone_config, "backbone", required=False)
+        residual = get_config_attr("residual", str, backbone_config, "backbone", default="ignore", required=False)
+        variant = get_config_attr("variant", str, backbone_config, "backbone", default=None, required=False)
+        checkpoint_encoder = get_config_attr("checkpoint_encoder", list, backbone_config, "backbone", default=(), required=False)
+        checkpoint_decoder = get_config_attr("checkpoint_decoder", list, backbone_config, "backbone", default=(), required=False)
 
         return BackboneConfig(
             in_channels=in_channels,
@@ -101,7 +104,11 @@ class BackboneConfig:
             parameter_dropout=parameter_dropout,
             positional_encoding=positional_encoding,
             obs_patch_size=obs_patch_size,
-            obs_features=obs_features
+            obs_features=obs_features,
+            residual=residual,
+            variant=variant,
+            checkpoint_encoder=checkpoint_encoder,
+            checkpoint_decoder=checkpoint_decoder
         )
 
     def to_config_dict(self) -> Dict[str, object]:
@@ -122,6 +129,7 @@ class BackboneConfig:
             static_input_scalers,
         )
         from PrithviWxC.model import PrithviWxC
+        from pytorch_retrieve.models.prithvi_wxc import PrithviWxCObs, PrithviWxCXObs
 
         prithvi_data_path = Path(os.environ["PRITHVI_DATA_PATH"])
         if not prithvi_data_path.exists():
@@ -182,8 +190,10 @@ class BackboneConfig:
             "obs_features": self.obs_features,
             "decoder_shifting": True,
             "mask_ratio_inputs": 0.99,
-            "residual": 'ignore',
+            "residual": self.residual,
             "masking_mode": "both",
+            "checkpoint_encoder": self.checkpoint_encoder,
+            "checkpoint_decoder": self.checkpoint_decoder
         }
 
         kwargs["input_scalers_mu"] = in_mu
@@ -192,10 +202,17 @@ class BackboneConfig:
         kwargs["static_input_scalers_sigma"] = static_sig
         kwargs["output_scalers"] = output_sig ** 0.5
         kwargs["masking_mode"] = "local"
-        kwargs["decoder_shifting"] = False
         kwargs["mask_ratio_inputs"] = 0.0
+        kwargs["mask_ratio_targets"] = self.mask_ratio_targets
 
-        model = PrithviWxC(**kwargs)
+        if self.variant == "obs":
+            model = PrithviWxCObs(**kwargs)
+        elif self.variant == "xobs":
+            model = PrithviWxCXObs(**kwargs)
+        else:
+            kwargs.pop("obs_features")
+            kwargs.pop("obs_patch_size")
+            model = PrithviWxC(**kwargs)
         return model
 
 
@@ -468,10 +485,16 @@ class PrithviWxCModel(RetrievalModel):
 
         Return:
         """
+        from pytorch_retrieve.models.prithvi_wxc import PrithviWxCObs, PrithviWxCXObs
         if x["static"].ndim == 5:
             return self.forward_unroll(x)
 
         y = self.backbone(x, apply_residual=False)
+        #if isinstance(self.backbone, (PrithviWxCObs, PrithviWxCXObs)):
+        #    y = self.backbone(x, apply_residual=False)
+        #else:
+        #    y = self.backbone(x)
+
         preds = {
             name: head(y) for name, head in self.heads.items()
         }
