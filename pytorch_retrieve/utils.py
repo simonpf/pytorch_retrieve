@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import torch
 from torch.utils.data import Dataset, default_collate
+from torch.optim import Optimizer
+from torch.optim.lr_scheduler import LRScheduler
 
 from .config import read_config_file, ComputeConfig
 
@@ -284,3 +286,116 @@ class InterleaveDatasets(Dataset):
                             target[name] = tnsr
 
         return samples
+
+
+class WarmupScheduler(torch.optim.lr_scheduler._LRScheduler):
+    """
+    Scheduler that linearly increases the learning rate.
+    """
+    def __init__(self, optimizer, warmup_ratio=0.1, total_steps=None, last_epoch=-1):
+        self.warmup_ratio = warmup_ratio
+        self.total_steps = total_steps
+        self.scheduler = None  # Will be created later
+        self.optimizer = optimizer
+        self._initialized = False
+        super().__init__(optimizer, last_epoch)
+
+    def _init_scheduler(self):
+        if self.total_steps is None:
+            raise ValueError("total_steps must be set before stepping the scheduler.")
+
+        warmup_steps = int(self.total_steps * self.warmup_ratio)
+
+        def lr_lambda(current_step):
+            if current_step < warmup_steps:
+                return float(current_step) / float(max(1, warmup_steps))
+            return max(
+                0.0, float(self.total_steps - current_step) / float(max(1, self.total_steps - warmup_steps))
+            )
+
+        self.scheduler = LambdaLR(self.optimizer, lr_lambda)
+        self._initialized = True
+
+    def step(self):
+        if not self._initialized:
+            self._init_scheduler()
+        self.scheduler.step()
+
+    def get_last_lr(self):
+        if not self._initialized:
+            return [group['lr'] for group in self.optimizer.param_groups]
+        return self.scheduler.get_last_lr()
+
+class WarmupLR(LRScheduler):
+    """
+    Special scheduler for warming up the learning rate.
+
+    This is mostly copied from PyTorch's LinearLR scheduler. It is redefined here to allow identifying
+    the scheduler from the lightning module and adaptively setting the number of steps expected during
+    training.
+    """
+    def __init__(
+        self,
+        optimizer: Optimizer,
+        start_factor: float = 0.1,
+        end_factor: float = 1.0,
+        total_iters: int = 5,
+        last_epoch: int = -1,
+    ):
+        """
+        Args:
+            optimizer (Optimizer): Wrapped optimizer.
+            start_factor (float): The number we multiply learning rate in the first epoch.
+                The multiplication factor changes towards end_factor in the following epochs.
+                Default: 1./3.
+            end_factor (float): The number we multiply learning rate at the end of linear changing
+                process. Default: 1.0.
+            total_iters (int): The number of iterations that multiplicative factor reaches to 1.
+                Default: 5.
+            last_epoch (int): The index of the last epoch. Default: -1.
+        """
+        if start_factor > 1.0 or start_factor <= 0:
+            raise ValueError(
+                "Starting multiplicative factor expected to be greater than 0 and less or equal to 1."
+            )
+
+        if end_factor > 1.0 or end_factor < 0:
+            raise ValueError(
+                "Ending multiplicative factor expected to be between 0 and 1."
+            )
+
+        self.start_factor = start_factor
+        self.end_factor = end_factor
+        self.total_iters = total_iters
+        super().__init__(optimizer, last_epoch)
+
+    def get_lr(self):
+        """Compute the learning rate."""
+        if self.total_iters == -1:
+            LOGGER.warning(
+                "Could not infer number of steps in epoch for Warmup schedulear. Will linearly increase learning rate "
+                "over 1000 steps."
+            )
+            self.total_iters = 1_000
+
+        if self.last_epoch == 0:
+            return [
+                group["lr"] * self.start_factor for group in self.optimizer.param_groups
+            ]
+
+        if self.last_epoch > self.total_iters:
+            return [group["lr"] for group in self.optimizer.param_groups]
+
+        return [
+            group["lr"]
+            * (
+                1.0
+                + (self.end_factor - self.start_factor)
+                / (
+                    self.total_iters * self.start_factor
+                    + (self.last_epoch - 1) * (self.end_factor - self.start_factor)
+                )
+            )
+            for group in self.optimizer.param_groups
+        ]
+

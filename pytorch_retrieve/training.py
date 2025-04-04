@@ -33,6 +33,7 @@ from pytorch_retrieve.utils import (
     read_training_config,
     read_compute_config,
     find_most_recent_checkpoint,
+    WarmupLR
 )
 from pytorch_retrieve.lightning import LightningRetrieval
 
@@ -40,7 +41,7 @@ from pytorch_retrieve.lightning import LightningRetrieval
 LOGGER = logging.getLogger(__name__)
 
 
-def load_weights(path: Path, model: nn.Module) -> None:
+def load_weights(path: Union[Path, Dict[str, Path]], model: nn.Module) -> None:
     """
     Load model weights from existing model file.
 
@@ -49,13 +50,23 @@ def load_weights(path: Path, model: nn.Module) -> None:
     i.e., not requiring all keys to be present..
 
     Args:
-        path: A path pointing to the model file or checkpoint containing the weights to load.
+        path: A path pointing to the model file or checkpoint containing the weights to load. If path
+             is a dictionary, it should map model component names to the corresponding weights to load.
         model: The pytorch Module object into which to load the pre-trained weights.
     """
+    if isinstance(path, dict):
+        for component, pth in path.items():
+            module = getattr(model, component)
+            load_weights(pth, module)
+        return None
+
     path = Path(path)
     if path.exists():
         data = torch.load(path, map_location="cpu")
-        state = data["state_dict"]
+        if "model_state" in data:
+            state = data["model_state"]
+        else:
+            state = data["state_dict"]
         if path.suffix == ".ckpt":
             state = {key[6:]: val for key, val in state.items()}
 
@@ -310,14 +321,13 @@ class TrainingConfigBase:
 
         if scheduler == "Warmup":
             total_iters = self.scheduler_args.get("n_iterations", self.n_epochs - 1)
-            stepwise = False
-            scheduler = torch.optim.lr_scheduler.LinearLR(
-                optimizer, start_factor=1e-8, end_factor=1.0, total_iters=total_iters
+            scheduler = WarmupLR(
+                optimizer, start_factor=1e-2, end_factor=1.0, total_iters=total_iters
             )
+            scheduler.stepwise = True
             return optimizer, scheduler
 
         if scheduler == "ReduceLROnPlateau":
-            print("OPTIM :: ", optimizer)
             monitor = self.scheduler_args.pop("monitor", "Validation loss")
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
                 optimizer, **self.scheduler_args
@@ -548,7 +558,7 @@ class TrainingConfig(TrainingConfigBase):
             "accumulate_grad_batches", int, config_dict, f"training stage {name}", 1
         )
         load_weights = get_config_attr(
-            "load_weights", str, config_dict, f"training stage {name}", None
+            "load_weights", None, config_dict, f"training stage {name}", None
         )
         n_data_loader_workers = get_config_attr(
             "n_data_loader_workers", int, config_dict, f"training stage {name}", 12

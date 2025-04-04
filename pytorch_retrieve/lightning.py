@@ -19,6 +19,7 @@ from lightning.pytorch import loggers
 
 from pytorch_retrieve.tensors.masked_tensor import MaskedTensor
 from pytorch_retrieve.metrics import ScalarMetric
+from pytorch_retrieve.utils import WarmupLR
 
 RetrievalInput = Union[torch.Tensor, list, dict]
 
@@ -801,6 +802,15 @@ class LightningRetrieval(L.LightningModule):
             version=self.stage_name,
         )
         return logger
+
+    def on_fit_start(self):
+        """
+        Sets number of expected steps for WarmupLR.
+        """
+        total_steps = self.trainer.estimated_stepping_batches
+        scheduler = self.trainer.lr_scheduler_configs[0].scheduler
+        if isinstance(scheduler, WarmupLR):
+            scheduler.total_iters = total_steps
 
     def on_fit_end(self):
         self._tensorboard = None
