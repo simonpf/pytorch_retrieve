@@ -965,7 +965,7 @@ class SequentialInferenceRunner:
                     if progress_bar is not None:
                         progress_bar.update(
                             task,
-                            description=f"[bold hot_pink3] >>> Processing tile: {tile_ctr + 1}/{total}",
+                            description=f"[bold hot_pink3]Processing tile: {min(tile_ctr + 1, total)}/{total}",
                             advance=1.0
                         )
 
@@ -979,7 +979,7 @@ class SequentialInferenceRunner:
             if progress_bar is not None:
                 progress_bar.update(
                     task,
-                    description=f"[bold hot_pink3] >>> Processing tile: {tile_ctr + 1}/{total}",
+                    description=f"[bold hot_pink3]Processing tile: {min(tile_ctr + 1, total)}/{total}",
                     advance=1.0
                 )
 
