@@ -9,12 +9,12 @@ import toml
 import torch
 
 
-from pytorch_retrieve.models.prithvi_wxc import PrithviWxCObs
 from pytorch_retrieve.config import InputConfig, OutputConfig
 
 
 try:
     import PrithviWxC
+    from pytorch_retrieve.models.prithvi_wxc import PrithviWxCObs
     HAS_PRITHVI = True
 except ImportError:
     HAS_PRITHVI = False
