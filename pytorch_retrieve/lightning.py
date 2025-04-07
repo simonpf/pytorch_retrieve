@@ -808,9 +808,10 @@ class LightningRetrieval(L.LightningModule):
         Sets number of expected steps for WarmupLR.
         """
         total_steps = self.trainer.estimated_stepping_batches
-        scheduler = self.trainer.lr_scheduler_configs[0].scheduler
-        if isinstance(scheduler, WarmupLR):
-            scheduler.total_iters = total_steps
+        for lr_scheduler_config in self.trainer.lr_scheduler_configs:
+            scheduler = lr_scheduler_configs.scheduler
+            if isinstance(scheduler, WarmupLR):
+                scheduler.total_iters = total_steps
 
     def on_fit_end(self):
         self._tensorboard = None
