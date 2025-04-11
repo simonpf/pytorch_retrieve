@@ -544,6 +544,37 @@ def finalize_results_no_tiling(
                 result_queue.put(results)
 
 
+class SimpleInput:
+    """
+    Input loader for the case that input data for a single sample is provided directly in the form
+    of a list, dict, or tensor.
+    """
+    def __init__(self, inpt: Any):
+        """
+        Args:
+            inpt:
+        """
+        self.inpt = inpt
+
+    def __len__(self) -> int:
+        if isinstance(self.inpt, list):
+            return len(self.inpt)
+        else:
+            return 1
+
+    def __iter__(self) -> Any:
+        if isinstance(self.inpt, list):
+            for inpt in self.inpt:
+                yield (inpt,)
+        else:
+            yield (self.inpt,)
+
+    def __getitem__(self, ind: int):
+        if isinstance(self.inpt, list):
+            return (self.inpt[ind],)
+        return (self.inpt,)
+
+
 class InferenceRunner:
     """
     The inference runner coordinates the running of the inference.
@@ -1170,6 +1201,8 @@ def run_inference(
         If an output path is provided, a list of the output files that were written is returned.
         If no output path is provided, the retrieval results are returned as a list of xarray.Datasets.
     """
+    if isinstance(input_loader, (torch.Tensor, list, dict)):
+        input_loader = SimpleInput(input_loader)
     runner = SequentialInferenceRunner(
         model, input_loader, inference_config
     )
