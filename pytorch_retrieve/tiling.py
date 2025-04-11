@@ -342,7 +342,7 @@ class Tiler:
             w_i[start : start + l_trans] = xp.linspace(1, 0, l_trans)[..., np.newaxis]
             w_i[start + l_trans :] = 0.0
 
-        w_j = np.ones((m, n))
+        w_j = xp.ones_like(w_i)
         if j > 0:
             trans_start = self.j_start[j]
             # Shift start to right if transition overlaps with
