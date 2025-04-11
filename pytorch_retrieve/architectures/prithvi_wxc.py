@@ -205,6 +205,7 @@ class BackboneConfig:
         kwargs["mask_ratio_inputs"] = 0.0
         kwargs["mask_ratio_targets"] = self.mask_ratio_targets
 
+
         if self.variant == "obs":
             model = PrithviWxCObs(**kwargs)
         elif self.variant == "xobs":

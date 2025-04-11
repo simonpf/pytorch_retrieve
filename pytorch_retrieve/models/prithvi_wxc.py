@@ -607,7 +607,7 @@ class PrithviWxCObs(PrithviWxC):
             obs = batch["obs"]
             mask = batch["obs_mask"]
             meta = batch["obs_meta"]
-            obs_enc, obs_mask, meta_enc = self.obs_encoder(obs, mask, meta)
+            obs_enc, obs_mask, meta_enc = checkpoint(self.obs_encoder, obs, mask, meta, use_reentrant=False)
 
             # obs_enc: [B x T x GY x GX x O x C x LY x LX]
             obs_enc = obs_enc + meta_enc
@@ -617,11 +617,11 @@ class PrithviWxCObs(PrithviWxC):
             obs_enc = torch.permute(obs_enc, (0, 1, 2, 3, 6, 7, 4, 5)).reshape(-1, O, C)
             obs_mask = torch.permute(obs_mask, (0, 1, 2, 3, 5, 6, 4)).reshape(-1, O)
             latent = self.obs_projection[None].repeat_interleave(obs_enc.shape[0], 0)
-            obs_latent = self.perceiver(latent, obs_enc, input_mask=obs_mask)
+            obs_latent = checkpoint(self.perceiver, latent, obs_enc, obs_mask, use_reentrant=False)
 
             obs_latent = obs_latent.reshape((B, T, GY, GX, LY, LX, self.obs_latent))
             obs_latent = torch.permute(obs_latent, (0, 1, 6, 2, 4, 3, 5)).reshape(B, C * T, GY * LY, GX * LX)
-            obs_latent = self.temporal_encoder(obs_latent).reshape(B, self.embed_dim, GY, 15, GX, 16)
+            obs_latent = checkpoint(self.temporal_encoder, obs_latent, use_reentrant=False).reshape(B, self.embed_dim, GY, 15, GX, 16)
             obs_latent = torch.permute(obs_latent, (0, 2, 4, 3, 5, 1)).reshape(B, GY *  GX, 15 * 16, -1)
 
 
@@ -914,15 +914,15 @@ class LocalGlobalLocalBlock(nn.Module):
             self.obs_transformers = None
 
         self.evaluator = [
-            self._checkpoint_wrapper if i in checkpoint else lambda m, x : m(x)
+            self._checkpoint_wrapper if i in checkpoint else lambda m, *args: m(*args)
             for i, _ in enumerate(self.transformers)
         ]
 
         self.shifter = shifter or _Shift()
 
     @staticmethod
-    def _checkpoint_wrapper(model, data):
-        return checkpoint(model, data, use_reentrant=False)
+    def _checkpoint_wrapper(model, *args):
+        return checkpoint(model, *args, use_reentrant=False)
 
     def forward(
             self,
@@ -955,7 +955,7 @@ class LocalGlobalLocalBlock(nn.Module):
 
         evaluator, transformer = next(transformer_iter)
         if self.obs_transformers is not None:
-            x = self.obs_transformers[0](x, obs=obs, obs_mask=obs_mask)
+            x = evaluator(self.obs_transformers[0], x, obs, obs_mask)
         x = evaluator(transformer, (x, attn_mask[local]))
 
         cntr = 1
@@ -966,7 +966,7 @@ class LocalGlobalLocalBlock(nn.Module):
             x = x.transpose(1, 2)
 
             if self.obs_transformers is not None and local:
-                x = self.obs_transformers[cntr](x, obs=obs, obs_mask=obs_mask)
+                x = evaluator(self.obs_transformers[cntr], x, obs, obs_mask)
                 cntr += 1
 
             x = evaluator(transformer, (x, attn_mask[local]))
