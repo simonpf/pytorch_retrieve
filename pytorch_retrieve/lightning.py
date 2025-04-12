@@ -809,7 +809,7 @@ class LightningRetrieval(L.LightningModule):
         """
         total_steps = self.trainer.estimated_stepping_batches
         for lr_scheduler_config in self.trainer.lr_scheduler_configs:
-            scheduler = lr_scheduler_configs.scheduler
+            scheduler = lr_scheduler_config.scheduler
             if isinstance(scheduler, WarmupLR):
                 scheduler.total_iters = total_steps
 
