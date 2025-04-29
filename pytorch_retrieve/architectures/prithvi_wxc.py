@@ -45,6 +45,8 @@ class BackboneConfig:
     mask_ratio_targets: float = 0.0
     residual: str = "ignore"
     variant: Optional[str] = None
+    encoder_shifting: bool = False
+    decoder_shifting: bool = True
     checkpoint_encoder: Optional[List[int]] = ()
     checkpoint_decoder: Optional[List[int]] = ()
 
@@ -81,6 +83,8 @@ class BackboneConfig:
         obs_features = get_config_attr("obs_features", int, backbone_config, "backbone", required=False)
         residual = get_config_attr("residual", str, backbone_config, "backbone", default="ignore", required=False)
         variant = get_config_attr("variant", str, backbone_config, "backbone", default=None, required=False)
+        encoder_shifting = get_config_attr("encoder_shifting", bool, backbone_config, "backbone", default=True, required=False)
+        decoder_shifting = get_config_attr("decoder_shifting", bool, backbone_config, "backbone", default=True, required=False)
         checkpoint_encoder = get_config_attr("checkpoint_encoder", list, backbone_config, "backbone", default=(), required=False)
         checkpoint_decoder = get_config_attr("checkpoint_decoder", list, backbone_config, "backbone", default=(), required=False)
 
@@ -107,6 +111,8 @@ class BackboneConfig:
             obs_features=obs_features,
             residual=residual,
             variant=variant,
+            encoder_shifting=encoder_shifting,
+            decoder_shifting=decoder_shifting,
             checkpoint_encoder=checkpoint_encoder,
             checkpoint_decoder=checkpoint_decoder
         )
@@ -188,7 +194,8 @@ class BackboneConfig:
             "positional_encoding": self.positional_encoding,
             "obs_patch_size": self.obs_patch_size,
             "obs_features": self.obs_features,
-            "decoder_shifting": True,
+            "encoder_shifting": self.encoder_shifting,
+            "decoder_shifting": self.decoder_shifting,
             "mask_ratio_inputs": 0.99,
             "residual": self.residual,
             "masking_mode": "both",
