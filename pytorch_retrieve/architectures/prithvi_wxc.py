@@ -450,26 +450,44 @@ class PrithviWxCModel(RetrievalModel):
         assert x["static"].ndim == 5
         n_steps = x["static"].shape[1]
 
-        latent_preds = []
-
         x_step = x["x"]
+        latent_preds = []
+        preds = {}
 
         for step in range(n_steps):
-            y = self.backbone({
+
+            if "climate" in x:
+                climate = x["climate"][:, step]
+            else:
+                climate = None
+
+            inpt =  {
                 "x": x_step,
                 "static": x["static"][:, step],
                 "lead_time": x["lead_time"],
-                "input_time": x["input_time"]
-            })
-            y_out = (
-                self.backbone.output_scalers * y + self.backbone.input_scalers_mu.reshape(1, -1, 1, 1)
-            )
-            x_step = torch.stack([x_step[:, -1], y_out], 1)
-            latent_preds.append(y)
+                "input_time": x["input_time"],
+                "climate": climate,
+            }
 
-        preds = {
-            name: [head(y_step) for y_step in latent_preds] for name, head in self.heads.items()
-        }
+            y = self.backbone(inpt, apply_residual=False)
+
+            if self.backbone.residual == "temporal":
+                raise ValueError(
+                    "Temporal residual isn't supported yet."
+                )
+                y_out = self.backbone.output_scalers * y + x_hat
+            elif self.backbone.residual == "climate":
+                y_out = self.backbone.output_scalers * y + x["climate"][:, step]
+            elif self.backbone.residual == "none":
+                y_out = self.backbone.output_scalers * y + self.backbone.input_scalers_mu.reshape(
+                    1, -1, 1, 1
+                )
+            x_step = torch.stack([x_step[:, -1], y_out], 1)
+
+            latent_preds.append(y)
+            for name, head in self.heads.items():
+                preds.setdefault(name, []).append(head(y))
+
         if self.return_latent:
             preds["y"] = latent_preds
 
