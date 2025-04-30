@@ -243,6 +243,58 @@ class ObservationEncoder(nn.Module):
         return obs_enc, obs_mask_enc, meta_enc
 
 
+class MultiHeadAttention(nn.Module):
+    def __init__(
+            self,
+            embed_dim: int,
+            num_heads: int,
+            dropout: float = 0.0
+
+    ):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.q = nn.Linear(embed_dim, embed_dim)
+        self.k = nn.Linear(embed_dim, embed_dim)
+        self.v = nn.Linear(embed_dim, embed_dim)
+        self.w = nn.Linear(embed_dim, embed_dim)
+        self.dropout = dropout
+
+    def forward(
+            self,
+            x: torch.Tensor,
+            attn_mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+
+        B, S, C = x.shape
+
+        q = self.q(x).view(B, S, self.n_heads, self.embed_dim // self.n_heads)
+        k = self.k(x).view(B, S, self.n_heads, self.embed_dim // self.n_heads)
+        v = self.v(x).view(B, S, self.n_heads, self.embed_dim // self.n_heads)
+
+        # Let us enforce either flash (A100+) or memory efficient attention.
+        if version("torch") > "2.3.0":
+            with sdpa_kernel(
+                [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]
+            ):
+                # x [B, H, S, C//H]
+                x = F.scaled_dot_product_attention(
+                    q, k, v, attn_mask=attn_mask, dropout_p=self.dropout
+                )
+        else:
+            with torch.backends.cuda.sdp_kernel(
+                enable_flash=True, enable_math=False, enable_mem_efficient=True
+            ):
+                # x [B, H, S, C//H]
+                x = F.scaled_dot_product_attention(
+                    q, k, v, attn_mask=attn_mask, dropout_p=self.dropout
+                )
+
+        x = x.transpose(1, 2).view(B, S, self.embed_dim)
+        x = self.w_layer(x)
+        return x
+
+
 class PerceiverBlock(nn.Module):
     """
     Perceiver block to project arbitrary length into a fixed-length feature vector.
