@@ -243,7 +243,7 @@ class ObservationEncoder(nn.Module):
         return obs_enc, obs_mask_enc, meta_enc
 
 
-class MultiHeadAttention(nn.Module):
+class MultiheadAttention(nn.Module):
     def __init__(
             self,
             embed_dim: int,
@@ -253,7 +253,7 @@ class MultiHeadAttention(nn.Module):
     ):
         super().__init__()
         self.embed_dim = embed_dim
-        self.num_heads = num_heads
+        self.n_heads = num_heads
         self.q = nn.Linear(embed_dim, embed_dim)
         self.k = nn.Linear(embed_dim, embed_dim)
         self.v = nn.Linear(embed_dim, embed_dim)
@@ -262,36 +262,44 @@ class MultiHeadAttention(nn.Module):
 
     def forward(
             self,
-            x: torch.Tensor,
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
             attn_mask: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
 
-        B, S, C = x.shape
+        B, T, _ = query.shape
+        B, S, _ = key.shape
 
-        q = self.q(x).view(B, S, self.n_heads, self.embed_dim // self.n_heads)
-        k = self.k(x).view(B, S, self.n_heads, self.embed_dim // self.n_heads)
-        v = self.v(x).view(B, S, self.n_heads, self.embed_dim // self.n_heads)
+        q = self.q(query).view(B, T, self.n_heads, self.embed_dim // self.n_heads)
+        q = q.transpose(1, 2)
+        k = self.k(key).view(B, S, self.n_heads, self.embed_dim // self.n_heads)
+        k = k.transpose(1, 2)
+        v = self.v(value).view(B, S, self.n_heads, self.embed_dim // self.n_heads)
+        v = v.transpose(1, 2)
+
+        if attn_mask is not None:
+            if attn_mask.dim() < 4:
+                attn_mask = attn_mask[:, None]
 
         # Let us enforce either flash (A100+) or memory efficient attention.
         if version("torch") > "2.3.0":
             with sdpa_kernel(
                 [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]
             ):
-                # x [B, H, S, C//H]
                 x = F.scaled_dot_product_attention(
                     q, k, v, attn_mask=attn_mask, dropout_p=self.dropout
                 )
         else:
             with torch.backends.cuda.sdp_kernel(
-                enable_flash=True, enable_math=False, enable_mem_efficient=True
+                    enable_flash=True, enable_math=False, enable_mem_efficient=True
             ):
-                # x [B, H, S, C//H]
                 x = F.scaled_dot_product_attention(
                     q, k, v, attn_mask=attn_mask, dropout_p=self.dropout
                 )
 
-        x = x.transpose(1, 2).view(B, S, self.embed_dim)
-        x = self.w_layer(x)
+        x = x.transpose(1, 2).view(B, T, self.embed_dim)
+        x = self.w(x)
         return x
 
 
@@ -314,7 +322,7 @@ class PerceiverBlock(nn.Module):
         super().__init__()
         self.num_heads = num_heads
         self.input_to_latent = nn.Linear(input_dim, latent_dim)
-        self.cross_attn = nn.MultiheadAttention(embed_dim=latent_dim, num_heads=num_heads, batch_first=True)
+        self.cross_attn = MultiheadAttention(embed_dim=latent_dim, num_heads=num_heads)
         self.cross_ff = nn.Sequential(
             nn.LayerNorm(latent_dim),
             nn.Linear(latent_dim, latent_dim * 2),
@@ -322,7 +330,7 @@ class PerceiverBlock(nn.Module):
             nn.Linear(latent_dim * 2, latent_dim)
         )
 
-        self.self_attn = nn.MultiheadAttention(embed_dim=latent_dim, num_heads=num_heads, batch_first=True)
+        self.self_attn = MultiheadAttention(embed_dim=latent_dim, num_heads=num_heads)
         self.self_ff = nn.Sequential(
             nn.LayerNorm(latent_dim),
             nn.Linear(latent_dim, latent_dim * 2),
@@ -342,9 +350,9 @@ class PerceiverBlock(nn.Module):
         input_data = self.input_to_latent(input_data)
 
         if input_mask.dim() < 3:
-            input_mask = input_mask[:, None].repeat_interleave(self.num_heads, 0)
+            input_mask = input_mask[:, None]
 
-        cross_attn_out, _ = self.cross_attn(
+        cross_attn_out = self.cross_attn(
             query=latent,
             key=input_data,
             value=input_data,
@@ -354,7 +362,7 @@ class PerceiverBlock(nn.Module):
         latent = latent + self.cross_ff(self.norm1(latent))
 
         # Self-attention: within latent
-        self_attn_out, _ = self.self_attn(query=latent, key=latent, value=latent)
+        self_attn_out = self.self_attn(query=latent, key=latent, value=latent)
         latent = latent + self_attn_out
         latent = latent + self.self_ff(self.norm2(latent))
 
@@ -669,7 +677,7 @@ class PrithviWxCObs(PrithviWxC):
             obs_enc = torch.permute(obs_enc, (0, 1, 2, 3, 6, 7, 4, 5)).reshape(-1, O, C)
             obs_mask = torch.permute(obs_mask, (0, 1, 2, 3, 5, 6, 4)).reshape(-1, O)
             latent = self.obs_projection[None].repeat_interleave(obs_enc.shape[0], 0)
-            obs_latent = checkpoint(self.perceiver, latent, obs_enc, obs_mask, use_reentrant=False)
+            obs_latent = checkpoint(self.perceiver, latent, obs_enc, obs_mask < 1.0, use_reentrant=False)
 
             obs_latent = obs_latent.reshape((B, T, GY, GX, LY, LX, self.obs_latent))
             obs_latent = torch.permute(obs_latent, (0, 1, 6, 2, 4, 3, 5)).reshape(B, C * T, GY * LY, GX * LX)
