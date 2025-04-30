@@ -404,6 +404,7 @@ class PrithviWxCObs(PrithviWxC):
         positional_encoding: str,
         obs_patch_size: Tuple[int, int] = (3, 2),
         obs_features: int = 64,
+        encoder_shifting: bool = False,
         decoder_shifting: bool = False,
         checkpoint_encoder: list[int] | None = (),
         checkpoint_decoder: list[int] | None = (),
@@ -489,6 +490,7 @@ class PrithviWxCObs(PrithviWxC):
             residual=residual,
             masking_mode=masking_mode,
             positional_encoding=positional_encoding,
+            encoder_shifting=encoder_shifting,
             decoder_shifting=decoder_shifting,
             checkpoint_encoder=checkpoint_encoder,
             checkpoint_decoder=checkpoint_decoder
