@@ -23,7 +23,6 @@ from pytorch_retrieve.inference import (
     run_inference,
     InferenceRunner,
     SequentialInferenceRunner,
-    SimpleInput
 )
 from pytorch_retrieve.tensors import QuantileTensor
 from pytorch_retrieve.modules.output import Quantiles
@@ -167,6 +166,8 @@ INFERENCE_CONFIG = """
 batch_size = 256
 """
 
+
+
 def test_run_inference_tabular(tmp_path):
     """
     Test running inference with tabular data.
@@ -186,35 +187,6 @@ def test_run_inference_tabular(tmp_path):
         assert res.exists()
 
 
-
-def test_run_inference_simple_input(tmp_path):
-    """
-    Test running inference with input data consisting of lists of tensors and single tensors.
-    """
-    inference_config = toml.loads(INFERENCE_CONFIG)
-    output_config = {}
-    inference_config = InferenceConfig.parse(output_config, inference_config)
-    model = nn.Identity()
-
-    input_loader = TabularInputLoader(2048, 12)
-    input_list = [inpt for inpt in input_loader]
-
-    runner = InferenceRunner(model, SimpleInput(input_list), inference_config=inference_config)
-    results = runner.run(output_path=tmp_path, device="cpu", dtype=torch.float32)
-
-    assert len(results) == 8
-    for res in results:
-        assert res.exists()
-
-    runner = InferenceRunner(model, SimpleInput(input_list[0]), inference_config=inference_config)
-    results = runner.run(output_path=tmp_path, device="cpu", dtype=torch.float32)
-
-    assert len(results) == 1
-    for res in results:
-        assert res.exists()
-
-
-
 def test_run_inference_tabular_sequential(tmp_path):
     """
     Test running inference with tabular data.
@@ -232,6 +204,34 @@ def test_run_inference_tabular_sequential(tmp_path):
     assert len(results) == 8
     for res in results:
         assert res.exists()
+
+
+def test_run_inference_simple_input(tmp_path):
+    """
+    Test running inference with tabular data.
+    """
+    inference_config = toml.loads(INFERENCE_CONFIG)
+    output_config = {}
+    inference_config = InferenceConfig.parse(output_config, inference_config)
+    model = nn.Identity()
+
+    input_loader = TabularInputLoader(2048, 12)
+    input_list = [inpt for inpt in input_loader]
+
+    runner = InferenceRunner(model, input_list, inference_config=inference_config)
+    results = runner.run(output_path=tmp_path, device="cpu", dtype=torch.float32)
+
+    assert len(results) == 8
+    for res in results:
+        assert res.exists()
+
+    runner = InferenceRunner(model, input_list[0], inference_config=inference_config)
+    results = runner.run(output_path=tmp_path, device="cpu", dtype=torch.float32)
+
+    assert len(results) == 1
+    for res in results:
+        assert res.exists()
+
 
 
 def test_run_inference_multiple_input_loaders(tmp_path):

@@ -1043,7 +1043,7 @@ class SequentialInferenceRunner:
                 elif len(dims) < tensor.ndim:
                     tensor = torch.squeeze(tensor)
                     results[key] = (tuple(dims) + ("x", "y"), tensor)
-                    results = xr.Dataset(results)
+            results = xr.Dataset(results)
 
         filename = f"results_{counter}.nc"
         if isinstance(results, (str, Path)):
