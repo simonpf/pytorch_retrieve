@@ -57,6 +57,11 @@ def load_weights(path: Union[Path, Dict[str, Path]], model: nn.Module) -> None:
     if isinstance(path, dict):
         for component, pth in path.items():
             module = getattr(model, component)
+            LOGGER.info(
+                "Loading weights for '%s' from '%s'.",
+                component,
+                pth
+            )
             load_weights(pth, module)
         return None
 
@@ -117,14 +122,18 @@ def freeze_modules(model: nn.Module, freeze: List[str]) -> None:
         freeze: A list containing the names of the modules to freeze.
     """
     modules = dict(model.named_modules())
+    frozen = []
     for name in freeze:
         if name in modules:
+            frozen.append(name)
             for param in modules[name].parameters():
                 param.requires_grad = False
         else:
             LOGGER.warning(
-                "Couldn't freeze module '%s' because it isn't a named module of the model."
+                "Couldn't freeze module '%s' because it isn't a named module of the model.",
+                name
             )
+    LOGGER.info("Freezing modules %s.", frozen)
 
 
 class TrainingConfigBase:
@@ -667,6 +676,8 @@ def run_training(
 
         training_loader = training_config.get_training_data_loader()
         validation_loader = training_config.get_validation_data_loader()
+
+        freeze_modules(module, training_config.freeze)
 
         trainer = L.Trainer(
             max_epochs=training_config.n_epochs,
