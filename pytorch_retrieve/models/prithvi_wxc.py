@@ -518,6 +518,15 @@ class PrithviWxCObs(PrithviWxC):
             ),
             nn.Upsample(scale_factor=upsmpl, mode="bilinear")
         )
+        self.obs_merger = nn.Sequential(
+            nn.Linear(2 * self.embed_dim, self.embed_dim),
+            nn.LayerNorm(self.embed_dim),
+            nn.GELU(),
+            nn.Linear(self.embed_dim, self.embed_dim),
+            nn.LayerNorm(self.embed_dim),
+            nn.GELU()
+        )
+        self.obs_scale = nn.Parameter(torch.tensor(1e-2))
 
     def _gen_mask_local(self, sizes: tuple[int]) -> tuple[torch.Tensor]:
         """
@@ -642,8 +651,7 @@ class PrithviWxCObs(PrithviWxC):
         time_encoding = self.time_encoding(batch['input_time'], batch['lead_time'])
 
         #tokens = static_embedded + time_encoding #x_embedded + static_embedded + time_encoding
-        #tokens = x_embedded + static_embedded + time_encoding
-        tokens = static_embedded + time_encoding
+        tokens = x_embedded + static_embedded + time_encoding
 
         # Now we generate masks based on masking_mode
         indices_masked, indices_unmasked = self.generate_mask(
@@ -685,12 +693,13 @@ class PrithviWxCObs(PrithviWxC):
             obs_latent = torch.permute(obs_latent, (0, 1, 6, 2, 4, 3, 5)).reshape(B, C * T, GY * LY, GX * LX)
             obs_latent = checkpoint(self.temporal_encoder, obs_latent, use_reentrant=False).reshape(B, self.embed_dim, GY, 15, GX, 16)
             obs_latent = torch.permute(obs_latent, (0, 2, 4, 3, 5, 1)).reshape(B, GY *  GX, 15 * 16, -1)
+            obs_merged = self.obs_merger(torch.cat((obs_latent, unmasked), -1))
 
 
         # Encoder
         #return unmasked, obs_enc, obs_mask_enc
 
-        x_encoded = self.encoder(unmasked + obs_latent)
+        x_encoded = self.encoder(unmasked + self.obs_scale * obs_merged)
 
         # Generate and position encode the mask tokens
         # (1, 1, 1, embed_dim) -> (batch, global_seq_masked, local seq, embed_dim)
