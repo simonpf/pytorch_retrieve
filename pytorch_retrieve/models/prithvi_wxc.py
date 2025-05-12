@@ -598,6 +598,7 @@ class PrithviWxCObs(PrithviWxC):
         x_rescaled = (batch["x"].to(dtype=torch.float32) - self.input_scalers_mu) / (
             self.input_scalers_sigma + self.input_scalers_epsilon
         ).to(dtype=dtype)
+        x_rescaled = torch.clip(x_rescaled, -20, 20).to(dtype=dtype)
         batch_size = x_rescaled.shape[0]
 
         if self.positional_encoding == 'fourier':
@@ -609,6 +610,7 @@ class PrithviWxCObs(PrithviWxC):
             x_static = (batch["static"] - self.static_input_scalers_mu) / (
                 self.static_input_scalers_sigma + self.static_input_scalers_epsilon
             ).to(dtype=dtype)
+        x_static = torch.clip(x_static, -20, 20).to(dtype=dtype)
 
         if self.residual == "temporal":
             # We create a residual of same shape as y
@@ -626,6 +628,7 @@ class PrithviWxCObs(PrithviWxC):
             ) / (
                 self.input_scalers_sigma.view(1, -1, 1, 1) + self.input_scalers_epsilon
             ).to(dtype=dtype)
+            climate_scaled = torch.clip(climate_scaled, -20, 20).to(dtype=dtype)
 
         # [batch, time, parameter, lat, lon] -> [batch, time x parameter, lat, lon]
         x_rescaled = x_rescaled.flatten(1, 2)
