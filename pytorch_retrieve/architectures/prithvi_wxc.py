@@ -135,7 +135,7 @@ class BackboneConfig:
             static_input_scalers,
         )
         from PrithviWxC.model import PrithviWxC
-        from pytorch_retrieve.models.prithvi_wxc import PrithviWxCObs, PrithviWxCXObs
+        from pytorch_retrieve.models.prithvi_wxc import PrithviWxCObs, PrithviWxCXObs, PrithviWxCRegional
 
         prithvi_data_path = Path(os.environ["PRITHVI_DATA_PATH"])
         if not prithvi_data_path.exists():
@@ -217,6 +217,10 @@ class BackboneConfig:
             model = PrithviWxCObs(**kwargs)
         elif self.variant == "xobs":
             model = PrithviWxCXObs(**kwargs)
+        elif self.variant == "regional":
+            kwargs.pop("obs_features")
+            kwargs.pop("obs_patch_size")
+            model = PrithviWxCRegional(**kwargs)
         else:
             kwargs.pop("obs_features")
             kwargs.pop("obs_patch_size")
