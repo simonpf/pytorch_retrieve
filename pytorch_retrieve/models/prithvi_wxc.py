@@ -24,6 +24,7 @@ from pytorch_retrieve.modules.conv.padding import Reflect
 
 try:
     import PrithviWxC
+    import PrithviWxC.model as mdl
     from PrithviWxC.model import (
         PrithviWxC,
         PatchEmbed,
@@ -1814,9 +1815,7 @@ class MultiheadCrossAttention(nn.Module):
 
     def forward(
             self,
-            x_target: torch.Tensor,
-            x_source: torch.Tensor,
-    ) -> torch.Tensor:
+            x_target: torch.Tensor, x_source: torch.Tensor,) -> torch.Tensor:
         """
         Args:
             args: A tuple ``(x, obs, obs_mask)`` containing the latent model state ``x``, the encoded observations
@@ -1900,8 +1899,10 @@ class CrossTransformer(nn.Module):
         self.dropout = dropout
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
 
-        self.norm = nn.LayerNorm(features_target)
+        self.target_norm = nn.LayerNorm(features_target)
+        self.source_norm = nn.LayerNorm(features_target)
         self.attention = MultiheadCrossAttention(features_target, features_source, n_heads, dropout)
+        #self.attention = mdl.MultiheadAttention(features_target, n_heads, dropout)
 
         self.ff = nn.Sequential(
             nn.LayerNorm(features_target),
@@ -1919,7 +1920,8 @@ class CrossTransformer(nn.Module):
         Returns:
             Tensor of shape [..., sequence, features]
         """
-        attention_x = self.attention(self.norm(x_target), x_source)
+        #attention_x = self.attention(self.target_norm(x_target), self.source_norm(x_source))
+        attention_x = self.attention(self.target_norm(x_target), self.source_norm(x_source))
 
         x = x_target + self.drop_path(attention_x)
         x = x + self.drop_path(self.ff(x))
@@ -2053,6 +2055,7 @@ class LocalGlobalLocalCrossAttentionBlock(nn.Module):
         # First local block
 
         evaluator, transformer = next(transformer_iter)
+        #x_target = evaluator(transformer, (x_target, None))
         x_target = evaluator(transformer, (x_target, None))
         x_source = x_source.transpose(1, 2)
 
@@ -2064,14 +2067,16 @@ class LocalGlobalLocalCrossAttentionBlock(nn.Module):
             x_target = x_target.transpose(1, 2)
 
             if local:
-                x = evaluator(transformer, (x_target, None))
+                x_target = evaluator(transformer, (x_target, None))
+                #x_target = evaluator(transformer, (x_target, None))
             else:
-                x = evaluator(transformer, x_target, x_source)
+                x_target = evaluator(transformer, x_target, x_source)
+                #x_target = evaluator(transformer, (x_target, None))
 
             if not local:
-                x, attn_mask = self.shifter(x)
+                x_target, attn_mask = self.shifter(x_target)
 
-        return x
+        return x_target
 
 
 class PrithviWxCRegional(nn.Module):
@@ -2641,11 +2646,6 @@ class PrithviWxCRegional(nn.Module):
             self.input_scalers_sigma + self.input_scalers_epsilon
         )
         batch_size = x_rescaled.shape[0]
-        global_shape = batch["x_regional"].shape[-2:]
-        global_shape = (
-            global_shape[0] // self.local_shape_mu[0],
-            global_shape[1] // self.local_shape_mu[1]
-        )
 
         if self.positional_encoding == 'fourier':
             x_static_pos = self.fourier_pos_encoding(batch['static_regional']) # B, embed_dim, lat / patch_size, lon / patch_size
@@ -2674,6 +2674,12 @@ class PrithviWxCRegional(nn.Module):
         x_rescaled = x_rescaled.flatten(1, 2)
         x_rescaled = self.parameter_dropout(x_rescaled)
         x_embedded = self.patch_embedding(x_rescaled)
+        global_shape = x_embedded.shape[-2:]
+        global_shape = (
+            global_shape[0] // self.local_shape_mu[0],
+            global_shape[1] // self.local_shape_mu[1]
+        )
+
         assert x_embedded.shape[1] == self.embed_dim
 
         if self.residual == "climate":
@@ -2690,9 +2696,8 @@ class PrithviWxCRegional(nn.Module):
         x_embedded = self.to_patching(x_embedded)
         static_embedded = self.to_patching(static_embedded)
         time_encoding = self.time_encoding(batch['input_time'], batch['lead_time'])
-        tokens = x_embedded + static_embedded + time_encoding
+        tokens = static_embedded + time_encoding
         x_decoded = self.decoder(tokens, x_encoded)
-
         # Output: (batch, global sequence, local sequence, in_channels * patch_size[0] * patch_size[1])
         x_unembed = self.unembed(x_decoded)
 
