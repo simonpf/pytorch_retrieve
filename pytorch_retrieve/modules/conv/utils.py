@@ -63,6 +63,7 @@ class Scale:
 
     def __floordiv__(self, other):
         other = Scale(other)
+        print(self.scale, other.scale)
         return Scale([scl_l // scl_r for scl_l, scl_r in zip(self.scale, other.scale)])
 
     def __ifloordiv__(self, other):

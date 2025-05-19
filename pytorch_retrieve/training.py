@@ -204,6 +204,7 @@ class TrainingConfigBase:
         worker_init_fn = None
         if hasattr(dataset, "worker_init_fn"):
             worker_init_fn = dataset.worker_init_fn
+        collate_fn = getattr(dataset, "collate_fn", None)
         data_loader = DataLoader(
             dataset,
             shuffle=shuffle,
@@ -211,7 +212,8 @@ class TrainingConfigBase:
             batch_size=self.batch_size,
             num_workers=self.n_data_loader_workers,
             pin_memory=True,
-            persistent_workers=self.persistent_workers
+            persistent_workers=self.persistent_workers,
+            collate_fn=collate_fn
         )
         return data_loader
 
@@ -249,13 +251,15 @@ class TrainingConfigBase:
         worker_init_fn = None
         if hasattr(dataset, "worker_init_fn"):
             worker_init_fn = dataset.worker_init_fn
+        collate_fn = getattr(dataset, "collate_fn", None)
         data_loader = DataLoader(
             dataset,
             worker_init_fn=worker_init_fn,
             batch_size=self.batch_size,
             num_workers=self.n_data_loader_workers,
             pin_memory=True,
-            persistent_workers=self.persistent_workers
+            persistent_workers=self.persistent_workers,
+            collate_fn=collate_fn
         )
         return data_loader
 

@@ -259,31 +259,59 @@ class InterleaveDatasets(Dataset):
         Args:
             ind: Index used to select the sample from the first dataset.
         """
-        fill_values = {}
+        fill_values_target = {}
+        fill_values_input = {}
         samples = []
 
-        sample = self.datasets[0][ind]
-        for target in sample[1:]:
-            if isinstance(target, dict):
-                for name, tnsr in target.items():
-                    fill_values[name] = torch.nan * torch.zeros_like(tnsr)
-        samples.append(sample)
+        inpt, target = self.datasets[0][ind]
+
+        if isinstance(inpt, dict):
+            for name, tnsr in inpt.items():
+                if isinstance(tnsr, list):
+                    fill_values_input[name] = [torch.nan * torch.zeros_like(elem) for elem in tnsr]
+                else:
+                    fill_values_input[name] = torch.nan * torch.zeros_like(tnsr)
+        if isinstance(target, dict):
+            for name, tnsr in target.items():
+                if isinstance(tnsr, list):
+                    fill_values_target[name] = [torch.nan * torch.zeros_like(elem) for elem in tnsr]
+                else:
+                    fill_values_target[name] = torch.nan * torch.zeros_like(tnsr)
+
+        samples.append((inpt, target))
 
         for dataset in self.datasets[1:]:
             ind = self.rng.integers(0, len(dataset))
-            sample = dataset[ind]
-            for target in sample[1:]:
-                if isinstance(target, dict):
-                    for name, tnsr in target.items():
-                        fill_values[name] = torch.nan * torch.zeros_like(tnsr)
-            samples.append(sample)
+            inpt, target = dataset[ind]
+
+            if isinstance(inpt, dict):
+                for name, tnsr in inpt.items():
+                    if isinstance(tnsr, list):
+                        fill_values_input[name] = [torch.nan * torch.zeros_like(elem) for elem in tnsr]
+                    else:
+                        fill_values_input[name] = torch.nan * torch.zeros_like(tnsr)
+
+            if isinstance(target, dict):
+                for name, tnsr in target.items():
+                    if isinstance(tnsr, list):
+                        fill_values_target[name] = [torch.nan * torch.zeros_like(elem) for elem in tnsr]
+                    else:
+                        fill_values_target[name] = torch.nan * torch.zeros_like(tnsr)
+
+            samples.append((inpt, target))
 
         for smpl in samples:
-            for target in smpl[1:]:
-                if isinstance(target, dict):
-                    for name, tnsr in fill_values.items():
-                        if name not in target:
-                            target[name] = tnsr
+            inpt, target = smpl
+
+            if isinstance(inpt, dict):
+                for name, tnsr in fill_values_input.items():
+                    if name not in inpt:
+                        inpt[name] = tnsr
+
+            if isinstance(target, dict):
+                for name, tnsr in fill_values_target.items():
+                    if name not in target:
+                        target[name] = tnsr
 
         return samples
 

@@ -233,7 +233,7 @@ class StandardizationLayer(InputLayer):
         """
         pad_dims = x.dim() - 2
 
-        if self.finalized.item() > 0.0:
+        if self.finalized > 0.0:
             if self.kind == "standardize":
                 mean = self.t_mean.to(device=x.device, dtype=x.dtype).__getitem__(
                     (...,) + (None,) * pad_dims

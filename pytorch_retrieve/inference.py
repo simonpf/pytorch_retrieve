@@ -1014,6 +1014,9 @@ class SequentialInferenceRunner:
                     advance=1.0
                 )
 
+        if progress_bar is not None:
+            progress_bar.remove_task(task)
+
         assert len(tile_stack) == 0
 
         results_ass = tiler.assemble(results_tiled)
@@ -1119,6 +1122,8 @@ class SequentialInferenceRunner:
                     LOGGER.exception(
                         "Encountered an error when loading input data."
                     )
+                    cntr += 1
+                    continue
 
                 args = []
                 if isinstance(input_data, (list, tuple)):

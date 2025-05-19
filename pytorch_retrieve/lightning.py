@@ -400,6 +400,7 @@ class LightningRetrieval(L.LightningModule):
                         f"preds_{self.global_rank}_{self.global_step}_{loss:.2f}.pt"
                     )
                     torch.save(pred, filename)
+
                 self.mean_loss = (
                     self.alpha * self.mean_loss + (1.0 - self.alpha) * loss.item()
                 )

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import torch
 from torch import nn
+import xarray as xr
 
 from pytorch_retrieve.config import get_config_attr, InputConfig, OutputConfig
 from pytorch_retrieve.architectures.model import RetrievalModel
@@ -49,6 +50,7 @@ class BackboneConfig:
     decoder_shifting: bool = True
     checkpoint_encoder: Optional[List[int]] = ()
     checkpoint_decoder: Optional[List[int]] = ()
+    scaling_factors: Optional[Path] = None
 
 
     @classmethod
@@ -87,6 +89,8 @@ class BackboneConfig:
         decoder_shifting = get_config_attr("decoder_shifting", bool, backbone_config, "backbone", default=True, required=False)
         checkpoint_encoder = get_config_attr("checkpoint_encoder", list, backbone_config, "backbone", default=(), required=False)
         checkpoint_decoder = get_config_attr("checkpoint_decoder", list, backbone_config, "backbone", default=(), required=False)
+        scaling_factors = get_config_attr("scaling_factors", str, backbone_config, "backbone", default=None, required=False)
+        scaling_factors = Path(scaling_factors)
 
         return BackboneConfig(
             in_channels=in_channels,
@@ -114,7 +118,8 @@ class BackboneConfig:
             encoder_shifting=encoder_shifting,
             decoder_shifting=decoder_shifting,
             checkpoint_encoder=checkpoint_encoder,
-            checkpoint_decoder=checkpoint_decoder
+            checkpoint_decoder=checkpoint_decoder,
+            scaling_factors=scaling_factors
         )
 
     def to_config_dict(self) -> Dict[str, object]:
@@ -137,11 +142,20 @@ class BackboneConfig:
         from PrithviWxC.model import PrithviWxC
         from pytorch_retrieve.models.prithvi_wxc import PrithviWxCObs, PrithviWxCXObs, PrithviWxCRegional
 
-        prithvi_data_path = Path(os.environ["PRITHVI_DATA_PATH"])
-        if not prithvi_data_path.exists():
-            raise ValueError(
-                "PRITHVI_DATA_PATH must point to an existing directory and contain the PrithviWxC scaling factors."
-            )
+        if self.scaling_factors is None:
+            scaling_factors = Path(os.environ["PRITHVI_DATA_PATH"])
+            if not prithvi_data_path.exists():
+                raise ValueError(
+                    "PRITHVI_DATA_PATH must point to an existing directory and contain the PrithviWxC scaling factors."
+                )
+        else:
+            if not Path(self.scaling_factors).exists():
+                raise ValueError(
+                    "'scaling_factors' must point to a directory containing the input and output scaling factors "
+                    "'musigma_surface.nc', 'musigma_vertical.nc', 'anomaly_variance_surface.nc', and "
+                    "'anomaly_variance_vertical.nc'."
+                )
+            scaling_factors = Path(self.scaling_factors)
 
         VERTICAL_VARS = ["CLOUD", "H", "OMEGA", "PL", "QI", "QL", "QV", "T", "U", "V"]
         STATIC_SURFACE_VARS = ["FRACI", "FRLAND", "FROCEAN", "PHIS"]
@@ -153,23 +167,24 @@ class BackboneConfig:
             34.0, 39.0, 41.0, 43.0, 44.0, 45.0, 48.0, 51.0, 53.0, 56.0, 63.0, 68.0, 71.0, 72.0
         ]
 
+        xr.load_dataset(scaling_factors / "musigma_vertical.nc")
         in_mu, in_sig = input_scalers(
             SURFACE_VARS,
             VERTICAL_VARS,
             LEVELS,
-            prithvi_data_path / "musigma_surface.nc",
-            prithvi_data_path / "musigma_vertical.nc",
+            str(scaling_factors / "musigma_surface.nc"),
+            str(scaling_factors / "musigma_vertical.nc"),
         )
         output_sig = output_scalers(
             SURFACE_VARS,
             VERTICAL_VARS,
             LEVELS,
-            prithvi_data_path / "anomaly_variance_surface.nc",
-            prithvi_data_path / "anomaly_variance_vertical.nc",
+            str(scaling_factors / "anomaly_variance_surface.nc"),
+            str(scaling_factors / "anomaly_variance_vertical.nc"),
         )
 
         static_mu, static_sig = static_input_scalers(
-            prithvi_data_path / "musigma_surface.nc",
+            str(scaling_factors / "musigma_surface.nc"),
             STATIC_SURFACE_VARS,
         )
 

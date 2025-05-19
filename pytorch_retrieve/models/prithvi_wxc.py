@@ -2068,10 +2068,8 @@ class LocalGlobalLocalCrossAttentionBlock(nn.Module):
 
             if local:
                 x_target = evaluator(transformer, (x_target, None))
-                #x_target = evaluator(transformer, (x_target, None))
             else:
                 x_target = evaluator(transformer, x_target, x_source)
-                #x_target = evaluator(transformer, (x_target, None))
 
             if not local:
                 x_target, attn_mask = self.shifter(x_target)

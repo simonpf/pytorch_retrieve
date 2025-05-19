@@ -50,7 +50,7 @@ class FourierEncoding(nn.Module):
         dims_back = x.dim() - dim - 1
         shape = (1,) * dims_front + (-1,) + (1,) * dims_back
         freq = (
-            torch.arange(1, self.channels_per_feature + 1, dtype=x.dtype, device=x.device)
+            0.5 * torch.arange(1, self.channels_per_feature + 1, dtype=x.dtype, device=x.device)
             .view(shape)
             .repeat_interleave(self.in_channels, dim)
         )

@@ -949,7 +949,8 @@ class InvertedBottleneckBlock(nn.Module, ParamCount):
             downsample: Optional[int] = None,
             anti_aliasing: bool = False,
             fused: bool = False,
-            stochastic_depth: Optional[float] = None
+            stochastic_depth: Optional[float] = None,
+            align: bool = False
     ):
         super().__init__()
         self.act = activation_factory()
@@ -997,7 +998,7 @@ class InvertedBottleneckBlock(nn.Module, ParamCount):
                 nn.Conv2d(
                     hidden_channels,
                     hidden_channels,
-                    kernel_size=kernel_size,
+                    kernel_size=kernel_size if (max(stride) < 2 or not align) else stride,
                     stride=stride,
                     groups=hidden_channels,
                 ),
@@ -1024,7 +1025,6 @@ class InvertedBottleneckBlock(nn.Module, ParamCount):
                 normalization_factory(hidden_channels),
                 act
             ]
-
 
         if excitation_ratio > 0.0:
             blocks.append(
@@ -1673,6 +1673,7 @@ class SatformerBlock(nn.Module, ParamCount):
         # Restore sequence dimensions
         # Shape: [n_batch, n_seq, n_embed, n_y, n_x]
         x = x.unflatten(0, (n_batch, n_seq))
+
 
         if self.attention is not None:
             if mask is not None:
