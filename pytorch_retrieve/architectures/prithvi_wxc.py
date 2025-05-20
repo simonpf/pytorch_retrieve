@@ -77,10 +77,10 @@ class BackboneConfig:
         drop_path = get_config_attr("drop_path", float, backbone_config, "backbone", default=0.0)
         parameter_dropout = get_config_attr("parameter_dropout", float, backbone_config, "backbone", default=0.0)
         positional_encoding = get_config_attr("positional_encoding", str, backbone_config, "backbone", default="fourier")
-        obs_patch_size = get_config_attr("obs_patch_size", list, backbone_config, "backbone", required=False)
+        obs_patch_size = get_config_attr("obs_patch_size", None, backbone_config, "backbone", required=False)
         if obs_patch_size is not None:
             obs_patch_size = tuple(obs_patch_size)
-        obs_features = get_config_attr("obs_features", int, backbone_config, "backbone", required=False)
+        obs_features = get_config_attr("obs_features", None, backbone_config, "backbone", required=False)
         residual = get_config_attr("residual", str, backbone_config, "backbone", default="ignore", required=False)
         variant = get_config_attr("variant", str, backbone_config, "backbone", default=None, required=False)
         encoder_shifting = get_config_attr("encoder_shifting", bool, backbone_config, "backbone", default=True, required=False)
