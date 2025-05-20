@@ -218,15 +218,23 @@ def test_run_inference_simple_input(tmp_path):
     input_loader = TabularInputLoader(2048, 12)
     input_list = [inpt for inpt in input_loader]
 
-    runner = InferenceRunner(model, input_list, inference_config=inference_config)
-    results = runner.run(output_path=tmp_path, device="cpu", dtype=torch.float32)
+    results = run_inference(
+        model,
+        input_list,
+        inference_config=inference_config,
+        output_path=tmp_path
+    )
 
     assert len(results) == 8
     for res in results:
         assert res.exists()
 
-    runner = InferenceRunner(model, input_list[0], inference_config=inference_config)
-    results = runner.run(output_path=tmp_path, device="cpu", dtype=torch.float32)
+    results = run_inference(
+        model,
+        input_list[0],
+        inference_config=inference_config,
+        output_path=tmp_path
+    )
 
     assert len(results) == 1
     for res in results:
