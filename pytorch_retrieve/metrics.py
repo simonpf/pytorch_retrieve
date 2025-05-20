@@ -960,7 +960,6 @@ class PlotMeans(tm.Metric):
         name = f"{self.name}  ({output_name})"
 
         buf = io.BytesIO()
-        fig.savefig("test.jpg", format='jpeg', bbox_inches='tight')
         fig.savefig(buf, format='jpeg', bbox_inches='tight')
         buf.seek(0)
         img = np.array(Image.open(buf)) / 255.0
