@@ -50,7 +50,7 @@ class BackboneConfig:
     decoder_shifting: bool = True
     checkpoint_encoder: Optional[List[int]] = ()
     checkpoint_decoder: Optional[List[int]] = ()
-    scaling_factors: Optional[Path] = None
+    scaling_factors: Optional[str] = None
 
 
     @classmethod
@@ -90,7 +90,7 @@ class BackboneConfig:
         checkpoint_encoder = get_config_attr("checkpoint_encoder", list, backbone_config, "backbone", default=(), required=False)
         checkpoint_decoder = get_config_attr("checkpoint_decoder", list, backbone_config, "backbone", default=(), required=False)
         scaling_factors = get_config_attr("scaling_factors", str, backbone_config, "backbone", default=None, required=False)
-        scaling_factors = Path(scaling_factors)
+        scaling_factors = scaling_factors
 
         return BackboneConfig(
             in_channels=in_channels,
@@ -167,7 +167,6 @@ class BackboneConfig:
             34.0, 39.0, 41.0, 43.0, 44.0, 45.0, 48.0, 51.0, 53.0, 56.0, 63.0, 68.0, 71.0, 72.0
         ]
 
-        xr.load_dataset(scaling_factors / "musigma_vertical.nc")
         in_mu, in_sig = input_scalers(
             SURFACE_VARS,
             VERTICAL_VARS,
