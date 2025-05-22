@@ -177,6 +177,103 @@ class Bias(ScalarMetric, tm.Metric):
         return self.error / self.counts
 
 
+class RelativeBias(ScalarMetric, tm.Metric):
+    """
+    The relative mean error.
+    """
+
+    name = "Bias"
+
+    def __init__(self, conditional: Optional[Dict[str, BinSpec]] = None, **kwargs):
+        ScalarMetric.__init__(self, conditional)
+        tm.Metric.__init__(self, **kwargs)
+        error = torch.zeros(self.shape)
+        mean = torch.zeros(self.shape)
+        counts = torch.zeros(self.shape)
+        self.add_state("error", default=error, dist_reduce_fx="sum")
+        self.add_state("mean", default=mean, dist_reduce_fx="sum")
+        self.add_state("counts", default=counts, dist_reduce_fx="sum")
+
+    def update(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        weights: Optional[torch.Tensor] = None,
+        conditional: Dict[str, torch.Tensor] = None,
+    ) -> None:
+        """
+        Args:
+            pred: A tensor containing the point predictions from the
+                retrieval model.
+            target: A tensor containing the reference values corresponding
+                to 'pred'.
+            weights: Optional weight tensor used to weigh the contribution of each
+                sample to the overall bias.
+            conditional: An optional dictionary containing values to
+                condition the calculation of the bias onto.
+        """
+        pred = pred.squeeze()
+        target = target.squeeze()
+        if weights is None:
+            weights = torch.ones_like(target)
+        else:
+            weights = weights.squeeze()
+
+        mask = None
+        if isinstance(target, MaskedTensor):
+            mask = target.mask
+            target = target.base
+            if isinstance(weights, MaskedTensor):
+                weights = weights.base
+            if isinstance(pred, MaskedTensor):
+                mask = mask | pred.mask
+                pred = pred.base
+            pred = pred[~mask]
+            target = target[~mask]
+            weights = weights[~mask]
+
+        if self.conditional is None:
+            self.error += ((pred - target) * weights).sum()
+            self.mean += (target * weights).sum()
+            self.counts += weights.sum()
+            return None
+
+        device = torch.device("cpu")
+        self.to(device=device)
+
+        coords = []
+        for cond in self.conditional:
+            if mask is None:
+                coords.append(conditional[cond].squeeze())
+            else:
+                mask = mask.to(device=device)
+                cond_s = conditional[cond].squeeze()
+                mask_s = mask.squeeze()
+                # Expand channel dimension if necessary
+                if cond_s.ndim < mask_s.ndim:
+                    cond_s = cond_s[:, None]
+                    cond_s = torch.broadcast_to(cond_s, mask_s.shape)
+                coords.append(cond_s[~mask_s])
+
+        coords = torch.stack(coords, -1).to(device=device)
+
+        wgts = ((pred - target) * weights).to(device=device)
+        bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
+        self.error += torch.histogramdd(coords, bins=bins, weight=wgts)[0]
+        wgts = (target * weights).to(device=device)
+        self.mean += torch.histogramdd(coords, bins=bins, weight=wgts)[0]
+        self.counts += torch.histogramdd(coords, bins=bins, weight=weights)[0]
+
+    def compute(self) -> torch.Tensor:
+        """
+        Compute the mean error.
+
+        Return:
+            The relative bias in percent.
+        """
+        return 100.0 * (self.error / self.mean)
+
+
 class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
     """
     Linear correlation coefficient.
@@ -981,6 +1078,120 @@ class PlotMeans(tm.Metric):
                 "Logger has no image logging functionality. Not logging output "
                 "from PlotMeans metric."
             )
+
+    @rank_zero_only
+    def compute(self) -> Dict[str, torch.Tensor]:
+        pass
+
+
+class Histogram(ScalarMetric, tm.Metric):
+    """
+    Plots a histogram of the predicted and reference data.
+    """
+    name = "Histogram"
+
+    def __init__(self, v_min: float = 0.0, v_max: float = 100.0):
+        """
+        Args:
+            n_samples: The number of samples to display.
+
+        """
+        ScalarMetric.__init__(self)
+        tm.Metric.__init__(self)
+
+        self.v_min = v_min
+        self.v_max = v_max
+
+        self.bins = torch.tensor(np.linspace(self.v_min, self.v_max).astype(np.float32))
+        counts = torch.zeros((2, self.bins.shape[0] - 1))
+        self.add_state("counts", default=counts, dist_reduce_fx="sum")
+        self.step = 0
+
+    def reset(self):
+        """
+        Reset metric.
+        """
+        super().reset()
+        self.step += 1
+
+    @rank_zero_only
+    def update(self, pred: torch.Tensor, target: torch.Tensor):
+        """
+        Args:
+            pred: A tensor containing the point predictions from the
+                retrieval model.
+            target: A tensor containing the reference values corresponding
+                to 'pred'.
+        """
+        device = torch.device("cpu")
+        dtype = torch.float32
+
+        self.to(device=device)
+        pred = pred.squeeze().to(device=device, dtype=dtype)
+        target = target.squeeze().to(device=device, dtype=dtype)
+
+        mask = None
+        if isinstance(target, MaskedTensor):
+            mask = target.mask
+            target = target.base
+            if isinstance(pred, MaskedTensor):
+                mask = mask | pred.mask
+                pred = pred.base
+            pred = pred[~mask]
+            target = target[~mask]
+
+        self.counts[0] += torch.histogram(target, bins=self.bins)[0]
+        self.counts[1] += torch.histogram(pred, bins=self.bins)[0]
+
+
+    @rank_zero_only
+    def log(
+        self, lightning_module: LightningModule, output_name: Optional[str] = None
+    ) -> None:
+
+        try:
+            import matplotlib.pyplot as plt
+            from PIL import Image
+        except ImportError:
+            LOGGER.warning(
+                "Could not import 'matplotlib', which is required by the PlotMeans"
+                "metric. Not producing any plots."
+            )
+            return {}
+
+        fig = plt.Figure(figsize=(6, 4))
+        ax = fig.add_subplot(1, 1, 1)
+        x = 0.5 * (self.bins[1:] + self.bins[:-1])
+        ax.plot(x, self.counts[0].float().cpu().numpy(), label="Target")
+        ax.plot(x, self.counts[1].float().cpu().numpy(), label="Predicted")
+        ax.set_yscale("log")
+        ax.legend()
+        name = f"{self.name}  ({output_name})"
+
+        buf = io.BytesIO()
+        fig.savefig("test.jpg", format='jpeg', bbox_inches='tight')
+        fig.savefig(buf, format='jpeg', bbox_inches='tight')
+        buf.seek(0)
+        img = np.array(Image.open(buf)) / 255.0
+        img = np.transpose(img, [2, 0, 1])
+        lightning_module.logger.experiment.add_image(name, img, self.step)
+        del fig
+        del ax
+
+        if hasattr(lightning_module.logger.experiment, "log_image"):
+            lightning_module.logger.experiment.log_image(name, img)
+        elif isinstance(lightning_module.logger, loggers.wandb.WandbLogger):
+            lightning_module.logger.log_image(
+                key=name, images=[(255 * img[:3]).to(dtype=torch.uint8)]
+            )
+        elif hasattr(lightning_module.logger.experiment, "add_image"):
+            lightning_module.logger.experiment.add_image(name, img, self.step)
+        else:
+            LOGGER.warning(
+                "Logger has no image logging functionality. Not logging output "
+                "from PlotMeans metric."
+            )
+
 
     @rank_zero_only
     def compute(self) -> Dict[str, torch.Tensor]:
