@@ -546,6 +546,7 @@ class SatformerConfig:
 
     token_length: int
     output_embed_dim: int
+    n_heads_perceiver: int
     stem_configs: Dict[str, StemConfig]
     encoding_configs: Dict[str, EncodingConfig]
     encoder_config: EncoderConfig
@@ -567,6 +568,14 @@ class SatformerConfig:
             "architecture",
             required=False,
             default=32,
+        )
+        n_heads_perceiver = get_config_attr(
+            "n_heads_perceiver",
+            int,
+            arch_config,
+            "architecture",
+            required=False,
+            default=4,
         )
 
         stem_config_dict = arch_config.get("stem", {})
@@ -627,6 +636,7 @@ class SatformerConfig:
         return SatformerConfig(
             token_length,
             output_embed_dim,
+            n_heads_perceiver,
             stem_configs,
             enc_configs,
             encoder_config,
@@ -696,16 +706,32 @@ class SatformerConfig:
 
 
 class Perceiver(nn.Module):
-    def __init__(self, embed_dim: int):
+    """
+    A perceiver module used to extract multi-scale output features from the input sequence
+    at the beginning of each decoder stage.
+    """
+    def __init__(
+            self,
+            embed_dim: int,
+            n_heads: int = 4
+    ):
+        """
+        Args:
+            embed_dim: The embedding dim of the perceiver.
+            n_heads: The number of heads in the attention layer.
+        """
         super().__init__()
         self.embed_dim = embed_dim
         self.query = nn.Parameter(
             torch.normal(torch.zeros(embed_dim), torch.ones(embed_dim))
         )
         self.norm = nn.LayerNorm(self.embed_dim)
-        self.att = nn.MultiheadAttention(self.embed_dim, 4, batch_first=True)
+        self.att = nn.MultiheadAttention(self.embed_dim, n_heads, batch_first=True)
 
-    def forward(self, x: torch.Tensor, key_padding_mask=None):
+    def forward(self, x: torch.Tensor, key_padding_mask=None) -> torch.Tensor:
+        """
+        Propagate input through perceiver.
+        """
         n_batch, _, n_seq_in, n_y, n_x = x.shape
         x_att = torch.permute(x, (0, 3, 4, 2, 1)).reshape(-1, n_seq_in, self.embed_dim)
         x_att = self.norm(x_att)
@@ -718,15 +744,33 @@ class Perceiver(nn.Module):
 
 
 class CondPerceiver(nn.Module):
-    def __init__(self, cond_dim: int, embed_dim: int):
+    """
+    A conditional perceiver module used to extract multi-scale output features from the input sequence
+    at the beginning of each decoder stage.
+    """
+    def __init__(
+            self,
+            cond_dim: int,
+            embed_dim: int,
+            n_heads: int
+    ):
+        """
+        Args:
+            cond_dim: The number of features in the conditioning input.
+            embed_dim: The number of features in the perceiver input and output.
+            n_heads: The number of heads in the attention layer.
+        """
         super().__init__()
         self.cond_dim = cond_dim
         self.embed_dim = embed_dim
         self.query = nn.Linear(cond_dim, embed_dim)
         self.norm = nn.LayerNorm(self.embed_dim)
-        self.att = nn.MultiheadAttention(self.embed_dim, 4, batch_first=True)
+        self.att = nn.MultiheadAttention(self.embed_dim, num_heads=n_heads, batch_first=True)
 
-    def forward(self, x_cond: torch.Tensor, x: torch.Tensor, key_padding_mask=None):
+    def forward(self, x_cond: torch.Tensor, x: torch.Tensor, key_padding_mask=None) -> torch.Tensor:
+        """
+        Propagate input through conditional perceiver.
+        """
         n_batch, _, n_seq_in, n_y, n_x = x.shape
         rep = x_cond.shape[0] // x.shape[0]
         if rep > 1:
@@ -823,7 +867,8 @@ class Satformer(RetrievalModel):
                 self.encoding_map[output_name] = output_cfg.encoding
             if output_cfg.encoding is None or output_cfg.encoding == "None":
                 perceivers[output_name] = Perceiver(
-                    arch_config.encoder_config.channels[-1]
+                    arch_config.encoder_config.channels[-1],
+                    n_heads=arch_config.n_heads_perceiver
                 )
             else:
                 channels = copy(arch_config.encoder_config.channels)
@@ -833,7 +878,8 @@ class Satformer(RetrievalModel):
                 perceivers[output_name] = nn.ModuleList([
                     CondPerceiver(
                         arch_config.output_embed_dim,
-                        enc_chans
+                        enc_chans,
+                        n_heads=arch_config.n_heads_perceiver
                     ) for enc_chans in channels
                 ])
 
