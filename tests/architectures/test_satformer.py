@@ -16,12 +16,13 @@ SATFORMER_CFG = """
 [architecture]
 name = "Satformer"
 output_embed_dim = 16
+n_heads_perceiver = 2
 
 [architecture.encoder]
 channels = [16, 32, 64, 128, 256]
 stage_depths = [1, 2, 2, 3, 5]
 block_factory_args = [
-    {expansion_factor=1, excitation_ratio=0.0, fused=true, attention=false},
+    {expansion_factor=1, excitation_ratio=0.0, fused=true, attention=false, n_heads=2},
     {expansion_factor=4, excitation_ratio=0.0, fused=true, attention=true},
     {expansion_factor=4, excitation_ratio=0.0, fused=true, attention=true},
     {expansion_factor=4, excitation_ratio=0.25, anti_aliasing=true, attention=true},
@@ -100,6 +101,7 @@ SATFORMER_UNCOND_CFG = """
 [architecture]
 name = "Satformer"
 output_embed_dim = 16
+n_heads_perceiver = 2
 
 [architecture.encoder]
 channels = [16, 32, 64, 128, 256]
