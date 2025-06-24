@@ -439,7 +439,7 @@ class ComputeConfig:
     devices: Union[List[int]] = -1
     n_nodes: int = 1
     strategy: str = "auto"
-    replace_sampler_ddp: bool = True
+    use_distributed_sampler: bool = True
 
     @classmethod
     def parse(cls, cfg):
@@ -450,7 +450,7 @@ class ComputeConfig:
         devices = get_config_attr("devices", None, cfg, f"compute config", None)
         n_nodes = get_config_attr("n_nodes", int, cfg, f"compute config", 1)
         strategy = get_config_attr("strategy", str, cfg, f"compute config", "auto")
-        replace_sampler_ddp = get_config_attr("replace_sampler_ddp", bool, cfg, f"compute config", True)
+        use_distributed_sampler = get_config_attr("use_distributed_sampler", bool, cfg, f"compute config", True)
 
         return ComputeConfig(
             precision=precision,
@@ -458,7 +458,7 @@ class ComputeConfig:
             devices=devices,
             n_nodes=n_nodes,
             strategy=strategy,
-            replace_sampler_ddp=replace_sampler_ddp
+            use_distributed_sampler=use_distributed_sampler
         )
 
     def __init__(
@@ -468,7 +468,7 @@ class ComputeConfig:
         devices=None,
         n_nodes: int = 1,
         strategy="auto",
-        replace_sampler_ddp=True
+        use_distributed_sampler=True
     ):
         self.precision = precision
 
@@ -493,7 +493,7 @@ class ComputeConfig:
                 strategy = "ddp"
         self.strategy = strategy
 
-        self.replace_sampler_ddp = replace_sampler_ddp
+        self.use_distributed_sampler = use_distributed_sampler
 
 
     def get_strategy(self):

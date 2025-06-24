@@ -691,6 +691,7 @@ def run_training(
             accelerator=compute_config.accelerator,
             devices=compute_config.devices,
             strategy=compute_config.get_strategy(),
+            use_distributed_sampler=compute_config.use_distributed_sampler,
             callbacks=training_config.get_callbacks(module),
             accumulate_grad_batches=training_config.accumulate_grad_batches,
             num_sanity_val_steps=0,
