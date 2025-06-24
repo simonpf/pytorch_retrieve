@@ -437,6 +437,7 @@ class ComputeConfig:
     precision: str = "16-mixed"
     accelerator: str = "cuda"
     devices: Union[List[int]] = -1
+    n_nodes: int = 1
     strategy: str = "auto"
 
     @classmethod
@@ -446,11 +447,13 @@ class ComputeConfig:
         )
         accelerator = get_config_attr("accelerator", str, cfg, f"compute config", None)
         devices = get_config_attr("devices", None, cfg, f"compute config", None)
+        n_nodes = get_config_attr("n_nodes", int, cfg, f"compute config", 1)
         strategy = get_config_attr("strategy", str, cfg, f"compute config", "auto")
         return ComputeConfig(
             precision=precision,
             accelerator=accelerator,
             devices=devices,
+            n_nodes=n_nodes,
             strategy=strategy,
         )
 
