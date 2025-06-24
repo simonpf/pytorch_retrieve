@@ -462,7 +462,13 @@ class ComputeConfig:
         )
 
     def __init__(
-        self, precision="16-mixed", accelerator=None, devices=None, strategy="auto"
+        self,
+        precision="16-mixed",
+        accelerator=None,
+        devices=None,
+        n_nodes: int = 1,
+        strategy="auto",
+        replace_sampler_ddp=True
     ):
         self.precision = precision
 
@@ -480,10 +486,15 @@ class ComputeConfig:
                 devices = 1
         self.devices = devices
 
+        self.n_nodes = n_nodes
+
         if strategy is None:
             if self.accelerator == "cuda" and len(self.devices) > 1:
                 strategy = "ddp"
         self.strategy = strategy
+
+        self.replace_sampler_ddp = replace_sampler_ddp
+
 
     def get_strategy(self):
         if self.strategy == "ddp":
