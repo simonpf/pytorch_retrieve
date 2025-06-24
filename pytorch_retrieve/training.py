@@ -690,6 +690,7 @@ def run_training(
             precision=compute_config.precision,
             accelerator=compute_config.accelerator,
             devices=compute_config.devices,
+            num_nodes=compute_config.n_nodes,
             strategy=compute_config.get_strategy(),
             use_distributed_sampler=compute_config.use_distributed_sampler,
             callbacks=training_config.get_callbacks(module),
