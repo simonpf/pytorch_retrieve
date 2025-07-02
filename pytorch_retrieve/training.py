@@ -122,6 +122,11 @@ def freeze_modules(model: nn.Module, freeze: List[str]) -> None:
         freeze: A list containing the names of the modules to freeze.
     """
     modules = dict(model.named_modules())
+
+    for module in modules.values():
+        for param in module.parameters():
+            param.requires_grad = True
+
     frozen = []
     for name in freeze:
         if name in modules:
@@ -133,7 +138,11 @@ def freeze_modules(model: nn.Module, freeze: List[str]) -> None:
                 "Couldn't freeze module '%s' because it isn't a named module of the model.",
                 name
             )
-    LOGGER.info("Freezing modules %s.", frozen)
+
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    non_trainable = sum(p.numel() for p in model.parameters() if not p.requires_grad)
+
+    LOGGER.info("Freezing modules %s. [%s / %s]", frozen, trainable / 1e6, non_trainable / 1e6)
 
 
 class TrainingConfigBase:
@@ -213,7 +222,8 @@ class TrainingConfigBase:
             num_workers=self.n_data_loader_workers,
             pin_memory=True,
             persistent_workers=self.persistent_workers,
-            collate_fn=collate_fn
+            collate_fn=collate_fn,
+
         )
         return data_loader
 
@@ -259,7 +269,7 @@ class TrainingConfigBase:
             num_workers=self.n_data_loader_workers,
             pin_memory=True,
             persistent_workers=self.persistent_workers,
-            collate_fn=collate_fn
+            collate_fn=collate_fn,
         )
         return data_loader
 
