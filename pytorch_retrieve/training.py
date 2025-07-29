@@ -407,8 +407,21 @@ class TrainingConfigBase:
         mtrcs = {}
         if isinstance(self.metrics, list):
             for output_name in outputs:
-                for name in self.metrics:
-                    metric = getattr(metrics, name)()
+                # Instantiate metrics for all outputs.
+                for margs in self.metrics:
+                    # Metric defined using dictionary.
+                    if isinstance(margs, dict):
+                        name = margs.pop("name", None)
+                        if name is None:
+                            raise ValueError(
+                                "If a metric is specified as a dictionary it needs a 'name' entry specifying "
+                                "the metric class."
+                            )
+                    # Metric defined using only its name.
+                    else:
+                        name = margs
+                        margs = {}
+                    metric = getattr(metrics, name)(**margs)
                     mtrcs.setdefault(output_name, []).append(metric)
             return mtrcs
 

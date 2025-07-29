@@ -55,7 +55,7 @@ class ScalarMetric:
                     shape.append(n_bins)
                 else:
                     raise RuntimeError(
-                        f"Metric 'Bias' received unsupported value of type "
+                        f"Metric received unsupported value of type "
                         " {type(bin_cfg)} in 'conditional'. Expected a single "
                         " integer or tuple '(start, end, n_bins)'."
                     )
@@ -105,7 +105,7 @@ class Bias(ScalarMetric, tm.Metric):
         pred: torch.Tensor,
         target: torch.Tensor,
         weights: Optional[torch.Tensor] = None,
-        conditional: Dict[str, torch.Tensor] = None,
+        conditional: Optional[Dict[str, torch.Tensor]] = None,
     ) -> None:
         """
         Args:
@@ -199,7 +199,7 @@ class RelativeBias(ScalarMetric, tm.Metric):
         pred: torch.Tensor,
         target: torch.Tensor,
         weights: Optional[torch.Tensor] = None,
-        conditional: Dict[str, torch.Tensor] = None,
+        conditional: Optional[Dict[str, torch.Tensor]] = None,
     ) -> None:
         """
         Args:
@@ -262,7 +262,7 @@ class RelativeBias(ScalarMetric, tm.Metric):
         self.error += torch.histogramdd(coords, bins=bins, weight=wgts)[0]
         wgts = (target * weights).to(device=device)
         self.mean += torch.histogramdd(coords, bins=bins, weight=wgts)[0]
-        self.counts += torch.histogramdd(coords, bins=bins, weight=weights)[0]
+        self.counts += torch.histogramdd(coords, bins=bins, weight=weights.to(device=device))[0]
 
     def compute(self) -> torch.Tensor:
         """
@@ -366,6 +366,7 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
 
             pred = pred.to(device=device)
             target = target.to(device=device)
+            weights = weights.to(device=device)
 
             self.x += torch.histogramdd(coords, bins=bins, weight=pred * weights)[0]
             self.x2 += torch.histogramdd(
@@ -484,6 +485,7 @@ class MSE(ScalarMetric, tm.Metric):
             bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
             pred = pred.to(device=device)
             target = target.to(device=device)
+            weights = weights.to(device=device)
             self.error += torch.histogramdd(
                 coords, bins=bins, weight=((pred - target) ** 2) * weights
             )[0]
@@ -741,13 +743,14 @@ class PlotSamples(tm.Metric):
         self.step += 1
 
     @rank_zero_only
-    def update(self, pred: torch.Tensor, target: torch.Tensor):
+    def update(self, pred: torch.Tensor, target: torch.Tensor, conditional = None):
         """
         Args:
             pred: A tensor containing the point predictions from the
                 retrieval model.
             target: A tensor containing the reference values corresponding
                 to 'pred'.
+            conditional: Ignored.
         """
         if isinstance(pred, list):
             batch_size = pred[0].shape[0]

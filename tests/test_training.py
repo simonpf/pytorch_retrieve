@@ -567,7 +567,10 @@ n_epochs = 2
 batch_size = 64
 optimizer = "SGD"
 optimizer_args = {"lr"= 1e-3}
-metrics = ["Bias", "CorrelationCoef"]
+metrics = [
+ {name = "Bias"}
+ {name = "CorrelationCoef"}
+]
 """
 
 

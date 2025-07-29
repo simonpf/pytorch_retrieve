@@ -415,6 +415,9 @@ class LightningRetrieval(L.LightningModule):
                 pass
 
     def on_train_start(self):
+        """
+        Initialize metrics.
+        """
         current_config = self.current_training_config
         if current_config is not None:
             self.metrics = self.current_training_config.get_metrics_dict(
@@ -433,10 +436,25 @@ class LightningRetrieval(L.LightningModule):
         # self.log_dict(norms)
 
     def validation_step_single_sequence(
-        self, pred: List[torch.Tensor], target: Union[List[torch.Tensor], dict]
+            self,
+            pred: List[torch.Tensor],
+            target: Union[List[torch.Tensor], dict],
+            inputs: Optional[Dict[str, torch.Tensor]] = None
     ) -> torch.Tensor:
         """
         Validation step for a sequence prediction with a single output.
+
+        Sequence predictions are handled as lists of tensors with each element representing a separate
+        step of the sequence. This function collects validation statistic by comparing the predicted
+        sequence 'pred' with the target sequence 'target'.
+
+        Args:
+            pred: A list of tensors containing the predicted sequence.
+            target: A list of tensors containing the targets.
+            inputs: A dictionary containing the model inputs used to condition certain metrics.
+
+        Return:
+            The total validation loss.
         """
         weights = None
         if isinstance(target, dict):
@@ -476,7 +494,14 @@ class LightningRetrieval(L.LightningModule):
             weights = [None] * len(target)
 
         loss = 0.0
-        for pred_s, target_s, weights_s in zip(pred, target, weights):
+
+        for step, (pred_s, target_s, weights_s) in enumerate(zip(pred, target, weights)):
+
+            # Conditional data for metrics
+            if inputs is None:
+                cond = {"step": step}
+            else:
+                cond = inputs | {"step": step}
 
             mask = torch.isnan(target_s)
             if mask.any():
@@ -490,16 +515,19 @@ class LightningRetrieval(L.LightningModule):
                 scalar_pred = pred_s.expected_value()
                 for metric in scalar_metrics:
                     metric = metric.to(device=scalar_pred.device)
-                    metric.update(scalar_pred, target_s)
+                    metric.update(scalar_pred, target_s, conditional=cond)
 
         for metric in other_metrics:
             metric = metric.to(device=pred_s.device)
-            metric.update(pred, target)
+            metric.update(pred, target, conditional=cond)
 
         return loss
 
     def validation_step_single_pred(
-        self, pred: torch.Tensor, target: Union[torch.Tensor, dict]
+            self,
+            pred: torch.Tensor,
+            target: Union[torch.Tensor, dict],
+            inputs: Optional[Dict[str, torch.Tensor]],
     ) -> torch.Tensor:
         """
         Validation step for a prediction with just a single output.
@@ -509,6 +537,8 @@ class LightningRetrieval(L.LightningModule):
                 retrieval module.
             target: A torch.Tensor or a dict with a single entry containing
                 the target corresponding to the prediction in 'pred'.
+            inputs: Optional dictionary containing the model input, which is used to condition
+                the validation metrics metrics.
 
         Return:
             The loss of the prediction with respect to the given target.
@@ -553,7 +583,13 @@ class LightningRetrieval(L.LightningModule):
             tot_samples = 0
             tot_loss = torch.tensor(0.0, device=self.device, dtype=self.dtype)
 
-            for pred_s, target_s in zip(pred, target):
+            for step, (pred_s, target_s) in enumerate(zip(pred, target)):
+
+                if inputs is None:
+                    cond = {"step": step * torch.ones_like(pred_s)}
+                else:
+                    cond = inputs | {"step": step * torch.ones_like(pred_s)}
+
                 mask = torch.isnan(target_s)
                 if mask.any():
                     target_s = MaskedTensor(target_s, mask=mask)
@@ -573,16 +609,17 @@ class LightningRetrieval(L.LightningModule):
                     pred_s = pred_s.expected_value()
                     for metric in scalar_metrics:
                         metric = metric.to(device=pred_s.device)
-                        metric.update(pred_s, target_s)
+                        metric.update(pred_s, target_s, cond=cond)
 
             if tot_samples > 0:
                 tot_loss = tot_loss / tot_samples
 
             for metric in other_metrics:
                 metric = metric.to(device=pred_s.device)
-                metric.update(pred, target)
+                metric.update(pred, target, cond=cond)
 
         else:
+
             mask = torch.isnan(target)
             if mask.any():
                 target = MaskedTensor(target, mask=mask)
@@ -594,13 +631,13 @@ class LightningRetrieval(L.LightningModule):
 
             for metric in other_metrics:
                 metric = metric.to(device=pred.device)
-                metric.update(pred, target)
+                metric.update(pred, target, conditional=inputs)
 
             if hasattr(pred, "expected_value") and len(scalar_metrics) > 0:
                 pred = pred.expected_value()
                 for metric in scalar_metrics:
                     metric = metric.to(device=pred.device)
-                    metric.update(pred, target)
+                    metric.update(pred, target, conditional=inputs)
 
         self.log("Validation loss", tot_loss)
         return tot_loss
@@ -626,9 +663,9 @@ class LightningRetrieval(L.LightningModule):
 
         if not isinstance(pred, dict):
             if isinstance(pred, list):
-                return self.validation_step_single_sequence(pred, target)
+                return self.validation_step_single_sequence(pred, target, inputs=inputs)
             else:
-                return self.validation_step_single_pred(pred, target)
+                return self.validation_step_single_pred(pred, target, inputs=inputs)
 
         if not isinstance(target, dict):
             if len(pred) > 1:
@@ -640,9 +677,9 @@ class LightningRetrieval(L.LightningModule):
                 )
             pred = next(iter(pred.values()))
             if isinstance(pred, list):
-                return self.validation_step_single_sequence(pred, target)
+                return self.validation_step_single_sequence(pred, target, inputs=inputs)
             else:
-                return self.validation_step_single_pred(pred, target)
+                return self.validation_step_single_pred(pred, target, inputs=inputs)
 
             raise RuntimeError(
                 "If the model output is a 'dict' the reference data must also "
@@ -671,14 +708,18 @@ class LightningRetrieval(L.LightningModule):
             ]
 
             if isinstance(pred_k, list):
+
                 if weights_k is None:
                     weights_k = [None] * len(target_k)
 
                 tot_samples = 0
 
-                for pred_k_s, target_k_s, weights_k_s in zip(
+                for step, (pred_k_s, target_k_s, weights_k_s) in enumerate(zip(
                     pred_k, target_k, weights_k
-                ):
+                )):
+
+                    cond = inputs | {"step": step * torch.ones_like(pred_k_s)}
+
                     mask = torch.isnan(target_k_s)
                     if mask.any():
                         target_k_s = MaskedTensor(target_k_s, mask=mask)
@@ -701,14 +742,14 @@ class LightningRetrieval(L.LightningModule):
                         pred_k_s = pred_k_s.expected_value()
                         for metric in scalar_metrics:
                             metric = metric.to(device=pred_k_s.device)
-                            metric.update(pred_k_s, target_k_s)
+                            metric.update(pred_k_s, target_k_s, conditional=cond)
+
+                    for metric in other_metrics:
+                        metric = metric.to(device=pred_k_s.device)
+                        metric.update(pred_k, target_k, conditional=cond)
 
                 if tot_samples > 0:
                     tot_loss = tot_loss / tot_samples
-
-                for metric in other_metrics:
-                    metric = metric.to(device=pred_k_s.device)
-                    metric.update(pred_k, target_k)
 
             else:
                 mask = torch.isnan(target_k)
@@ -726,13 +767,13 @@ class LightningRetrieval(L.LightningModule):
 
                 for metric in other_metrics:
                     metric = metric.to(device=pred_k.device)
-                    metric.update(pred_k, target_k)
+                    metric.update(pred_k, target_k, conditional=inputs)
 
                 if hasattr(pred_k, "expected_value") and len(scalar_metrics) > 0:
                     pred_k = pred_k.expected_value()
                     for metric in scalar_metrics:
                         metric = metric.to(device=pred_k.device)
-                        metric.update(pred_k, target_k)
+                        metric.update(pred_k, target_k, conditional=inputs)
 
         log_dict = {}
         for name, loss in losses.items():
