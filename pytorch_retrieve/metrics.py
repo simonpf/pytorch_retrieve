@@ -886,10 +886,7 @@ class PlotSamples(tm.Metric):
                 elif isinstance(pred, DetectionTensor):
                     target_min = 0
                     target_max = 1
-                    cmap = colormaps["Pastel1"]
-                    pred = (pred.to(dtype=torch.float32).probability() > 0.5).to(
-                        dtype=torch.float32
-                    )[0]
+                    pred = pred.to(dtype=torch.float32).probability().to(dtype=torch.float32)[0]
                 else:
                     continue
 

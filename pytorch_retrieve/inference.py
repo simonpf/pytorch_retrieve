@@ -463,15 +463,19 @@ def finalize_results_tiled(
 
             results = xr.Dataset(results)
 
-        filename = f"results_{cntr}.nc"
         if isinstance(results, (str, Path)):
             result_queue.put(results)
         else:
-            if isinstance(results, tuple):
-                results, filename = results
             if output_path is not None:
-                results.to_netcdf(output_path / filename)
-                result_queue.put(output_path / filename)
+                filename = f"results_{cntr}.nc"
+                if isinstance(results, tuple):
+                    results, filename = results
+                if output_path.is_dir():
+                    results.to_netcdf(output_path / filename)
+                    result_queue.put(output_path / filename)
+                else:
+                    results.to_netcdf(output_path)
+                    result_queue.put(output_path)
             else:
                 result_queue.put(results)
 
@@ -534,12 +538,16 @@ def finalize_results_no_tiling(
         if isinstance(results, (str, Path)):
             result_queue.put(results)
         else:
-            filename = f"results_{cntr}.nc"
-            if isinstance(results, tuple):
-                results, filename = results
             if output_path is not None:
-                results.to_netcdf(output_path / filename)
-                result_queue.put(output_path / filename)
+                filename = f"results_{cntr}.nc"
+                if isinstance(results, tuple):
+                    results, filename = results
+                if output_path.is_dir():
+                    results.to_netcdf(output_path / filename)
+                    result_queue.put(output_path / filename)
+                else:
+                    results.to_netcdf(output_path)
+                    result_queue.put(output_path)
             else:
                 result_queue.put(results)
 
@@ -850,6 +858,7 @@ class SequentialInferenceRunner:
         self.model = model
         self.input_loader = input_loader
         self.inference_config = inference_config
+        self.tile_callback = None
 
     def process_simple(
             self,
@@ -912,8 +921,12 @@ class SequentialInferenceRunner:
             if isinstance(results, tuple):
                 results, filename = results
             if output_path is not None:
-                results.to_netcdf(output_path / filename)
-                return output_path / filename
+                if output_path.is_dir():
+                    results.to_netcdf(output_path / filename)
+                    return output_path / filename
+                else:
+                    results.to_netcdf(output_path)
+                    return output_path / filename
 
             return results
 
@@ -968,7 +981,11 @@ class SequentialInferenceRunner:
             }
         else:
             not_tiled = {}
+
         tiler = Tiler(input_data, tile_size=tile_size, overlap=overlap)
+        if self.tile_callback is not None:
+            tiler.tile_callback = self.tile_callback
+
 
         results_tiled = np.array([[None] * tiler.N] * tiler.M)
         tile_stack = []
@@ -1054,8 +1071,13 @@ class SequentialInferenceRunner:
         if isinstance(results, tuple):
             results, filename = results
         if output_path is not None:
-            results.to_netcdf(output_path / filename)
-            return output_path / filename
+            if output_path.is_dir():
+                results.to_netcdf(output_path / filename)
+                return output_path / filename
+            else:
+                results.to_netcdf(output_path)
+                return output_path
+
         return results
 
 
@@ -1172,7 +1194,7 @@ class SequentialInferenceRunner:
                 cntr += 1
                 progress.update(
                     task,
-                    description=f"[bold dark_orange] Processing retrieval input: {cntr + 1}/{total}",
+                    description=f"[bold dark_orange] Processing retrieval input: {min(cntr + 1, total)}/{total}",
                     advance=1.0
                 )
 
@@ -1187,6 +1209,7 @@ def run_inference(
     device: torch.device = torch.device("cpu"),
     dtype: torch.dtype = torch.float32,
     exclude_from_tiling: Optional[List[str]] = None,
+    tile_callback = None
 ) -> Union[List[Path], List[xr.Dataset]]:
     """
     Run inference using the given model on a sequence of inputs provided by an
@@ -1211,6 +1234,7 @@ def run_inference(
     runner = SequentialInferenceRunner(
         model, input_loader, inference_config
     )
+    runner.tile_callback = tile_callback
     return runner.run(output_path=output_path, device=device, dtype=dtype)
 
 
