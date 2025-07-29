@@ -159,17 +159,22 @@ class Bias(ScalarMetric, tm.Metric):
 
         coords = []
         for cond in self.conditional:
+
+            coords_c = conditional[cond].squeeze()
+
             if mask is None:
-                coords.append(conditional[cond].squeeze())
+                if coords_c.ndim < target.ndim:
+                    coords_c = coords_c.reshape(coords_c.shape + (1,) * (target.ndim - coords_c.ndim))
+                    coords_c = torch.broadcast_to(coords_c, target.shape)
+                coords.append(coords_c)
             else:
                 mask = mask.to(device=device)
-                cond_s = conditional[cond].squeeze()
                 mask_s = mask.squeeze()
                 # Expand channel dimension if necessary
-                if cond_s.ndim < mask_s.ndim:
-                    cond_s = cond_s[:, None]
-                    cond_s = torch.broadcast_to(cond_s, mask_s.shape)
-                coords.append(cond_s[~mask_s])
+                if coords_c.ndim < mask_s.ndim:
+                    coords_c = coords_c.reshape(coords_c.shape + (1,) * (mask_s.ndim - coords_c.ndim))
+                    coords_c = torch.broadcast_to(coords_c, mask_s.shape)
+                coords.append(coords_c[~mask_s])
 
         coords = torch.stack(coords, -1).to(device=device)
 
@@ -254,17 +259,22 @@ class RelativeBias(ScalarMetric, tm.Metric):
 
         coords = []
         for cond in self.conditional:
+
+            coords_c = conditional[cond].squeeze()
+
             if mask is None:
-                coords.append(conditional[cond].squeeze())
+                if coords_c.ndim < target.ndim:
+                    coords_c = coords_c.reshape(coords_c.shape + (1,) * (target.ndim - coords_c.ndim))
+                    coords_c = torch.broadcast_to(coords_c, target.shape)
+                coords.append(coords_c)
             else:
                 mask = mask.to(device=device)
-                cond_s = conditional[cond].squeeze()
                 mask_s = mask.squeeze()
                 # Expand channel dimension if necessary
-                if cond_s.ndim < mask_s.ndim:
-                    cond_s = cond_s[:, None]
-                    cond_s = torch.broadcast_to(cond_s, mask_s.shape)
-                coords.append(cond_s[~mask_s])
+                if coords_c.ndim < mask_s.ndim:
+                    coords_c = coords_c.reshape(coords_c.shape + (1,) * (mask_s.ndim - coords_c.ndim))
+                    coords_c = torch.broadcast_to(coords_c, mask_s.shape)
+                coords.append(coords_c[~mask_s])
 
         coords = torch.stack(coords, -1).to(device=device)
 
@@ -359,17 +369,22 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
 
             coords = []
             for cond in self.conditional:
+
+                coords_c = conditional[cond].squeeze()
+
                 if mask is None:
-                    coords.append(conditional[cond].squeeze().flatten())
+                    if coords_c.ndim < target.ndim:
+                        coords_c = coords_c.reshape(coords_c.shape + (1,) * (target.ndim - coords_c.ndim))
+                        coords_c = torch.broadcast_to(coords_c, target.shape)
+                    coords.append(coords_c)
                 else:
                     mask = mask.to(device=device)
-                    cond_s = conditional[cond].squeeze()
                     mask_s = mask.squeeze()
                     # Expand channel dimension if necessary
-                    if cond_s.ndim < mask_s.ndim:
-                        cond_s = cond_s[:, None]
-                        cond_s = torch.broadcast_to(cond_s, mask_s.shape)
-                    coords.append(cond_s[~mask_s])
+                    if coords_c.ndim < mask_s.ndim:
+                        coords_c = coords_c.reshape(coords_c.shape + (1,) * (mask_s.ndim - coords_c.ndim))
+                        coords_c = torch.broadcast_to(coords_c, mask_s.shape)
+                    coords.append(coords_c[~mask_s])
 
             coords = torch.stack(coords, -1).to(device=device)
 
@@ -481,17 +496,22 @@ class MSE(ScalarMetric, tm.Metric):
 
             coords = []
             for cond in self.conditional:
+
+                coords_c = conditional[cond].squeeze()
+
                 if mask is None:
-                    coords.append(conditional[cond].squeeze().flatten())
+                    if coords_c.ndim < target.ndim:
+                        coords_c = coords_c.reshape(coords_c.shape + (1,) * (target.ndim - coords_c.ndim))
+                        coords_c = torch.broadcast_to(coords_c, target.shape)
+                    coords.append(coords_c)
                 else:
                     mask = mask.to(device=device)
-                    cond_s = conditional[cond].squeeze()
                     mask_s = mask.squeeze()
                     # Expand channel dimension if necessary
-                    if cond_s.ndim < mask_s.ndim:
-                        cond_s = cond_s[:, None]
-                        cond_s = torch.broadcast_to(cond_s, mask_s.shape)
-                    coords.append(cond_s[~mask_s])
+                    if coords_c.ndim < mask_s.ndim:
+                        coords_c = coords_c.reshape(coords_c.shape + (1,) * (mask_s.ndim - coords_c.ndim))
+                        coords_c = torch.broadcast_to(coords_c, mask_s.shape)
+                    coords.append(coords_c[~mask_s])
 
             coords = torch.stack(coords, -1).to(device=device)
             bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
@@ -576,17 +596,22 @@ class MAE(ScalarMetric, tm.Metric):
 
             coords = []
             for cond in self.conditional:
+
+                coords_c = conditional[cond].squeeze()
+
                 if mask is None:
-                    coords.append(conditional[cond].squeeze().flatten())
+                    if coords_c.ndim < target.ndim:
+                        coords_c = coords_c.reshape(coords_c.shape + (1,) * (target.ndim - coords_c.ndim))
+                        coords_c = torch.broadcast_to(coords_c, target.shape)
+                    coords.append(coords_c)
                 else:
                     mask = mask.to(device=device)
-                    cond_s = conditional[cond].squeeze()
                     mask_s = mask.squeeze()
                     # Expand channel dimension if necessary
-                    if cond_s.ndim < mask_s.ndim:
-                        cond_s = cond_s[:, None]
-                        cond_s = torch.broadcast_to(cond_s, mask_s.shape)
-                    coords.append(cond_s[~mask_s])
+                    if coords_c.ndim < mask_s.ndim:
+                        coords_c = coords_c.reshape(coords_c.shape + (1,) * (mask_s.ndim - coords_c.ndim))
+                        coords_c = torch.broadcast_to(coords_c, mask_s.shape)
+                    coords.append(coords_c[~mask_s])
 
             coords = torch.stack(coords, -1).to(device=device)
             bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
@@ -680,35 +705,40 @@ class SMAPE(ScalarMetric, tm.Metric):
 
         coords = []
         for cond in self.conditional:
+
+            coords_c = conditional[cond].squeeze()
+
             if mask is None:
-                coords.append(conditional[cond].squeeze().flatten())
+                if coords_c.ndim < target.ndim:
+                    coords_c = coords_c.reshape(coords_c.shape + (1,) * (target.ndim - coords_c.ndim))
+                    coords_c = torch.broadcast_to(coords_c, target.shape)
+                coords.append(coords_c)
             else:
                 mask = mask.to(device=device)
-                cond_s = conditional[cond].squeeze()
                 mask_s = mask.squeeze()
                 # Expand channel dimension if necessary
-                if cond_s.ndim < mask_s.ndim:
-                    cond_s = cond_s[:, None]
-                    cond_s = torch.broadcast_to(cond_s, mask_s.shape)
-                coords.append(cond_s[~mask_s])
+                if coords_c.ndim < mask_s.ndim:
+                    coords_c = coords_c.reshape(coords_c.shape + (1,) * (mask_s.ndim - coords_c.ndim))
+                    coords_c = torch.broadcast_to(coords_c, mask_s.shape)
+                coords.append(coords_c[~mask_s])
 
-            coords = torch.stack(coords, -1).to(device=device)
-            bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
-            pred = pred.to(device=device)
-            target = target.to(device=device)
+        coords = torch.stack(coords, -1).to(device=device)
+        bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
+        pred = pred.to(device=device)
+        target = target.to(device=device)
 
-            valid = target >= self.threshold
-            pred = pred[valid]
-            target = target[valid]
-            coords = coords[valid]
-            weights = weights[valid]
-            smape = torch.abs(pred - target) / (
-                0.5 * (torch.abs(pred) + torch.abs(target))
-            )
-            self.error += torch.histogramdd(coords, bins=bins, weight=smape * weights)[
-                0
-            ]
-            self.counts += torch.histogramdd(coords, bins=bins, weight=weights)[0]
+        valid = target >= self.threshold
+        pred = pred[valid]
+        target = target[valid]
+        coords = coords[valid]
+        weights = weights[valid]
+        smape = torch.abs(pred - target) / (
+            0.5 * (torch.abs(pred) + torch.abs(target))
+        )
+        self.error += torch.histogramdd(coords, bins=bins, weight=smape * weights)[
+            0
+        ]
+        self.counts += torch.histogramdd(coords, bins=bins, weight=weights)[0]
 
     def compute(self) -> torch.Tensor:
         """
