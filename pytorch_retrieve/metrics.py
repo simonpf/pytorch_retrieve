@@ -181,7 +181,7 @@ class Bias(ScalarMetric, tm.Metric):
         wgts = ((pred - target) * weights).to(device=device)
         bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
         self.error += torch.histogramdd(coords, bins=bins, weight=wgts)[0]
-        self.counts += torch.histogramdd(coords, bins=bins, weight=weights)[0]
+        self.counts += torch.histogramdd(coords, bins=bins, weight=weights.to(device=device))[0]
 
     def compute(self) -> torch.Tensor:
         """
@@ -617,6 +617,7 @@ class MAE(ScalarMetric, tm.Metric):
             bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
             pred = pred.to(device=device)
             target = target.to(device=device)
+            weights = weights.to(device=device)
             self.error += torch.histogramdd(
                 coords, bins=bins, weight=torch.abs(pred - target) * weights
             )[0]
@@ -726,6 +727,7 @@ class SMAPE(ScalarMetric, tm.Metric):
         bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
         pred = pred.to(device=device)
         target = target.to(device=device)
+        weights = weights.to(device=device)
 
         valid = target >= self.threshold
         pred = pred[valid]
