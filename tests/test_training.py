@@ -567,10 +567,22 @@ n_epochs = 2
 batch_size = 64
 optimizer = "SGD"
 optimizer_args = {"lr"= 1e-3}
-metrics = [
- {name = "Bias"}
- {name = "CorrelationCoef"}
-]
+
+[[warm_up.metrics]]
+name = "Bias"
+conditional = {x_1 = [1.5, 25.5, 8.0]}
+
+[[warm_up.metrics]]
+name = "CorrelationCoef"
+conditional = {x_1 = [1.5, 25.5, 8.0]}
+
+[[warm_up.metrics]]
+name = "MSE"
+conditional = {x_1 = [1.5, 25.5, 8.0]}
+
+[[warm_up.metrics]]
+name = "PlotSamples"
+conditional = {x_1 = [1.5, 25.5, 8.0]}
 """
 
 

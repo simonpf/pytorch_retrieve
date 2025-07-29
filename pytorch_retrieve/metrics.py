@@ -7,7 +7,7 @@ probabilistic outputs.
 """
 import io
 import logging
-from typing import Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 from lightning import LightningModule
 from lightning.pytorch.utilities import rank_zero_only
@@ -49,19 +49,20 @@ class ScalarMetric:
                 if isinstance(bin_cfg, int):
                     bins.append(torch.arange(bin_cfg + 1) - 0.5)
                     shape.append(bin_cfg)
-                elif isinstance(bin_cfg, tuple):
+                elif isinstance(bin_cfg, (tuple, list)):
                     start, end, n_bins = bin_cfg
+                    n_bins = int(n_bins)
                     bins.append(torch.linspace(start, end, n_bins + 1))
                     shape.append(n_bins)
                 else:
                     raise RuntimeError(
                         f"Metric received unsupported value of type "
-                        " {type(bin_cfg)} in 'conditional'. Expected a single "
+                        f" {type(bin_cfg)} in 'conditional'. Expected a single "
                         " integer or tuple '(start, end, n_bins)'."
                     )
             self.conditional = conds
         self.bins = bins
-        self.shape = shape
+        self.shape = tuple(shape)
 
     def log(
         self, lightning_module: LightningModule, output_name: Optional[str] = None
@@ -79,6 +80,16 @@ class ScalarMetric:
             name = f"{name} ({output_name})"
 
         sync_dist = lightning_module.device != torch.device("cpu")
+
+        # Log multiple scalars for conditional norms.
+        if self.conditional is not None and len(self.bins) == 1:
+            cntrs = self.bins[0]
+            cntrs = 0.5 * (cntrs[1:] + cntrs[:-1])
+            vals = {
+                str(key): val for key, val in zip(cntrs, value)
+            }
+            lightning_module.logger.experiment.add_scalars(name, vals, global_step=lightning_module.global_step)
+            return None
 
         lightning_module.log(
             name, value, on_step=False, on_epoch=True, sync_dist=sync_dist
@@ -443,6 +454,7 @@ class MSE(ScalarMetric, tm.Metric):
         else:
             weights = weights.squeeze()
 
+        mask = None
         if isinstance(target, MaskedTensor):
             mask = target.mask
             target = target.base
@@ -713,7 +725,7 @@ class PlotSamples(tm.Metric):
 
     name = "Validation samples"
 
-    def __init__(self, n_samples: int = 8):
+    def __init__(self, n_samples: int = 8, conditional: Any = None):
         """
         Args:
             n_samples: The number of samples to display.
