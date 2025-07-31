@@ -483,12 +483,13 @@ class MSE(ScalarMetric, tm.Metric):
             target = target[~mask]
             weights = weights[~mask]
 
-        if pred.dim() > 2:
-            pred = pred.flatten()
-            target = target.flatten()
-            weights = weights.flatten()
-
         if self.conditional is None:
+
+            if pred.dim() > 2:
+                pred = pred.flatten()
+                target = target.flatten()
+                weights = weights.flatten()
+
             self.error += (((pred - target) ** 2) * weights).sum()
             self.counts += weights.sum()
         else:
@@ -583,12 +584,13 @@ class MAE(ScalarMetric, tm.Metric):
             target = target[~mask]
             weights = weights[~mask]
 
-        if pred.dim() > 2:
-            pred = pred.flatten()
-            target = target.flatten()
-            weights = weights.flatten()
-
         if self.conditional is None:
+
+            if pred.dim() > 2:
+                pred = pred.flatten()
+                target = target.flatten()
+                weights = weights.flatten()
+
             self.error += (torch.abs(pred - target) * weights).sum()
             self.counts += weights.sum()
         else:
@@ -685,12 +687,13 @@ class SMAPE(ScalarMetric, tm.Metric):
             target = target[~mask]
             weights = weights[~mask]
 
-        if pred.dim() > 2:
-            pred = pred.flatten()
-            target = target.flatten()
-            weights = weights.flatten()
-
         if self.conditional is None:
+
+            if pred.dim() > 2:
+                pred = pred.flatten()
+                target = target.flatten()
+                weights = weights.flatten()
+
             valid = target >= self.threshold
             pred = pred[valid]
             target = target[valid]
