@@ -121,13 +121,27 @@ def test_correlation_coef():
     result = corr.compute()
     assert torch.isclose(result, torch.tensor(-1.0))
 
-    # Test conditional bias with regularly-spaced bins.
+    # Test conditional correlation with regularly-spaced bins.
     corr = CorrelationCoef(conditional={"rand": (0, 1, 4)})
     for x, y in data_loader:
         mask = torch.rand(y.shape) > 0.5
         y[mask] = torch.nan
         y = MaskedTensor(y, mask=mask)
         rand = torch.rand(y.shape)
+        corr.update(y, y, conditional={"rand": rand})
+
+    result = corr.compute()
+    assert result.shape == (4,)
+    assert torch.isclose(result, torch.tensor(1.0)).all()
+
+    # Test conditional correlation with broadcasted coordinates
+    corr = CorrelationCoef(conditional={"rand": (0, 1, 4)})
+    for x, y in data_loader:
+        y = y[..., None].repeat_interleave(4, -2).repeat_interleave(4, -1)
+        mask = torch.rand(y.shape) > 0.5
+        #y[mask] = torch.nan
+        #y = MaskedTensor(y, mask=mask)
+        rand = torch.rand(y.shape[:1])
         corr.update(y, y, conditional={"rand": rand})
 
     result = corr.compute()

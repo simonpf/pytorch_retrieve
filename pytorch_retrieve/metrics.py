@@ -351,12 +351,13 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
             target = target[~mask]
             weights = weights[~mask]
 
-        if pred.dim() >= 2:
-            pred = pred.flatten()
-            target = target.flatten()
-            weights = weights.flatten()
-
         if self.conditional is None:
+
+            if pred.dim() >= 2:
+                pred = pred.flatten()
+                target = target.flatten()
+                weights = weights.flatten()
+
             self.x += (pred * weights).sum()
             self.x2 += ((pred**2) * weights).sum()
             self.xy += (pred * target * weights).sum()
