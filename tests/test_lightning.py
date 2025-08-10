@@ -27,3 +27,6 @@ def test_save_load_checkpoint(
     ckpts = list((tmp_path / "checkpoints").glob("*.ckpt"))
     model = load_model(ckpts[0])
     assert model is not None
+
+    ckpts = list((tmp_path / "checkpoints").glob("*best_val*.ckpt"))
+    assert len(ckpts) == 1

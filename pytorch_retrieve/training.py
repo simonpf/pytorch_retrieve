@@ -33,7 +33,8 @@ from pytorch_retrieve.utils import (
     read_training_config,
     read_compute_config,
     find_most_recent_checkpoint,
-    WarmupLR
+    WarmupLR,
+    BestScoreCheckpoint
 )
 from pytorch_retrieve.lightning import LightningRetrieval
 
@@ -381,15 +382,20 @@ class TrainingConfigBase:
             A list of callbacks for the current stage of the training.
 
         """
+        checkpoint_dir = str(module.model_dir / "checkpoints")
         checkpoint_cb = callbacks.ModelCheckpoint(
-            dirpath=module.model_dir / "checkpoints",
+            dirpath=checkpoint_dir,
             filename=module.name,
             save_top_k=0,
             save_last=True,
         )
         checkpoint_cb.CHECKPOINT_NAME_LAST = module.name
+        best_score_checkpoint_cb = BestScoreCheckpoint(
+            checkpoint_dir=checkpoint_dir,
+            prefix=module.name,
+        )
 
-        cbs = [checkpoint_cb]
+        cbs = [checkpoint_cb, best_score_checkpoint_cb]
         if self.minimum_lr is not None:
             cbs.append(
                 callbacks.EarlyStopping(

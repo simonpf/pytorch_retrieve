@@ -427,3 +427,122 @@ class WarmupLR(LRScheduler):
             for group in self.optimizer.param_groups
         ]
 
+
+import os
+import re
+from typing import Optional, Tuple
+from lightning.pytorch.callbacks import Callback
+from lightning.pytorch.utilities import rank_zero_only
+
+
+class BestScoreCheckpoint(Callback):
+    """
+    Saves a checkpoint of the model with the best validation loss, falling back
+    to the training loss if it is not available.
+
+
+    """
+    def __init__(
+        self,
+        checkpoint_dir: str,
+        prefix: str,
+        primary: str = "Validation loss",
+        fallback: str = "Training loss",
+        mode: str = "min",
+        score_fmt: str = "{score:.6f}",
+    ):
+        Path(checkpoint_dir).mkdir(exist_ok=True)
+        assert mode in ("min", "max")
+        self.checkpoint_dir = checkpoint_dir
+        self.prefix = prefix
+        self.primary = primary
+        self.fallback = fallback
+        self.mode = mode
+        self.score_fmt = score_fmt
+
+        self.best_score: Optional[float] = None
+        self.best_ckpt = None
+        self._re = re.compile(
+            rf"^{re.escape(prefix + '_best_val')}_"
+            r"(?P<score>[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?).ckpt"
+        )
+
+
+    def is_better(self, new: float, ref: Optional[float]) -> bool:
+        """
+        Determine whether current loss is better than the reference value.
+
+        Args:
+            new: The new value.
+            ref: The reference value.
+
+        Return:
+            A boolean value indicating whether new is better than ref.
+        """
+        if ref is None:
+            return True
+        return (new < ref) if self.mode == "min" else (new > ref)
+
+    def get_metric(self, trainer) -> Tuple[Optional[float], Optional[str]]:
+        """
+        Get primary or secondary metric value from trainer.
+        """
+        mtrcs = trainer.callback_metrics
+        if self.primary in mtrcs and mtrcs[self.primary] is not None:
+            try:
+                return float(mtrcs[self.primary]), self.primary
+            except (TypeError, ValueError):
+                pass
+        if self.fallback in mtrcs and mtrcs[self.fallback] is not None:
+            try:
+                return float(mtrcs[self.fallback]), self.fallback
+            except (TypeError, ValueError):
+                pass
+        return None, None
+
+    def make_filename(self, score: float) -> str:
+        score_str = self.score_fmt.format(score=score)
+        return f"{self.prefix}_best_val_{score_str}.ckpt"
+
+    def find_best_score(self):
+        """
+        Initializes the best score attribute looking for available checkpoints
+        in the checkpoint directory setting it to None of no previous checkpoints
+        are available.
+        """
+        try:
+            for path in Path(self.checkpoint_dir).glob("*.ckpt"):
+                match = self._re.match(path.name)
+                if not match:
+                    continue
+                try:
+                    score = float(match.group("score"))
+                except ValueError:
+                    continue
+                self.best_score = score
+        except FileNotFoundError:
+            Path(self.checkpoint_dir).mkdir(exist_ok=True)
+
+    @rank_zero_only
+    def save_if_better(self, trainer, score: float, metric_name: str):
+        if not self.is_better(score, self.best_score):
+            return None
+
+        self.best_score = score
+        fname = self.make_filename(score)
+        ckpt_path = Path(self.checkpoint_dir) / fname
+        trainer.save_checkpoint(ckpt_path)
+
+        if self.best_ckpt is not None and Path(self.best_ckpt).exists():
+            Path(self.best_ckpt).unlink()
+
+        self.best_ckpt = ckpt_path
+
+    @rank_zero_only
+    def setup(self, trainer, pl_module, stage: Optional[str] = None):
+        self.find_best_score()
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        score, name = self.get_metric(trainer)
+        if score is not None:
+            self.save_if_better(trainer, score, name)

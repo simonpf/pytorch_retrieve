@@ -13,7 +13,8 @@ from pytorch_retrieve.utils import (
     read_compute_config,
     find_most_recent_checkpoint,
     update_recursive,
-    InterleaveDatasets
+    InterleaveDatasets,
+    BestScoreCheckpoint
 )
 
 
@@ -214,3 +215,22 @@ def test_inverleave_datasets():
         assert x.shape[0] == 16
         assert ((x[::2] % 2) == 0).all()
         assert ((x[1::2] % 2) == 1).all()
+
+
+def test_best_checkpoint(tmp_path):
+    """
+    Ensure that the BestScoreCheckpoint correctly parses the score from exsisting
+    checkpoints.
+    """
+
+    ckpt = (tmp_path / "checkpoints").mkdir()
+    ckpt = (tmp_path / "checkpoints" / "model_best_val_0.1.ckpt").touch()
+    callback = BestScoreCheckpoint(
+        checkpoint_dir=str(tmp_path / "checkpoints"),
+        prefix="model",
+    )
+    callback.find_best_score()
+    assert callback.best_score == 0.1
+
+
+    # Ensure that
