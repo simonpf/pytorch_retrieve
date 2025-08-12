@@ -151,6 +151,13 @@ class TrainingConfigBase:
     Base functionality for training configuration objects.
     """
 
+    @property
+    def has_validation_dataset(self) -> bool:
+        """
+        Check whether training config has validation data.
+        """
+        return self.validation_dataset_args is not None or validation_split is not None
+
     def get_training_and_validation_splits(self) -> Tuple[Subset, Subset]:
         """
         Get training and validation datasets by splitting the training dataset using
@@ -224,7 +231,6 @@ class TrainingConfigBase:
             pin_memory=True,
             persistent_workers=self.persistent_workers,
             collate_fn=collate_fn,
-
         )
         return data_loader
 
@@ -383,19 +389,29 @@ class TrainingConfigBase:
 
         """
         checkpoint_dir = str(module.model_dir / "checkpoints")
-        checkpoint_cb = callbacks.ModelCheckpoint(
+
+        training_config = module.current_training_config
+        last_checkpoint_cb = callbacks.ModelCheckpoint(
             dirpath=checkpoint_dir,
             filename=module.name,
             save_top_k=0,
             save_last=True,
-        )
-        checkpoint_cb.CHECKPOINT_NAME_LAST = module.name
-        best_score_checkpoint_cb = BestScoreCheckpoint(
-            checkpoint_dir=checkpoint_dir,
-            prefix=module.name,
-        )
+            )
+        last_checkpoint_cb.CHECKPOINT_NAME_LAST = module.name
+        cbs = [last_checkpoint_cb]
 
-        cbs = [checkpoint_cb, best_score_checkpoint_cb]
+        if training_config.has_validation_dataset:
+            best_checkpoint_cb = callbacks.ModelCheckpoint(
+                dirpath=checkpoint_dir,
+                filename="best_validation",
+                monitor="Validation loss",
+                save_top_k=1,
+                save_last=False,
+                save_weights_only=True,
+                auto_insert_metric_name=False,
+            )
+            cbs.append(best_checkpoint_cb)
+
         if self.minimum_lr is not None:
             cbs.append(
                 callbacks.EarlyStopping(
