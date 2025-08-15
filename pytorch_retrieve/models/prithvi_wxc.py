@@ -410,6 +410,8 @@ class PrithviWxCObs(PrithviWxC):
         decoder_shifting: bool = False,
         checkpoint_encoder: list[int] | None = (),
         checkpoint_decoder: list[int] | None = (),
+        drop_dynamic: float = 0.0,
+        drop_obs: float = 0.0
     ) -> None:
         """
         Args:
@@ -495,7 +497,7 @@ class PrithviWxCObs(PrithviWxC):
             encoder_shifting=encoder_shifting,
             decoder_shifting=decoder_shifting,
             checkpoint_encoder=checkpoint_encoder,
-            checkpoint_decoder=checkpoint_decoder
+            checkpoint_decoder=checkpoint_decoder,
         )
 
         channels = (16, 32, obs_features)
@@ -529,6 +531,9 @@ class PrithviWxCObs(PrithviWxC):
             nn.GELU()
         )
         self.obs_scale = nn.Parameter(torch.tensor(1e-2))
+
+        self.drop_dynamic = drop_dynamic
+        self.drop_obs = drop_obs
 
     def _gen_mask_local(self, sizes: tuple[int]) -> tuple[torch.Tensor]:
         """
@@ -656,8 +661,12 @@ class PrithviWxCObs(PrithviWxC):
 
         time_encoding = self.time_encoding(batch['input_time'], batch['lead_time'])
 
-        #tokens = static_embedded + time_encoding #x_embedded + static_embedded + time_encoding
-        tokens = x_embedded + static_embedded + time_encoding
+        n_batch = x_embedded.shape[0]
+        if self.training:
+            drop_dynamic = torch.rand(n_batch, 1, 1, 1, device=x_embedded.device, dtype=x_embedded.dtype) < self.drop_dynamic
+            tokens = torch.where(drop_dynamic, 0.0, x_embedded) + static_embedded + time_encoding
+        else:
+            tokens = x_embedded + static_embedded + time_encoding
 
         # Now we generate masks based on masking_mode
         indices_masked, indices_unmasked = self.generate_mask(
@@ -704,8 +713,12 @@ class PrithviWxCObs(PrithviWxC):
 
         # Encoder
         #return unmasked, obs_enc, obs_mask_enc
-
-        x_encoded = self.encoder(unmasked + self.obs_scale * obs_merged)
+        n_batch = unmasked.shape[0]
+        if self.training:
+            drop_obs = torch.rand(n_batch, 1, 1, 1, device=obs_merged.device, dtype=obs_merged.dtype) < self.drop_obs
+            x_encoded = self.encoder(unmasked + torch.where(drop_obs, 0.0, obs_merged))
+        else:
+            x_encoded = self.encoder(unmasked + obs_merged)
 
         # Generate and position encode the mask tokens
         # (1, 1, 1, embed_dim) -> (batch, global_seq_masked, local seq, embed_dim)

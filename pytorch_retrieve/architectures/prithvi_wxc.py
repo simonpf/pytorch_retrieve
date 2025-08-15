@@ -43,6 +43,8 @@ class BackboneConfig:
     positional_encoding: str = "fourier"
     obs_patch_size: Optional[Tuple[int, int]] = None,
     obs_features: Optional[int] = None
+    drop_dynamic: float = 0.0
+    drop_obs: float = 0.0
     mask_ratio_targets: float = 0.0
     residual: str = "ignore"
     variant: Optional[str] = None
@@ -82,6 +84,8 @@ class BackboneConfig:
         obs_patch_size = get_config_attr("obs_patch_size", None, backbone_config, "backbone", required=False)
         if obs_patch_size is not None:
             obs_patch_size = tuple(obs_patch_size)
+        drop_dynamic = get_config_attr("drop_dynamic", float, backbone_config, "backbone", default=0.0)
+        drop_obs = get_config_attr("drop_obs", float, backbone_config, "backbone", default=0.0)
         obs_features = get_config_attr("obs_features", None, backbone_config, "backbone", required=False)
         residual = get_config_attr("residual", str, backbone_config, "backbone", default="ignore", required=False)
         variant = get_config_attr("variant", str, backbone_config, "backbone", default=None, required=False)
@@ -113,6 +117,8 @@ class BackboneConfig:
             positional_encoding=positional_encoding,
             obs_patch_size=obs_patch_size,
             obs_features=obs_features,
+            drop_dynamic=drop_dynamic,
+            drop_obs=drop_obs,
             residual=residual,
             variant=variant,
             encoder_shifting=encoder_shifting,
@@ -143,18 +149,20 @@ class BackboneConfig:
         from pytorch_retrieve.models.prithvi_wxc import PrithviWxCObs, PrithviWxCXObs, PrithviWxCRegional
 
         if self.scaling_factors is None:
-            scaling_factors = Path(os.environ["PRITHVI_DATA_PATH"])
-            if not prithvi_data_path.exists():
+            self.scaling_factors = Path(os.environ["PRITHVI_DATA_PATH"])
+            if not self.scaling_factors.exists():
                 raise ValueError(
                     "PRITHVI_DATA_PATH must point to an existing directory and contain the PrithviWxC scaling factors."
                 )
         else:
             if not Path(self.scaling_factors).exists():
-                raise ValueError(
-                    "'scaling_factors' must point to a directory containing the input and output scaling factors "
-                    "'musigma_surface.nc', 'musigma_vertical.nc', 'anomaly_variance_surface.nc', and "
-                    "'anomaly_variance_vertical.nc'."
-                )
+                self.scaling_factors = Path(os.environ["PRITHVI_DATA_PATH"])
+                if not self.scaling_factors.exists():
+                    raise ValueError(
+                        "'scaling_factors' must point to a directory containing the input and output scaling factors "
+                        "'musigma_surface.nc', 'musigma_vertical.nc', 'anomaly_variance_surface.nc', and "
+                        "'anomaly_variance_vertical.nc'."
+                    )
             scaling_factors = Path(self.scaling_factors)
 
         VERTICAL_VARS = ["CLOUD", "H", "OMEGA", "PL", "QI", "QL", "QV", "T", "U", "V"]
@@ -208,6 +216,8 @@ class BackboneConfig:
             "positional_encoding": self.positional_encoding,
             "obs_patch_size": self.obs_patch_size,
             "obs_features": self.obs_features,
+            "drop_dynamic": self.drop_dynamic,
+            "drop_obs": self.drop_obs,
             "encoder_shifting": self.encoder_shifting,
             "decoder_shifting": self.decoder_shifting,
             "mask_ratio_inputs": 0.99,
@@ -230,14 +240,20 @@ class BackboneConfig:
         if self.variant == "obs":
             model = PrithviWxCObs(**kwargs)
         elif self.variant == "xobs":
+            kwargs.pop("drop_dynamic")
+            kwargs.pop("drop_obs")
             model = PrithviWxCXObs(**kwargs)
         elif self.variant == "regional":
             kwargs.pop("obs_features")
             kwargs.pop("obs_patch_size")
+            kwargs.pop("drop_dynamic")
+            kwargs.pop("drop_obs")
             model = PrithviWxCRegional(**kwargs)
         else:
             kwargs.pop("obs_features")
             kwargs.pop("obs_patch_size")
+            kwargs.pop("drop_dynamic")
+            kwargs.pop("drop_obs")
             model = PrithviWxC(**kwargs)
         return model
 
