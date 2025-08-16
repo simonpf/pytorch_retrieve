@@ -791,10 +791,13 @@ class LightningRetrieval(L.LightningModule):
                 metric.log(self, output_name=output_name)
                 metric.reset()
 
-        self.log(
-            "Learning rate",
-            self.trainer.optimizers[0].param_groups[0]["lr"],
-        )
+        try:
+            self.log(
+                "Learning rate",
+                self.trainer.optimizers[0].param_groups[0]["lr"],
+            )
+        except IndexError:
+            pass
 
     def configure_optimizers(self):
         if self.training_schedule is None:
@@ -859,6 +862,10 @@ class LightningRetrieval(L.LightningModule):
         self._tensorboard = None
         self.prev_optim = self.optimizers().optimizer
         self.stage += 1
+
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        self.trainer.strategy.barrier()
 
     def on_save_checkpoint(self, checkpoint) -> None:
         """
