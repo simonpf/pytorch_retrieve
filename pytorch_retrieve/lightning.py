@@ -522,8 +522,6 @@ class LightningRetrieval(L.LightningModule):
             metric.update(pred, target, conditional=cond)
 
         self.log("Validation loss", loss)
-        return tot_loss
-
         return loss
 
     def validation_step_single_pred(
