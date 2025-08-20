@@ -474,7 +474,9 @@ class PrithviWxCModel(RetrievalModel):
         return list(self.heads.keys())
 
     def forward_unroll(
-        self, x: Dict[str, torch.Tensor]
+        self,
+        x: Dict[str, torch.Tensor],
+        **backbone_kwargs
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
         """
         Creates a prediction by unrolling.
@@ -484,6 +486,7 @@ class PrithviWxCModel(RetrievalModel):
 
         Args:
             x: A dictionary containing the expected model inputs.
+            backbone_kwargs: Keyword arguments that will be forewarded to the backbone.
 
         Return:
             A dictionary mapping output names to corresponding lists of output tensors.
@@ -510,7 +513,7 @@ class PrithviWxCModel(RetrievalModel):
                 "climate": climate,
             }
 
-            y = self.backbone(inpt, apply_residual=False)
+            y = self.backbone(inpt, apply_residual=False, **backbone_kwargs)
 
             if self.backbone.residual == "temporal":
                 raise ValueError(
@@ -535,21 +538,23 @@ class PrithviWxCModel(RetrievalModel):
         return preds
 
     def forward(
-        self, x: Dict[str, torch.Tensor]
+            self, x: Dict[str, torch.Tensor],
+            **backbone_kwargs
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
         """
         Forward tensor through network.
 
         Args:
             x: A dictionary containing the expected model inputs.
+            backbone_kwargs: Keyword arguments that will be forewarded to the backbone.
 
         Return:
         """
         from pytorch_retrieve.models.prithvi_wxc import PrithviWxCObs, PrithviWxCXObs
         if x["static"].ndim == 5:
-            return self.forward_unroll(x)
+            return self.forward_unroll(x, **backbone_kwargs)
 
-        y = self.backbone(x, apply_residual=False)
+        y = self.backbone(x, apply_residual=False, **backbone_kwargs)
         #if isinstance(self.backbone, (PrithviWxCObs, PrithviWxCXObs)):
         #    y = self.backbone(x, apply_residual=False)
         #else:

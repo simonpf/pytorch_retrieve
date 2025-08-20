@@ -574,7 +574,13 @@ class PrithviWxCObs(PrithviWxC):
 
         return indices_masked, indices_unmasked
 
-    def forward(self, batch: dict[str, torch.Tensor], apply_residual: bool = True) -> torch.Tensor:
+    def forward(
+            self,
+            batch: dict[str, torch.Tensor],
+            apply_residual: bool = True,
+            obs_only: bool = False,
+            model_only: bool = False
+    ) -> torch.Tensor:
         """
         Args:
             batch: Dictionary containing the keys 'x', 'y', 'input_time',
@@ -665,6 +671,8 @@ class PrithviWxCObs(PrithviWxC):
         if self.training:
             drop_dynamic = torch.rand(n_batch, 1, 1, 1, device=x_embedded.device, dtype=x_embedded.dtype) < self.drop_dynamic
             tokens = torch.where(drop_dynamic, 0.0, x_embedded) + static_embedded + time_encoding
+        elif obs_only:
+            tokens = 0.0 * x_embedded + static_embedded + time_encoding
         else:
             tokens = x_embedded + static_embedded + time_encoding
 
@@ -714,7 +722,9 @@ class PrithviWxCObs(PrithviWxC):
         # Encoder
         #return unmasked, obs_enc, obs_mask_enc
         n_batch = unmasked.shape[0]
-        if self.training:
+        if model_only:
+            x_encoded = self.encoder(unmasked + 0.0 * obs_merged)
+        elif self.training:
             drop_obs = torch.rand(n_batch, 1, 1, 1, device=obs_merged.device, dtype=obs_merged.dtype) < self.drop_obs
             x_encoded = self.encoder(unmasked + torch.where(drop_obs, 0.0, obs_merged))
         else:
