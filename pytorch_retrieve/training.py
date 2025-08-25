@@ -6,6 +6,7 @@ The 'pytroch_retrieve.training' module coordinates the training of
 retrieval models.
 """
 from dataclasses import dataclass
+import gc
 import importlib
 import logging
 from pathlib import Path
@@ -16,6 +17,7 @@ import click
 import lightning as L
 import torch
 from torch import nn
+import torch.distributed as dist
 from torch.utils.data import Dataset, DataLoader, IterableDataset, Subset, random_split
 from torch.optim.lr_scheduler import SequentialLR
 from lightning.pytorch import callbacks
@@ -676,6 +678,47 @@ def parse_training_config(config_dict: Dict[str, object]) -> Dict[str, TrainingC
     return {name: TrainingConfig.parse(name, dct) for name, dct in config_dict.items()}
 
 
+def is_dist() -> bool:
+    """
+    Determine if training is distributed.
+    """
+    return dist.is_available() and dist.is_initialized()
+
+
+def stage_barrier():
+    """
+    Wait for all processes.
+    """
+    # sync CUDA kernels first (per-rank)
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    # then global barrier
+    if is_dist():
+        dist.barrier()
+
+def cleanup_cuda():
+    """
+    Cleanup all CUDA devices.
+    """
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()  # free any CUDA IPC handles
+
+
+def all_ranks_fail_if_any_failed(ok: bool):
+    """Propagate a failure to all ranks so nobody hangs at a barrier."""
+    if not is_dist():
+        if not ok:
+            raise RuntimeError("Stage failed on the only rank.")
+        return
+    t = torch.tensor([0 if ok else 1], device="cuda" if torch.cuda.is_available() else "cpu")
+    dist.all_reduce(t, op=dist.ReduceOp.SUM)
+    if t.item() > 0:
+        # Ensure all ranks raise
+        raise RuntimeError("One or more ranks failed in the previous stage.")
+
+
 def run_training(
     model_dir: Path,
     module: "pytorch_retrieve.lightning.LightningRetrieval",
@@ -714,56 +757,64 @@ def run_training(
         )
 
     while not module.training_finished:
-        training_config = module.current_training_config
 
-        # Try to load weights, if 'load_weight' argument is set.
-        if training_config.load_weights is not None:
-            load_weights(training_config.load_weights, module.model)
+        try:
+            training_config = module.current_training_config
 
-        ckpt_path = model_dir / "checkpoints"
-        ckpt_path.mkdir(exist_ok=True)
+            # Try to load weights, if 'load_weight' argument is set.
+            if training_config.load_weights is not None:
+                load_weights(training_config.load_weights, module.model)
 
-        training_loader = training_config.get_training_data_loader()
-        validation_loader = training_config.get_validation_data_loader()
+            ckpt_path = model_dir / "checkpoints"
+            ckpt_path.mkdir(exist_ok=True)
 
-        freeze_modules(module, training_config.freeze)
+            training_loader = training_config.get_training_data_loader()
+            validation_loader = training_config.get_validation_data_loader()
 
-        trainer = L.Trainer(
-            max_epochs=training_config.n_epochs,
-            logger=module.current_logger,
-            log_every_n_steps=training_config.log_every_n_steps,
-            precision=compute_config.precision,
-            accelerator=compute_config.accelerator,
-            devices=compute_config.devices,
-            num_nodes=compute_config.n_nodes,
-            strategy=compute_config.get_strategy(),
-            use_distributed_sampler=compute_config.use_distributed_sampler,
-            callbacks=training_config.get_callbacks(module),
-            accumulate_grad_batches=training_config.accumulate_grad_batches,
-            num_sanity_val_steps=0,
-            gradient_clip_val=training_config.gradient_clip_val,
-            gradient_clip_algorithm=training_config.gradient_clip_algorithm,
-            detect_anomaly=False,
-        )
+            freeze_modules(module, training_config.freeze)
 
+            trainer = L.Trainer(
+                max_epochs=training_config.n_epochs,
+                logger=module.current_logger,
+                log_every_n_steps=training_config.log_every_n_steps,
+                precision=compute_config.precision,
+                accelerator=compute_config.accelerator,
+                devices=compute_config.devices,
+                num_nodes=compute_config.n_nodes,
+                strategy=compute_config.get_strategy(),
+                use_distributed_sampler=compute_config.use_distributed_sampler,
+                callbacks=training_config.get_callbacks(module),
+                accumulate_grad_batches=training_config.accumulate_grad_batches,
+                num_sanity_val_steps=0,
+                gradient_clip_val=training_config.gradient_clip_val,
+                gradient_clip_algorithm=training_config.gradient_clip_algorithm,
+                detect_anomaly=False,
+            )
 
-        #for name, mod in module.named_modules():
-        #    def make_hook(name):
-        #        def detect_non_finite_with_exception(module, input, output):
-        #            if isinstance(output, torch.Tensor) and not torch.isfinite(output).all():
-        #                raise ValueError(f"Non-finite value detected in output of layer: {name, module, output.shape}")
-        #        return detect_non_finite_with_exception
-        #    mod.register_forward_hook(make_hook(name))
+            trainer.fit(
+                module,
+                train_dataloaders=training_loader,
+                val_dataloaders=validation_loader,
+                ckpt_path=checkpoint,
+            )
+            stage_barrier()
+            module = module.to(torch.device("cpu"))
+            model_path = module.save_model(model_dir)
+            checkpoint = None
 
-        trainer.fit(
-            module,
-            train_dataloaders=training_loader,
-            val_dataloaders=validation_loader,
-            ckpt_path=checkpoint,
-        )
-        module = module.to(torch.device("cpu"))
-        model_path = module.save_model(model_dir)
-        checkpoint = None
+        except Exception:
+            try:
+                all_ranks_fail_if_any_failed(ok=False)
+            finally:
+                raise
+
+        finally:
+            if hasattr(trainer, "strategy"):
+                trainer.strategy.barrier()
+            del training_loader, validation_loader, trainer
+            cleanup_cuda()
+            stage_barrier()
+
     return model_path
 
 
