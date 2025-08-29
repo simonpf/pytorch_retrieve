@@ -5,9 +5,10 @@ pytorch_retrieve.config
 The 'pytorch_retrieve.config' module implements functionality for
  reading configuration files.
 """
-
 from copy import copy
 from dataclasses import dataclass, asdict
+from functools import partial
+import importlib
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -18,6 +19,8 @@ import numpy as np
 import toml
 from torch import nn
 import torch
+from torch.distributed.fsdp import MixedPrecision
+from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 import yaml
 
 import pytorch_retrieve.modules.transformations
@@ -440,6 +443,9 @@ class ComputeConfig:
     n_nodes: int = 1
     strategy: str = "auto"
     use_distributed_sampler: bool = True
+    sharding_strategy: str = "FULL_SHARD",
+    device_mesh: Optional[List[int]] = None,
+    transformer_layer_classes: Optional[List[str]] = None
 
     @classmethod
     def parse(cls, cfg):
@@ -451,6 +457,9 @@ class ComputeConfig:
         n_nodes = get_config_attr("n_nodes", int, cfg, f"compute config", 1)
         strategy = get_config_attr("strategy", str, cfg, f"compute config", "auto")
         use_distributed_sampler = get_config_attr("use_distributed_sampler", bool, cfg, f"compute config", True)
+        sharding_strategy = get_config_attr("sharding_strategy", list, cfg, f"compute config", "FULL_SHARD")
+        device_mesh = get_config_attr("device_mesh", list, cfg, f"compute config", None)
+        transformer_layer_classes = get_config_attr("transformer_layer_classes", list, cfg, f"compute config", [])
 
         return ComputeConfig(
             precision=precision,
@@ -458,17 +467,23 @@ class ComputeConfig:
             devices=devices,
             n_nodes=n_nodes,
             strategy=strategy,
-            use_distributed_sampler=use_distributed_sampler
+            use_distributed_sampler=use_distributed_sampler,
+            sharding_strategy=sharding_strategy,
+            device_mesh=device_mesh,
+            transformer_layer_classes=transformer_layer_classes
         )
 
     def __init__(
         self,
-        precision="16-mixed",
-        accelerator=None,
-        devices=None,
+        precision: str = "16-mixed",
+        accelerator: Optional[str] = None,
+        devices: Optional[List[int]] = None,
         n_nodes: int = 1,
-        strategy="auto",
-        use_distributed_sampler=True
+        strategy: str = "auto",
+        use_distributed_sampler: bool = True,
+        sharding_strategy: str = "FULL_SHARD",
+        device_mesh: Optional[List[int]] = None,
+        transformer_layer_classes: Optional[List[str]] = None
     ):
         self.precision = precision
 
@@ -494,18 +509,42 @@ class ComputeConfig:
         self.strategy = strategy
 
         self.use_distributed_sampler = use_distributed_sampler
+        self.sharding_strategy = sharding_strategy
+        self.device_mesh = device_mesh
+        self.transformer_layer_classes = transformer_layer_classes
 
 
-    def get_strategy(self):
+    def get_strategy(self) -> Any:
+        """
+        Get the compute strategy to pass to lightning.
+        """
         if self.strategy == "ddp":
             return strategies.DDPStrategy(find_unused_parameters=True)
         elif self.strategy == "fsdp":
             import pytorch_retrieve
 
+            all_modules = lambda module, recurse, nonwrapped_numel: True
+
+            transformer_classes = []
+            for name in self.transformer_layer_classes:
+                *parts, cls = name.split(".")
+                module = importlib.import_module(".".join(parts))
+                transformer_classes.append(getattr(module, cls))
+
+            auto_wrap = partial(
+                transformer_auto_wrap_policy,
+                transformer_layer_cls=set(transformer_classes)
+            )
+            mp = MixedPrecision(param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16, buffer_dtype=torch.bfloat16)
+
             return strategies.FSDPStrategy(
-                sharding_strategy="SHARD_GRAD_OP",
+                sharding_strategy="FULL_SHARD",
+                auto_wrap_policy=auto_wrap,
+                mixed_precision=mp,
                 activation_checkpointing_policy=pytorch_retrieve.modules.conv.blocks.ALL,
-                #use_orig_params=True
+                limit_all_gathers=True,
+                forward_prefetch=True,
+                use_orig_params=True
             )
         return self.strategy
 

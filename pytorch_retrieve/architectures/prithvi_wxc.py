@@ -15,6 +15,7 @@ import xarray as xr
 
 from pytorch_retrieve.config import get_config_attr, InputConfig, OutputConfig
 from pytorch_retrieve.architectures.model import RetrievalModel
+from pytorch_retrieve.tensors import MeanTensor
 from .encoder_decoder import StemConfig, HeadConfig
 
 
@@ -533,7 +534,7 @@ class PrithviWxCModel(RetrievalModel):
                 preds.setdefault(name, []).append(head(y))
 
         if self.return_latent:
-            preds["y"] = latent_preds
+            preds["y"] = [MeanTensor(y) for y in latent_preds]
 
         return preds
 

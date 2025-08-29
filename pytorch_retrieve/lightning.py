@@ -315,7 +315,10 @@ class LightningRetrieval(L.LightningModule):
                     if mask.all() or torch.isnan(pred_k_s).any():
                         continue
 
-                    n_samples = (~mask).sum()
+                    if weights_k_s is None:
+                        n_samples = (~mask).sum()
+                    else:
+                        n_samples = weights_k_s.sum()
 
                     if n_samples == 0:
                         pred_k_s = 0.0 * pred_k_s
@@ -334,7 +337,11 @@ class LightningRetrieval(L.LightningModule):
                     if weights_k is not None:
                         weights_k = MaskedTensor(weights_k, mask=mask)
 
-                n_samples = (~mask).sum()
+                if weights_k is None:
+                    n_samples = (~mask).sum()
+                else:
+                    n_samples = weights_k.sum()
+
                 loss_k = pred[name].loss(target_k, weights=weights_k)
                 tot_loss = tot_loss + n_samples * loss_k
                 tot_samples += n_samples
@@ -425,6 +432,11 @@ class LightningRetrieval(L.LightningModule):
             )
         else:
             self.metrics = []
+
+        # Print number of FSDP wrapped modules.
+        n_wrapped = sum(1 for m in self.trainer.strategy.model.modules() if getattr(m, "_fsdp_wrapped_module", None))
+        if n_wrapped > 0:
+            LOGGER.info(f"FSDP-wrapped modules: %s.", n_wrapped)
 
     def on_before_optimizer_step(self, optimizer):
         from lightning.pytorch.utilities import grad_norm
@@ -597,7 +609,11 @@ class LightningRetrieval(L.LightningModule):
                 if mask.all():
                     continue
 
-                n_samples = (~mask).sum()
+                if weights is  None:
+                    n_samples = (~mask).sum()
+                else:
+                    n_samples = weights.sum()
+
                 if n_samples == 0:
                     pred_s = 0.0 * pred_s
                     target_s = 0.0 * target_s
@@ -729,7 +745,11 @@ class LightningRetrieval(L.LightningModule):
                     if mask.all():
                         continue
 
-                    n_samples = (~mask).sum()
+                    if weights_k_s is None:
+                        n_samples = (~mask).sum()
+                    else:
+                        n_samples = weights_k_s.sum()
+
                     if n_samples == 0:
                         pred_k_s = 0.0 * pred_k_s
                         target_k_s = 0.0 * target_k_s
@@ -758,9 +778,14 @@ class LightningRetrieval(L.LightningModule):
                     target_k = MaskedTensor(target_k, mask=mask)
                     if weights_k is not None:
                         weights_k = MaskedTensor(weights_k, mask=mask)
-                    n_samples = (~mask).sum()
+                        n_samples = weights_k.sum()
+                    else:
+                        n_samples = (~mask).sum()
                 else:
-                    n_samples = target_k.numel()
+                    if weights_k is None:
+                        n_samples = target_k.numel()
+                    else:
+                        n_samples = weights_k.sum()
 
                 loss_k = pred_k.loss(target_k, weights=weights_k)
                 tot_loss += loss_k if n_samples > 0 else 0

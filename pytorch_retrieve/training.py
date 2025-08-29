@@ -158,7 +158,7 @@ class TrainingConfigBase:
         """
         Check whether training config has validation data.
         """
-        return self.validation_dataset_args is not None or validation_split is not None
+        return self.validation_dataset_args is not None or self.validation_split is not None
 
     def get_training_and_validation_splits(self) -> Tuple[Subset, Subset]:
         """
