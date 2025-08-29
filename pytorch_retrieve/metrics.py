@@ -791,7 +791,7 @@ class PlotSamples(tm.Metric):
         self.step += 1
 
     @rank_zero_only
-    def update(self, pred: torch.Tensor, target: torch.Tensor, conditional = None):
+    def update(self, pred: torch.Tensor, target: torch.Tensor, conditional: Any = None):
         """
         Args:
             pred: A tensor containing the point predictions from the
@@ -1037,13 +1037,14 @@ class PlotMeans(tm.Metric):
         self.step += 1
 
     @rank_zero_only
-    def update(self, pred: torch.Tensor, target: torch.Tensor):
+    def update(self, pred: torch.Tensor, target: torch.Tensor, conditional: Any = None):
         """
         Args:
             pred: A tensor containing the point predictions from the
                 retrieval model.
             target: A tensor containing the reference values corresponding
                 to 'pred'.
+            conditional: Ignored.
         """
         if not isinstance(pred, list):
             pred = [pred]
@@ -1163,13 +1164,14 @@ class Histogram(ScalarMetric, tm.Metric):
         self.step += 1
 
     @rank_zero_only
-    def update(self, pred: torch.Tensor, target: torch.Tensor):
+    def update(self, pred: torch.Tensor, target: torch.Tensor, conditional: Any = None):
         """
         Args:
             pred: A tensor containing the point predictions from the
                 retrieval model.
             target: A tensor containing the reference values corresponding
                 to 'pred'.
+            conditional: Ignored.
         """
         device = torch.device("cpu")
         dtype = torch.float32
