@@ -969,8 +969,8 @@ class PlotSamples(tm.Metric):
         for pred, target in zip(self.preds, self.targets):
             images = {}
 
-            target_min = np.nanmin(torch.stack(target).cpu().numpy())
-            target_max = np.nanmax(torch.stack(target).cpu().numpy())
+            target_min = np.nanmin(torch.stack(target).float().cpu().numpy())
+            target_max = np.nanmax(torch.stack(target).float().cpu().numpy())
             target_max = max(target_min * 1.5, target_max)
             cmap = colormaps["magma"]
             cmap.set_bad("grey")
