@@ -798,7 +798,8 @@ def run_training(
                 ckpt_path=checkpoint,
             )
             stage_barrier()
-            module = module.to(torch.device("cpu"))
+            if compute_config.strategy != "fsdp":
+                module = module.to(torch.device("cpu"))
             model_path = module.save_model(model_dir)
             checkpoint = None
 
