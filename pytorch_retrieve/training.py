@@ -21,6 +21,7 @@ from torch import nn
 import torch.distributed as dist
 from torch.utils.data import Dataset, DataLoader, IterableDataset, Subset, random_split
 from torch.optim.lr_scheduler import SequentialLR
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType, FullStateDictConfig
 from lightning.pytorch import callbacks
 
 from pytorch_retrieve import metrics
@@ -757,11 +758,11 @@ def run_training(
             logger=module.logger_class,
         )
 
+    model_cfg = module.model.to_config_dict()
     while not module.training_finished:
 
         try:
 
-            module_orig = copy(module)
             training_config = module.current_training_config
 
             # Try to load weights, if 'load_weight' argument is set.
@@ -806,11 +807,24 @@ def run_training(
                 with FSDP.state_dict_type(
                         fsdp_model,
                         StateDictType.FULL_STATE_DICT,
-                        FullStateDictConfig(offload_to_cpu=True, rank0_only=True),
+                        FullStateDictConfig(offload_to_cpu=True),
                 ):
                     full_sd = fsdp_model.state_dict()
+
+                retrieval_model = compile_architecture(model_cfg)
+                schedule = module.training_schedule
+                LOGGER.warning(
+                    "Not reusing optimizers because of FSDP strategy."
+                )
+                for cfg in schedule.values():
+                    cfg.reuse_optimizer = False
+                module_orig = LightningRetrieval(
+                    retrieval_model, training_schedule=module.training_schedule, name=module.name
+                )
                 module_orig.load_state_dict(full_sd)
+                module_orig.stage = module.stage
                 module = module_orig
+
 
             model_path = module.save_model(model_dir)
             checkpoint = None
