@@ -5,6 +5,7 @@ pytorch_retrieve.training
 The 'pytroch_retrieve.training' module coordinates the training of
 retrieval models.
 """
+from copy import copy
 from dataclasses import dataclass
 import gc
 import importlib
@@ -759,6 +760,8 @@ def run_training(
     while not module.training_finished:
 
         try:
+
+            module_orig = copy(module)
             training_config = module.current_training_config
 
             # Try to load weights, if 'load_weight' argument is set.
@@ -798,8 +801,17 @@ def run_training(
                 ckpt_path=checkpoint,
             )
             stage_barrier()
-            if compute_config.strategy != "fsdp":
-                module = module.to(torch.device("cpu"))
+            if compute_config.strategy == "fsdp":
+                fsdp_model = trainer.strategy.model
+                with FSDP.state_dict_type(
+                        fsdp_model,
+                        StateDictType.FULL_STATE_DICT,
+                        FullStateDictConfig(offload_to_cpu=True, rank0_only=True),
+                ):
+                    full_sd = fsdp_model.state_dict()
+                module_orig.load_state_dict(full_sd)
+                module = module_orig
+
             model_path = module.save_model(model_dir)
             checkpoint = None
 
