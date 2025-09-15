@@ -321,7 +321,7 @@ class PrithviWxCConfig:
         else:
             head_configs = {
                 name: HeadConfig.parse(
-                    decoder_config.out_channels, output_config, "head", head_config_dict
+                    backbone_config.in_channels, output_config, "head", head_config_dict
                 )
                 for name, output_config in output_configs.items()
             }
