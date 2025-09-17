@@ -538,13 +538,14 @@ class ComputeConfig:
             mp = MixedPrecision(param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16, buffer_dtype=torch.bfloat16)
 
             return strategies.FSDPStrategy(
-                sharding_strategy="FULL_SHARD",
+                sharding_strategy=self.sharding_strategy,
                 auto_wrap_policy=auto_wrap,
                 mixed_precision=mp,
                 activation_checkpointing_policy=pytorch_retrieve.modules.conv.blocks.ALL,
                 limit_all_gathers=True,
                 forward_prefetch=True,
-                use_orig_params=True
+                use_orig_params=True,
+                device_mesh=self.device_mesh
             )
         return self.strategy
 

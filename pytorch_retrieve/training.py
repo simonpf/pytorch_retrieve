@@ -795,6 +795,11 @@ def run_training(
                 detect_anomaly=False,
             )
 
+            LOGGER.info(
+                "Starting training stage %s.",
+                module.stage
+            )
+
             trainer.fit(
                 module,
                 train_dataloaders=training_loader,
@@ -836,6 +841,10 @@ def run_training(
                 raise
 
         finally:
+            LOGGER.info(
+                "Finished training stage %s.",
+                module.stage
+            )
             if hasattr(trainer, "strategy"):
                 trainer.strategy.barrier()
             del training_loader, validation_loader, trainer
