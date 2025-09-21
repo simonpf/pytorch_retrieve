@@ -4,6 +4,7 @@ pytorch_retrieve.architectures
 
 This module defines the Architecture classes.
 """
+import importlib
 from pathlib import Path
 from typing import Any, Dict
 
@@ -34,6 +35,14 @@ def compile_architecture(config_dict) -> nn.Module:
     arch = config_dict.get("architecture", None)
     if arch is None:
         raise RuntimeError("The model configuration lacks a 'architecture' section.")
+
+    if "model_class" in arch:
+        model_class = arch.pop("model_class")
+        if model_class is not None:
+            *module,  model_class = model_class.split(".")
+            module = importlib.import_module(".".join(module))
+            model_class = getattr(module, model_class)
+            return model_class(**arch)
 
     arch_name = arch.get("name", None)
     if arch_name is None:
