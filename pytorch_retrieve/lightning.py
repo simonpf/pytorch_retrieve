@@ -840,7 +840,10 @@ class LightningRetrieval(L.LightningModule):
             curr_config.optimizer_args["lr"] = self.lr
 
         optimizer, scheduler = curr_config.get_optimizer_and_scheduler(
-            curr_name, self, previous_optimizer=self.prev_optim
+            curr_name,
+            self,
+            previous_optimizer=self.prev_optim,
+            steps_per_epoch=self.trainer.estimated_stepping_batches
         )
 
         conf = {"optimizer": optimizer}
@@ -873,16 +876,6 @@ class LightningRetrieval(L.LightningModule):
             version=self.stage_name,
         )
         return logger
-
-    def on_fit_start(self):
-        """
-        Sets number of expected steps for WarmupLR.
-        """
-        total_steps = self.trainer.estimated_stepping_batches
-        for lr_scheduler_config in self.trainer.lr_scheduler_configs:
-            scheduler = lr_scheduler_config.scheduler
-            if isinstance(scheduler, WarmupLR):
-                scheduler.total_iters = total_steps
 
     def on_fit_end(self):
         self._tensorboard = None

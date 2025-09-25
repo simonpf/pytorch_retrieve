@@ -4,8 +4,10 @@ pytorch_retrieve.architectures
 
 This module defines the Architecture classes.
 """
+from copy import copy
 import importlib
 from pathlib import Path
+from types import MethodType
 from typing import Any, Dict
 
 import torch
@@ -36,46 +38,57 @@ def compile_architecture(config_dict) -> nn.Module:
     if arch is None:
         raise RuntimeError("The model configuration lacks a 'architecture' section.")
 
+    # TODO: Would be great to handle output_names more consistently if it is required by the training interface.
+    #arch["model_class"] = "rtem.models.HeatingRateUNet3D"
     if "model_class" in arch:
+        arch = copy(arch)
         model_class = arch.pop("model_class")
         if model_class is not None:
             *module,  model_class = model_class.split(".")
             module = importlib.import_module(".".join(module))
             model_class = getattr(module, model_class)
-            return model_class(**arch)
-
-    arch_name = arch.get("name", None)
-    if arch_name is None:
-        raise RuntimeError(
-            "Architecture section needs 'name' field to identify the architecture "
-            "to instantiate."
-        )
-
-    model = None
-    if arch_name == "MLP":
-        model = MLP.from_config_dict(config_dict)
-    elif arch_name == "EncoderDecoder":
-        model = EncoderDecoder.from_config_dict(config_dict)
-    elif arch_name == "RecurrentEncoderDecoder":
-        model = RecurrentEncoderDecoder.from_config_dict(config_dict)
-    elif arch_name == "Autoregressive":
-        model = Autoregressive.from_config_dict(config_dict)
-    elif arch_name == "MultiScaleAutoregressor":
-        model = MultiScaleAutoregressor.from_config_dict(config_dict)
-    elif arch_name == "DirectForecast":
-        model = DirectForecast.from_config_dict(config_dict)
-    elif arch_name == "MetNet":
-        model = MetNet.from_config_dict(config_dict)
-    elif arch_name == "Satformer":
-        model = Satformer.from_config_dict(config_dict)
-    elif arch_name == "PrithviWxC":
-        from . import prithvi_wxc
-        model = prithvi_wxc.PrithviWxCModel.from_config_dict(config_dict)
-
+            model = model_class(**arch)
+            model.config_dict = config_dict
+            model._inference_config = None
+            model.__class__ = type(
+                model.__class__.__name__ + "Mixin",
+                (RetrievalModel, model.__class__),  # order matters for MRO
+                {}
+            )
+            model.output_names = list(config_dict.get("output", {}).keys())
+            return model
     else:
-        raise RuntimeError(
-            f"The architecture '{arch_name}' is currently not supported."
-        )
+        arch_name = arch.get("name", None)
+        if arch_name is None:
+            raise RuntimeError(
+                "Architecture section needs 'name' field to identify the architecture "
+                "to instantiate."
+            )
+
+        model = None
+        if arch_name == "MLP":
+            model = MLP.from_config_dict(config_dict)
+        elif arch_name == "EncoderDecoder":
+            model = EncoderDecoder.from_config_dict(config_dict)
+        elif arch_name == "RecurrentEncoderDecoder":
+            model = RecurrentEncoderDecoder.from_config_dict(config_dict)
+        elif arch_name == "Autoregressive":
+            model = Autoregressive.from_config_dict(config_dict)
+        elif arch_name == "MultiScaleAutoregressor":
+            model = MultiScaleAutoregressor.from_config_dict(config_dict)
+        elif arch_name == "DirectForecast":
+            model = DirectForecast.from_config_dict(config_dict)
+        elif arch_name == "MetNet":
+            model = MetNet.from_config_dict(config_dict)
+        elif arch_name == "Satformer":
+            model = Satformer.from_config_dict(config_dict)
+        elif arch_name == "PrithviWxC":
+            from . import prithvi_wxc
+            model = prithvi_wxc.PrithviWxCModel.from_config_dict(config_dict)
+        else:
+            raise RuntimeError(
+                f"The architecture '{arch_name}' is currently not supported."
+            )
 
     if "name" in config_dict:
         model.config_dict["name"] = config_dict["name"]

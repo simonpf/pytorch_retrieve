@@ -150,6 +150,72 @@ def freeze_modules(model: nn.Module, freeze: List[str]) -> None:
     LOGGER.info("Freezing modules %s. [%s / %s]", frozen, trainable / 1e6, non_trainable / 1e6)
 
 
+def update_scheduler_args(arguments: Dict[str, Any], steps_per_epoch):
+    """
+    Transforms schduler arguments from epoch-wise to step-wise quantities.
+    The arguments
+
+
+    """
+
+def convert_scheduler_args_to_steps(
+    scheduler_class, args: dict, steps_per_epoch: int
+) -> dict:
+    """Convert epoch-based scheduler arguments to step units.
+
+    This utility converts scheduler keyword arguments that are specified
+    in epoch (e.g., ``step_size`` in StepLR, ``T_max`` in
+    CosineAnnealingLR) to the equivalent number of training steps
+    (batches). It supports common PyTorch learning-rate schedulers such
+    as StepLR, MultiStepLR, CosineAnnealingLR, CosineAnnealingWarmRestarts,
+    PolynomialLR, and LinearLR.
+
+    Args:
+        scheduler_class (type | str):
+            The PyTorch scheduler class (e.g.
+            ``torch.optim.lr_scheduler.StepLR``) or its class name as a string.
+        args (dict):
+            Keyword arguments for the scheduler **excluding** the optimizer.
+            For example, ``{"step_size": 5, "gamma": 0.1}`` for StepLR.
+        steps_per_epoch (int):
+            Number of training steps (batches) in one epoch.
+
+    Returns:
+        dict: A copy of ``args`` where all recognized epoch-based
+        parameters are converted to step units. Parameters that are not
+        epoch-based are left unchanged.
+    """
+    updated = dict(args)
+
+    # Get scheduler name
+    sched_name = (
+        scheduler_class.__name__ if hasattr(scheduler_class, "__name__") else str(scheduler_class)
+    )
+
+    def convert(key):
+        if key in updated:
+            updated[key] = int(updated[key] * steps_per_epoch)
+
+    if "StepLR" in sched_name:
+        convert("step_size")
+    elif "MultiStepLR" in sched_name:
+        if "milestones" in updated:
+            updated["milestones"] = [int(m * steps_per_epoch) for m in updated["milestones"]]
+    elif "CosineAnnealingLR" in sched_name:
+        convert("T_max")
+    elif "CosineAnnealingWarmRestarts" in sched_name:
+        convert("T_0")
+        # T_mult is multiplicative and should not be converted
+    elif "PolynomialLR" in sched_name or "LinearLR" in sched_name:
+        convert("total_iters")
+    elif "LambdaLR" in sched_name:
+        raise ValueError(
+            "LambdaLR requires wrapping lr_lambda to accept step units manually."
+        )
+
+    return updated
+
+
 class TrainingConfigBase:
     """
     Base functionality for training configuration objects.
@@ -285,7 +351,11 @@ class TrainingConfigBase:
         return data_loader
 
     def get_optimizer_and_scheduler(
-        self, name: str, model: nn.Module, previous_optimizer=None
+            self,
+            name: str,
+            model: nn.Module,
+            previous_optimizer=None,
+            steps_per_epoch: int = 1
     ):
         """
         Return torch optimizer, learning-rate scheduler and callback objects
@@ -334,13 +404,12 @@ class TrainingConfigBase:
                     "If a list of schedulers is provided, 'milestones' must be "
                     "provided as well."
                 )
+            milestones = [ms * steps_per_epoch for ms in milestones]
             schedulers = scheduler
             scheds = []
             for scheduler, args in zip(schedulers, self.scheduler_args):
                 scheduler = getattr(torch.optim.lr_scheduler, scheduler)
-                scheduler_args = self.scheduler_args
-                if scheduler_args is None:
-                    scheduler_args = {}
+                scheduler_args = convert_scheduler_args_to_steps(scheduler, args, steps_per_epoch)
                 scheds.append(
                     scheduler(
                         optimizer=optimizer,
@@ -356,7 +425,7 @@ class TrainingConfigBase:
         if scheduler == "Warmup":
             total_iters = self.scheduler_args.get("n_iterations", self.n_epochs - 1)
             scheduler = WarmupLR(
-                optimizer, start_factor=1e-2, end_factor=1.0, total_iters=total_iters
+                optimizer, start_factor=1e-2, end_factor=1.0, total_iters=total_iters * steps_per_batch
             )
             scheduler.stepwise = True
             return optimizer, scheduler
