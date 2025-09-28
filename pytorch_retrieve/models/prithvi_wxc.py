@@ -534,6 +534,7 @@ class PrithviWxCObs(PrithviWxC):
 
         self.drop_dynamic = drop_dynamic
         self.drop_obs = drop_obs
+        self.obs_dropout = 0.2
 
     def _gen_mask_local(self, sizes: tuple[int]) -> tuple[torch.Tensor]:
         """
@@ -700,6 +701,13 @@ class PrithviWxCObs(PrithviWxC):
             obs = batch["obs"]
             mask = batch["obs_mask"]
             meta = batch["obs_meta"]
+
+            if self.training:
+                obs_dropout = (torch.rand(*obs.shape[:-2]) < self.obs_dropout)[..., None, None]
+                obs = torch.where(obs_dropout, -1.5, obs)
+                meta = torch.where(obs_dropout, -1.5, meta)
+                mask[obs_dropout[..., 0, 0]] = torch.tensor(True)
+
             obs_enc, obs_mask, meta_enc = checkpoint(self.obs_encoder, obs, mask, meta, use_reentrant=False)
 
             # obs_enc: [B x T x GY x GX x O x C x LY x LX]

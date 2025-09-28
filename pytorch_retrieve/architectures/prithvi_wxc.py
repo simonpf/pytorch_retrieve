@@ -166,7 +166,7 @@ class BackboneConfig:
                         "'musigma_surface.nc', 'musigma_vertical.nc', 'anomaly_variance_surface.nc', and "
                         "'anomaly_variance_vertical.nc'."
                     )
-            scaling_factors = Path(self.scaling_factors)
+        scaling_factors = Path(self.scaling_factors)
 
         VERTICAL_VARS = ["CLOUD", "H", "OMEGA", "PL", "QI", "QL", "QV", "T", "U", "V"]
         STATIC_SURFACE_VARS = ["FRACI", "FRLAND", "FROCEAN", "PHIS"]
@@ -526,7 +526,7 @@ class PrithviWxCModel(RetrievalModel):
                 y_out = self.backbone.output_scalers * y + x_hat
             elif self.backbone.residual == "climate":
                 y_out = self.backbone.output_scalers * y + x["climate"][:, step]
-            elif self.backbone.residual == "none":
+            else:
                 y_out = self.backbone.output_scalers * y + self.backbone.input_scalers_mu.reshape(
                     1, -1, 1, 1
                 )
