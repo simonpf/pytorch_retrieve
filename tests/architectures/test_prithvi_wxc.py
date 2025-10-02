@@ -2,6 +2,7 @@
 Tests for the pytorch_retrieve.architectures.prithvi_wxc module.
 ===============================================================
 """
+from pathlib import Path
 import os
 import pytest
 import toml
@@ -14,6 +15,7 @@ from pytorch_retrieve.config import InputConfig, OutputConfig
 
 try:
     import PrithviWxC
+    from PrithviWxC.dataloaders.merra2 import input_scalers, output_scalers, static_input_scalers
     from pytorch_retrieve.models.prithvi_wxc import PrithviWxCObs
     HAS_PRITHVI = True
 except ImportError:
@@ -68,9 +70,9 @@ def compile_prithvi_wxc_obs():
     )
 
     kwargs = {
-        "in_channels": 140,
+        "in_channels": 160,
         "input_size_time": 2,
-        "in_channels_static": 20,
+        "in_channels_static": 8,
         "input_scalers_epsilon": 1e-5,
         "static_input_scalers_epsilon": 1e-5,
         "n_lats_px": 360,
@@ -84,14 +86,15 @@ def compile_prithvi_wxc_obs():
         "n_heads": 4,
         "dropout": 0.0,
         "drop_path": 0.0,
-        "parameter_dropout": None,
+        "parameter_dropout": 0.0,
         "positional_encoding": "fourier",
-        "obs_patch_size": (3, 2),
-        "obs_features": 64,
+        "obs_patch_size": (6, 4),
+        "obs_features": 32,
         "decoder_shifting": True,
         "mask_ratio_inputs": 0.0,
         "residual": 'ignore',
         "masking_mode": "both",
+        "mask_ratio_targets": 0.0
     }
 
     kwargs["input_scalers_mu"] = in_mu
@@ -206,3 +209,25 @@ def test_prithvi_model_direct(prithvi_wxc_config):
         pred = model(x)
     assert "surface_precip" in pred
     assert pred["surface_precip"].shape == (1, 1, 360, 576)
+
+
+@NEEDS_PRITHVI
+@NEEDS_PRITHVI_DATA
+def test_prithvi_wxc_obs():
+    """
+
+
+    """
+    mdl = compile_prithvi_wxc_obs()
+    inpt = {
+        "x": torch.rand(1, 2, 160, 360, 576),
+        "climate": torch.rand(1, 160, 360, 576),
+        "static": torch.rand(1, 10, 360, 576),
+        "y": torch.rand(1, 1, 360, 576),
+        "obs": torch.rand(1, 2, 12, 18, 32, 1, 30, 32),
+        "obs_meta": torch.rand(1, 2, 12, 18, 32, 8, 30, 32),
+        "obs_mask": torch.rand(1, 2, 12, 18, 32, 1, 30, 32),
+        "input_time": torch.tensor([3.0]),
+        "lead_time": torch.tensor([3.0]),
+    }
+    pred = mdl(inpt)

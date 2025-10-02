@@ -7,7 +7,7 @@ Provides extensions of the PrithviWxC foundation model.
 NOTE: Requires the PrithviWxC package to be installed.
 """
 from importlib.metadata import version
-from typing import Callable, Optional, Tuple, Union
+from typing import Callable, Dict, Optional, Tuple, Union
 from functools import cached_property
 
 import numpy as np
@@ -371,6 +371,89 @@ class PerceiverBlock(nn.Module):
         return latent
 
 
+class CondLayerNorm(nn.Module):
+    """
+    LayerNorm whose affine parameters are conditioned on auxiliary input.
+    """
+    def __init__(
+        self,
+        feature_dim: int,
+        cond_dim: int,
+        hidden_dim: int = 128,
+        eps: float = 1e-5,
+        activation: nn.Module = nn.GELU(),  # optional: keep if you want LN->act fused
+        use_activation: bool = False
+    ):
+        super().__init__()
+        self.ln = nn.LayerNorm(feature_dim, elementwise_affine=False, eps=eps)
+        self.film_mlp = nn.Sequential(
+            nn.Linear(cond_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, 2 * feature_dim)  # gamma | beta
+        )
+
+
+    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+        """
+        Normalize x and apply scaling conditioned on cond.
+
+        Args:
+            x: The input tensor with shape [B, ..., F]
+            cond: The auxiliary input used to condition the scaling [B, F_cond]
+
+        Return:
+            The normalized and scaled x.
+        """
+        B = x.shape[0]
+        F = x.shape[-1]
+        # Normalize over last dim
+        z = self.ln(x)
+
+        # Generate FiLM params per batch item
+        gmmabeta = self.film_mlp(cond)                  # [B, 2F]
+        gamma, beta = gammabeta.chunk(2, dim=-1)         # [B, F], [B, F]
+
+        # Reshape for broadcasting over non-batch leading dims
+        # target shape: [B, 1, 1, ..., 1, F] to match z's rank
+        expand_shape = [B] + [1] * (z.dim() - 2) + [F]
+        gamma = gamma.view(*expand_shape)
+        beta  = beta.view(*expand_shape)
+
+        out = gamma * z + beta
+        return out
+
+
+class MergingModule(nn.Module):
+    """
+    Conditional merging module to merge latent observations with latent model state.
+    """
+    def __init__(self, embed_dim: int):
+        """
+        Args:
+            embed_dim: The dimenionality of the latent observation and model states.
+        """
+        super().__init__()
+        self.encoding = nn.Linear(1, 32)
+        self.linear_1 = nn.Linear(2 * embed_dim, embed_dim)
+        self.cond_norm_1 = CondNorm(embed_dim, 32)
+        self.act = nn.GELU()
+        self.linear_2 = nn.Linear(2 * embed_dim, embed_dim)
+        self.cond_norm_2 = CondNorm(embed_dim, 32)
+
+    def forward(self, x_latent: torch.Tensor, obs_latent, total_lead_time: torch.Tensor):
+        """
+        Merge modell state 'x_latent' and latent observations 'obs_latent' conditioned on total_lead_time.
+        """
+        B, *_ = x.shape
+
+        enc = self.encoding(torch.tensor(total_lead_time))
+        x = self.linear_1(torch.cat([x_latent, obs_latent], -1))
+        x = self.act(self.cond_norm_1(x, enc))
+        x = self.linear_2(x)
+        x = self.act(self.cond_norm_2(x, enc))
+        return self.act(x)
+
+
 class PrithviWxCObs(PrithviWxC):
     """
     Extension of the PrithviWxC for integrating satellite observations into model predictions.
@@ -406,6 +489,7 @@ class PrithviWxCObs(PrithviWxC):
         positional_encoding: str,
         obs_patch_size: Tuple[int, int] = (3, 2),
         obs_features: int = 64,
+        conditional_merging: bool = False,
         encoder_shifting: bool = False,
         decoder_shifting: bool = False,
         checkpoint_encoder: list[int] | None = (),
@@ -522,14 +606,19 @@ class PrithviWxCObs(PrithviWxC):
             ),
             nn.Upsample(scale_factor=upsmpl, mode="bilinear")
         )
-        self.obs_merger = nn.Sequential(
-            nn.Linear(2 * self.embed_dim, self.embed_dim),
-            nn.LayerNorm(self.embed_dim),
-            nn.GELU(),
-            nn.Linear(self.embed_dim, self.embed_dim),
-            nn.LayerNorm(self.embed_dim),
-            nn.GELU()
-        )
+
+
+        if conditional_merging:
+            self.obs_merger = MergingModule(self.embed_dim)
+        else:
+            self.obs_merger = nn.Sequential(
+                nn.Linear(2 * self.embed_dim, self.embed_dim),
+                nn.LayerNorm(self.embed_dim),
+                nn.GELU(),
+                nn.Linear(self.embed_dim, self.embed_dim),
+                nn.LayerNorm(self.embed_dim),
+                nn.GELU()
+            )
         self.obs_scale = nn.Parameter(torch.tensor(1e-2))
 
         self.drop_dynamic = drop_dynamic
@@ -575,12 +664,55 @@ class PrithviWxCObs(PrithviWxC):
 
         return indices_masked, indices_unmasked
 
+    def encode_observations(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """
+        Encode observations.
+
+        This function is useful to encode observation prior to unrolling..
+
+        Args:
+            batch: A dictionary containing the model input.
+
+        Return:
+            The encoded observations.
+        """
+        obs = batch["obs"]
+        mask = batch["obs_mask"]
+        meta = batch["obs_meta"]
+
+        if self.training:
+            obs_dropout = (torch.rand(*obs.shape[:-2]) < self.obs_dropout)[..., None, None]
+            obs = torch.where(obs_dropout, -1.5, obs)
+            meta = torch.where(obs_dropout, -1.5, meta)
+            mask[obs_dropout[..., 0, 0, 0]] = torch.tensor(True)
+
+        obs_enc, obs_mask, meta_enc = checkpoint(self.obs_encoder, obs, mask, meta, use_reentrant=False)
+
+        # obs_enc: [B x T x GY x GX x O x C x LY x LX]
+        obs_enc = obs_enc + meta_enc
+        B, T, GY, GX, O, C, LY, LX = obs_enc.shape
+
+        # obs_enc: B x T x GY x GX x LY x LX x O x C
+        obs_enc = torch.permute(obs_enc, (0, 1, 2, 3, 6, 7, 4, 5)).reshape(-1, O, C)
+        obs_mask = torch.permute(obs_mask, (0, 1, 2, 3, 5, 6, 4)).reshape(-1, O)
+        latent = self.obs_projection[None].repeat_interleave(obs_enc.shape[0], 0)
+        obs_latent = checkpoint(self.perceiver, latent, obs_enc, obs_mask < 1.0, use_reentrant=False)
+
+        obs_latent = obs_latent.reshape((B, T, GY, GX, LY, LX, self.obs_latent))
+        obs_latent = torch.permute(obs_latent, (0, 1, 6, 2, 4, 3, 5)).reshape(B, C * T, GY * LY, GX * LX)
+        obs_latent = checkpoint(self.temporal_encoder, obs_latent, use_reentrant=False).reshape(B, self.embed_dim, GY, 15, GX, 16)
+        obs_latent = torch.permute(obs_latent, (0, 2, 4, 3, 5, 1)).reshape(B, GY *  GX, 15 * 16, -1)
+        return obs_latent
+
+
     def forward(
             self,
             batch: dict[str, torch.Tensor],
             apply_residual: bool = True,
             obs_only: bool = False,
-            model_only: bool = False
+            model_only: bool = False,
+            obs_latent: Optional[torch.Tensor] = None,
+            tot_lead_time: int = 0
     ) -> torch.Tensor:
         """
         Args:
@@ -698,34 +830,14 @@ class PrithviWxCObs(PrithviWxC):
 
         # Observations
         if self.obs_encoder is not None:
-            obs = batch["obs"]
-            mask = batch["obs_mask"]
-            meta = batch["obs_meta"]
 
-            if self.training:
-                obs_dropout = (torch.rand(*obs.shape[:-2]) < self.obs_dropout)[..., None, None]
-                obs = torch.where(obs_dropout, -1.5, obs)
-                meta = torch.where(obs_dropout, -1.5, meta)
-                mask[obs_dropout[..., 0, 0]] = torch.tensor(True)
+            if obs_latent is None:
+                obs_latent = self.encode_observations(batch)
 
-            obs_enc, obs_mask, meta_enc = checkpoint(self.obs_encoder, obs, mask, meta, use_reentrant=False)
-
-            # obs_enc: [B x T x GY x GX x O x C x LY x LX]
-            obs_enc = obs_enc + meta_enc
-            B, T, GY, GX, O, C, LY, LX = obs_enc.shape
-
-            # obs_enc: B x T x GY x GX x LY x LX x O x C
-            obs_enc = torch.permute(obs_enc, (0, 1, 2, 3, 6, 7, 4, 5)).reshape(-1, O, C)
-            obs_mask = torch.permute(obs_mask, (0, 1, 2, 3, 5, 6, 4)).reshape(-1, O)
-            latent = self.obs_projection[None].repeat_interleave(obs_enc.shape[0], 0)
-            obs_latent = checkpoint(self.perceiver, latent, obs_enc, obs_mask < 1.0, use_reentrant=False)
-
-            obs_latent = obs_latent.reshape((B, T, GY, GX, LY, LX, self.obs_latent))
-            obs_latent = torch.permute(obs_latent, (0, 1, 6, 2, 4, 3, 5)).reshape(B, C * T, GY * LY, GX * LX)
-            obs_latent = checkpoint(self.temporal_encoder, obs_latent, use_reentrant=False).reshape(B, self.embed_dim, GY, 15, GX, 16)
-            obs_latent = torch.permute(obs_latent, (0, 2, 4, 3, 5, 1)).reshape(B, GY *  GX, 15 * 16, -1)
-            obs_merged = self.obs_merger(torch.cat((obs_latent, unmasked), -1))
-
+            if isinstance(self.obs_merger, MergingModule):
+                obs_merged = self.obs_merger(unmasked, obs_latent, total_lead_time)
+            else:
+                obs_merged = self.obs_merger(torch.cat((obs_latent, unmasked), -1))
 
         # Encoder
         #return unmasked, obs_enc, obs_mask_enc
