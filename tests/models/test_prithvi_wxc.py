@@ -18,11 +18,12 @@ try:
         output_scalers,
         static_input_scalers,
     )
-
+    from PrithviWxC.model import DropPath
     from pytorch_retrieve.models.prithvi_wxc import (
-            PrithviWxCObs,
-            PrithviWxCXObs,
-            PrithviWxCRegional
+        LeadTimeDropPath,
+        PrithviWxCObs,
+        PrithviWxCXObs,
+        PrithviWxCRegional
     )
     HAS_PRITHVI = True
 except ImportError:
@@ -91,7 +92,7 @@ def compile_prithvi_wxc_obs():
         "mlp_multiplier": 1,
         "n_heads": 4,
         "dropout": 0.0,
-        "drop_path": 0.0,
+        "drop_path": 0.1,
         "parameter_dropout": 0.0,
         "positional_encoding": "fourier",
         "obs_patch_size": (6, 4),
@@ -193,7 +194,7 @@ def compile_prithvi_wxc_xobs():
         "mlp_multiplier": 1,
         "n_heads": 4,
         "dropout": 0.0,
-        "drop_path": 0.0,
+        "drop_path": 0.1,
         "parameter_dropout": 0.0,
         "positional_encoding": "fourier",
         "obs_patch_size": (6, 4),
@@ -294,7 +295,7 @@ def compile_prithvi_wxc_regional():
         "mlp_multiplier": 1,
         "n_heads": 4,
         "dropout": 0.0,
-        "drop_path": 0.0,
+        "drop_path": 0.1,
         "parameter_dropout": 0.0,
         "positional_encoding": "fourier",
         "decoder_shifting": True,
@@ -335,3 +336,32 @@ def test_prithvi_wxc_regional():
         "climate": torch.rand((1, 160, 360, 576)),
     }
     pred = mdl(batch)
+
+
+
+@pytest.mark.skipif(not HAS_PRITHVI, reason="Needs PrithviWxC package installed.")
+def test_lead_time_drop_path():
+    """
+    Test lead-time drop path.
+    """
+    lead_time_drop_path = LeadTimeDropPath(0.5)
+    x = torch.rand(1_000, 5)
+    torch.manual_seed(42)
+    y = lead_time_drop_path(x)
+    assert torch.isclose(y.mean(), x.mean(), rtol=0.1)
+
+    lead_time_drop_path = LeadTimeDropPath((0.0, 0.0))
+    x = torch.rand(1_000, 5)
+    lead_time = 3.0 * torch.ones(x.shape[0])
+    lead_time[-1] = 10.0
+    y = lead_time_drop_path(x, lead_time)
+
+    assert not torch.isclose(y[-1], torch.tensor(0.0)).all()
+
+    lead_time_drop_path = LeadTimeDropPath((0.0, 1.0))
+    x = torch.rand(1_000, 5)
+    lead_time = 3.0 * torch.ones(x.shape[0])
+    lead_time[-1] = 10.0
+    y = lead_time_drop_path(x, lead_time)
+
+    assert torch.isclose(y[-1], torch.tensor(0.0)).all()

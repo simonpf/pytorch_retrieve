@@ -28,6 +28,7 @@ try:
     from PrithviWxC.model import (
         PrithviWxC,
         PatchEmbed,
+        LayerNormPassThrough,
         Transformer,
         _Shift,
         SWINShiftNoBuffer,
@@ -43,6 +44,135 @@ except ImportError:
     )
 
 TORCH_VERSION = version('torch')
+
+def drop_path(
+    x: torch.Tensor,
+    drop_prob: torch.Tensor,
+    training: bool = False,
+    scale_by_keep: bool = True
+):
+    """
+    Drop path supporting variable dropping frequencies.
+    """
+    if (drop_prob == 0.0).all() or not training:
+        return x
+    keep_prob = 1.0 - drop_prob
+    shape = (x.shape[0],) + (1,) * (
+        x.ndim - 1
+    )
+    keep_mask = torch.bernoulli(keep_prob).to(dtype=x.dtype)
+    if scale_by_keep and (keep_prob > 0.0).any():
+        keep_mask.div_(torch.where(0.0 < keep_prob, keep_prob, torch.tensor(1.0, device=x.device, dtype=x.dtype)))
+    return x * keep_mask.view(shape)
+
+
+class LeadTimeDropPath(nn.Module):
+    """
+    Lead-time conditioned drop path.
+    """
+    def __init__(
+            self,
+            drop_probs: Union[float, Tuple[float, float]] = (0.0, 0.0),
+            scale_by_keep=True
+    ):
+        super().__init__()
+        if isinstance(drop_probs, float):
+            drop_probs = (drop_probs, drop_probs)
+        self.drop_probs = drop_probs
+        self.scale_by_keep = scale_by_keep
+        self.lead_time_min = 3
+        self.lead_time_max = 10
+
+    def forward(self, x: torch.Tensor, lead_time: torch.Tensor = None):
+        """
+        Apply dropout.
+        """
+        if not self.training:
+            return x
+
+        if lead_time is None:
+            drop_prob = self.drop_probs[0] * torch.ones(x.shape[0], device=x.device, dtype=x.dtype)
+        else:
+            weights = (lead_time - self.lead_time_min) / (self.lead_time_max - self.lead_time_min)
+            drop_prob = weights * self.drop_probs[1] + (1.0 - weights) * self.drop_probs[0]
+            drop_prob = torch.clip(drop_prob, torch.zeros_like(drop_prob), torch.ones_like(drop_prob))
+
+        return drop_path(x, drop_prob, self.training, self.scale_by_keep)
+
+
+class Transformer(nn.Module):
+    """
+    Transformer for inputs of shape [..., S, features].
+    """
+
+    def __init__(
+        self,
+        features: int,
+        mlp_multiplier: int,
+        n_heads: int,
+        dropout: float,
+        drop_path: Union[float, Tuple[float, float]],
+    ) -> None:
+        """
+        Args:
+            features: Number of features for inputs to the layer.
+            mlp_multiplier: Model will use features*mlp_multiplier hidden units.
+            n_heads: Number of attention heads. Should be a factor of features.
+                (I.e. the layer uses features // n_heads.)
+            dropout: Dropout.
+            drop_path: DropPath.
+        """
+        super().__init__()
+
+        self.features = features
+        self.mlp_multiplier = mlp_multiplier
+        self.n_heads = n_heads
+        self.dropout = dropout
+        self.drop_path = LeadTimeDropPath(drop_path) if drop_path > 0.0 else None
+
+        self.attention = nn.Sequential(
+            LayerNormPassThrough(features),
+            mdl.MultiheadAttention(features, n_heads, dropout),
+        )
+
+        self.ff = nn.Sequential(
+            nn.LayerNorm(features),
+            Mlp(
+                features=features,
+                hidden_features=features * mlp_multiplier,
+                dropout=dropout,
+            ),
+        )
+
+    def forward(
+            self,
+            d: tuple[torch.Tensor, torch.Tensor | None],
+            lead_time: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """
+        Args:
+            x: Tensor of shape [..., sequence, features]
+            lead_time: A tensor containing the lead time for each sample.
+        Returns:
+            Tensor of shape [..., sequence, features]
+        """
+        x, attn_mask = d
+        if not x.shape[-1] == self.features:
+            raise ValueError(
+                f"Expecting tensor with last dimension of size {self.features}."
+            )
+
+        attention_x = self.attention(d)
+
+        if self.drop_path is None:
+            x = x + attention_x
+            x = x + self.ff(x)
+        else:
+            x = x + self.drop_path(attention_x, lead_time=lead_time)
+            x = x + self.drop_path(self.ff(x), lead_time=lead_time)
+
+        return x
+
 
 
 class InvertedBottleneckBlock(nn.Module):
@@ -453,6 +583,612 @@ class MergingModule(nn.Module):
         x = self.act(self.cond_norm_2(x, enc))
         return self.act(x)
 
+
+class PrithviWxC(nn.Module):
+    """
+    Encoder-decoder fusing Hiera with MaxViT. See
+    - Ryali et al. "Hiera: A Hierarchical Vision Transformer without the
+        Bells-and-Whistles" (https://arxiv.org/abs/2306.00989)
+    - Tu et al. "MaxViT: Multi-Axis Vision Transformer"
+        (https://arxiv.org/abs/2204.01697)
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        input_size_time: int,
+        in_channels_static: int,
+        input_scalers_mu: torch.Tensor,
+        input_scalers_sigma: torch.Tensor,
+        input_scalers_epsilon: float,
+        static_input_scalers_mu: torch.Tensor,
+        static_input_scalers_sigma: torch.Tensor,
+        static_input_scalers_epsilon: float,
+        output_scalers: torch.Tensor,
+        n_lats_px: int,
+        n_lons_px: int,
+        patch_size_px: tuple[int],
+        mask_unit_size_px: tuple[int],
+        mask_ratio_inputs: float,
+        mask_ratio_targets: float,
+        embed_dim: int,
+        n_blocks_encoder: int,
+        n_blocks_decoder: int,
+        mlp_multiplier: float,
+        n_heads: int,
+        dropout: float,
+        drop_path: float,
+        parameter_dropout: float,
+        residual: str,
+        masking_mode: str,
+        positional_encoding: str,
+        encoder_shifting: bool = False,
+        decoder_shifting: bool = False,
+        checkpoint_encoder: list[int]=[],
+        checkpoint_decoder: list[int]=[],
+    ) -> None:
+        """
+        Args:
+            in_channels: Number of input channels.
+            input_size_time: Number of timestamps in input.
+            in_channels_static: Number of input channels for static data.
+            input_scalers_mu: Tensor of size (in_channels,). Used to rescale
+                input.
+            input_scalers_sigma: Tensor of size (in_channels,). Used to rescale
+                input.
+            input_scalers_epsilon: Float. Used to rescale input.
+            static_input_scalers_mu: Tensor of size (in_channels_static). Used
+                to rescale static inputs.
+            static_input_scalers_sigma: Tensor of size (in_channels_static).
+                Used to rescale static inputs.
+            static_input_scalers_epsilon: Float. Used to rescale static inputs.
+            output_scalers: Tensor of shape (in_channels,). Used to rescale
+                output.
+            n_lats_px: Total latitudes in data. In pixels.
+            n_lons_px: Total longitudes in data. In pixels.
+            patch_size_px: Patch size for tokenization. In pixels lat/lon.
+            mask_unit_size_px: Size of each mask unit. In pixels lat/lon.
+            mask_ratio_inputs: Masking ratio for inputs. 0 to 1.
+            mask_ratio_targets: Masking ratio for targets. 0 to 1.
+            embed_dim: Embedding dimension
+            n_blocks_encoder: Number of local-global transformer pairs in
+                encoder.
+            n_blocks_decoder: Number of local-global transformer pairs in
+                decoder.
+            mlp_multiplier: MLP multiplier for hidden features in feed forward
+                networks.
+            n_heads: Number of attention heads.
+            dropout: Dropout.
+            drop_path: DropPath.
+            parameter_dropout: Dropout applied to parameters.
+            residual: Indicates whether and how model should work as residual
+                model. Accepted values are 'climate', 'temporal' and 'none'
+            positional_encoding: possible values are ['absolute' (default), 'fourier'].
+                'absolute'  lat lon encoded in 3 dimensions using sine and cosine
+                'fourier' lat/lon to be encoded using various frequencies
+            masking_mode: String ['local', 'global', 'both'] that controls the
+                type of masking used.
+            checkpoint_encoder: List of integers controlling if gradient checkpointing is used on encoder.
+                Format: [] for no gradient checkpointing. [3, 7] for checkpointing after 4th and 8th layer etc.
+            checkpoint_decoder: List of integers controlling if gradient checkpointing is used on decoder.
+                Format: See `checkpoint_encoder`.
+            masking_mode: The type of masking to use {'global', 'local', 'both'}
+            encoder_shifting: Whether to use swin shifting in the encoder.
+            decoder_shifting: Whether to use swin shifting in the decoder.
+        """
+        super().__init__()
+
+        if mask_ratio_targets > 0.0:
+            raise NotImplementedError("Target masking is not implemented.")
+
+        self.in_channels = in_channels
+        self.input_size_time = input_size_time
+        self.in_channels_static = in_channels_static
+        self.n_lats_px = n_lats_px
+        self.n_lons_px = n_lons_px
+        self.patch_size_px = patch_size_px
+        self.mask_unit_size_px = mask_unit_size_px
+        self.mask_ratio_inputs = mask_ratio_inputs
+        self.mask_ratio_targets = mask_ratio_targets
+        self.embed_dim = embed_dim
+        self.n_blocks_encoder = n_blocks_encoder
+        self.n_blocks_decoder = n_blocks_decoder
+        self.mlp_multiplier = mlp_multiplier
+        self.n_heads = n_heads
+        self.dropout = dropout
+        self.drop_path = drop_path
+        self.residual = residual
+        self._encoder_shift = encoder_shifting
+        self._decoder_shift = decoder_shifting
+        self.positional_encoding = positional_encoding
+        self._checkpoint_encoder = checkpoint_encoder
+        self._checkpoint_decoder = checkpoint_decoder
+
+        assert self.n_lats_px % self.mask_unit_size_px[0] == 0
+        assert self.n_lons_px % self.mask_unit_size_px[1] == 0
+        assert self.mask_unit_size_px[0] % self.patch_size_px[0] == 0
+        assert self.mask_unit_size_px[1] % self.patch_size_px[1] == 0
+
+        if self.patch_size_px[0] != self.patch_size_px[1]:
+            raise NotImplementedError(
+                "Current pixel shuffle implementation assumes same patch size along both dimensions."
+            )
+
+        self.local_shape_mu = (
+            self.mask_unit_size_px[0] // self.patch_size_px[0],
+            self.mask_unit_size_px[1] // self.patch_size_px[1],
+        )
+        self.global_shape_mu = (
+            self.n_lats_px // self.mask_unit_size_px[0],
+            self.n_lons_px // self.mask_unit_size_px[1],
+        )
+
+        assert input_scalers_mu.shape == (in_channels,)
+        assert input_scalers_sigma.shape == (in_channels,)
+        assert output_scalers.shape == (in_channels,)
+
+        if self.positional_encoding != 'fourier':
+            assert static_input_scalers_mu.shape == (in_channels_static,)
+            assert static_input_scalers_sigma.shape == (in_channels_static,)
+
+        # Input shape [batch, time, parameter, lat, lon]
+        self.input_scalers_epsilon = input_scalers_epsilon
+        self.register_buffer('input_scalers_mu', input_scalers_mu.reshape(1, 1, -1, 1, 1))
+        self.register_buffer('input_scalers_sigma', input_scalers_sigma.reshape(1, 1, -1, 1, 1))
+
+        # Static inputs shape [batch, parameter, lat, lon]
+        self.static_input_scalers_epsilon = static_input_scalers_epsilon
+        self.register_buffer('static_input_scalers_mu', static_input_scalers_mu.reshape(1, -1, 1, 1))
+        self.register_buffer('static_input_scalers_sigma', static_input_scalers_sigma.reshape(1, -1, 1, 1))
+
+        # Output shape [batch, parameter, lat, lon]
+        self.register_buffer('output_scalers', output_scalers.reshape(1, -1, 1, 1))
+
+        self.parameter_dropout = nn.Dropout2d(p=parameter_dropout)
+
+        self.patch_embedding = PatchEmbed(
+            patch_size=patch_size_px,
+            channels=in_channels * input_size_time,
+            embed_dim=embed_dim,
+        )
+
+        if self.residual == "climate":
+            self.patch_embedding_static = PatchEmbed(
+                patch_size=patch_size_px,
+                channels=in_channels + in_channels_static,
+                embed_dim=embed_dim,
+            )
+        else:
+            self.patch_embedding_static = PatchEmbed(
+                patch_size=patch_size_px,
+                channels=in_channels_static,
+                embed_dim=embed_dim,
+            )
+
+        self.input_time_embedding = nn.Linear(1, embed_dim//4, bias=True)
+        self.lead_time_embedding = nn.Linear(1, embed_dim//4, bias=True)
+
+        self.mask_token = nn.Parameter(torch.randn(1, 1, 1, self.embed_dim))
+        self._nglobal_mu = np.prod(self.global_shape_mu)
+        self._global_idx = torch.arange(self._nglobal_mu)
+
+        self._nlocal_mu = np.prod(self.local_shape_mu)
+        self._local_idx = torch.arange(self._nlocal_mu)
+
+        if self._encoder_shift:
+            self.encoder_shifter = e_shifter = SWINShiftNoBuffer(
+                self.mask_unit_size_px,
+                self.global_shape_mu,
+                self.local_shape_mu,
+                self.patch_size_px,
+                n_context_tokens=0,
+            )
+        else:
+            self.encoder_shifter = e_shifter = None
+        self.encoder = PrithviWxCEncoderDecoder(
+            embed_dim=embed_dim,
+            n_blocks=n_blocks_encoder,
+            mlp_multiplier=mlp_multiplier,
+            n_heads=n_heads,
+            dropout=dropout,
+            drop_path=drop_path,
+            shifter=e_shifter,
+            transformer_cp=checkpoint_encoder,
+        )
+
+        if n_blocks_decoder != 0:
+            if self._decoder_shift:
+                self.decoder_shifter = d_shifter = SWINShift(
+                    self.mask_unit_size_px,
+                    self.global_shape_mu,
+                    self.local_shape_mu,
+                    self.patch_size_px,
+                    n_context_tokens=0,
+                )
+            else:
+                self.decoder_shifter = d_shifter = None
+
+            self.decoder = PrithviWxCEncoderDecoder(
+                embed_dim=embed_dim,
+                n_blocks=n_blocks_decoder,
+                mlp_multiplier=mlp_multiplier,
+                n_heads=n_heads,
+                dropout=dropout,
+                drop_path=0.,
+                shifter=d_shifter,
+                transformer_cp=checkpoint_decoder,
+            )
+
+            self.unembed = nn.Linear(
+                self.embed_dim,
+                self.in_channels * self.patch_size_px[0] * self.patch_size_px[1],
+                bias=True,
+            )
+
+        self.masking_mode = masking_mode.lower()
+        match self.masking_mode:
+            case "local":
+                self.generate_mask = self._gen_mask_local
+            case "global":
+                self.generate_mask = self._gen_mask_global
+            case "both":
+                self._mask_both_local: bool = True
+                self.generate_mask = self._gen_mask_both
+            case _:
+                raise ValueError(f"Masking mode '{masking_mode}' not supported")
+
+    def swap_masking(self) -> None:
+        if hasattr(self, '_mask_both_local'):
+            self._mask_both_local = not self._mask_both_local
+
+    @cached_property
+    def n_masked_global(self):
+        return int(self.mask_ratio_inputs * np.prod(self.global_shape_mu))
+
+    @cached_property
+    def n_masked_local(self):
+        return int(self.mask_ratio_inputs * np.prod(self.local_shape_mu))
+
+    @staticmethod
+    def _shuffle_along_axis(a, axis):
+        # https://stackoverflow.com/questions/5040797/shuffling-numpy-array-along-a-given-axis
+        idx = torch.argsort(input=torch.rand(*a.shape), dim=axis)
+        return torch.gather(a, dim=axis, index=idx)
+
+    def _gen_mask_local(self, sizes: tuple[int]) -> tuple[torch.Tensor]:
+        """
+        Args:
+            batch_size: Number of elements in batch
+        Returns:
+            Tuple of torch tensors. [indices masked, indices unmasked].
+            Each of these is a tensor of shape (batch, global sequene)
+        """
+        # We identifies which indices (values) should be masked
+
+        maskable_indices = self._local_idx.view(1, -1).expand(*sizes[:2], -1)
+
+        maskable_indices = self._shuffle_along_axis(maskable_indices, 2)
+
+        # `...` cannot be jit'd :-(
+        indices_masked = maskable_indices[:, :, : self.n_masked_local]
+        indices_unmasked = maskable_indices[:, :, self.n_masked_local :]
+
+        return indices_masked, indices_unmasked
+
+    def _gen_mask_global(self, sizes: tuple[int]) -> tuple[torch.Tensor]:
+        """
+        Args:
+            batch_size: Number of elements in batch
+        Returns:
+            Tuple of torch tensors. [indices masked, indices unmasked].
+            Each of these is a tensor of shape (batch, global sequene)
+        """
+        # We identifies which indices (values) should be masked
+
+        maskable_indices = self._global_idx.view(1, -1).expand(*sizes[:1], -1)
+
+        maskable_indices = self._shuffle_along_axis(maskable_indices, 1)
+
+        indices_masked = maskable_indices[:, : self.n_masked_global]
+        indices_unmasked = maskable_indices[:, self.n_masked_global :]
+
+        return indices_masked, indices_unmasked
+
+    def _gen_mask_both(self, sizes: tuple[int]) -> tuple[torch.Tensor]:
+        if self._mask_both_local:
+            return self._gen_mask_local(sizes)
+        else:
+            return self._gen_mask_global(sizes)
+
+    @staticmethod
+    def reconstruct_batch(
+        idx_masked: torch.Tensor,
+        idx_unmasked: torch.Tensor,
+        data_masked: torch.Tensor,
+        data_unmasked: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Reconstructs a tensor along the mask unit dimension. Batched version.
+
+        Args:
+            idx_masked: Tensor of shape `batch, mask unit sequence`.
+            idx_unmasked: Tensor of shape `batch, mask unit sequence`.
+            data_masked: Tensor of shape `batch, mask unit sequence, ...`.
+                Should have same size along mask unit sequence dimension as
+                idx_masked. Dimensions beyond the first two, marked here as ...
+                will typically be `local_sequence, channel` or `channel, lat, lon`.
+                  These dimensions should agree with data_unmasked.
+            data_unmasked: Tensor of shape `batch, mask unit sequence, ...`.
+                Should have same size along mask unit sequence dimension as
+                idx_unmasked. Dimensions beyond the first two, marked here as
+                ... will typically be `local_sequence, channel` or `channel,
+                lat, lon`. These dimensions should agree with data_masked.
+        Returns:
+            Tensor of same shape as inputs data_masked and data_unmasked. I.e.
+            `batch, mask unit sequence, ...`. Index for the total data composed
+            of the masked and the unmasked part
+        """
+        dim: int = idx_masked.ndim
+
+        idx_total = torch.argsort(torch.cat([idx_masked, idx_unmasked], dim=-1), dim=-1)
+        idx_total = idx_total.view(*idx_total.shape, *[1] * (data_unmasked.ndim - dim))
+        idx_total = idx_total.expand(*idx_total.shape[:dim], *data_unmasked.shape[dim:])
+
+        data = torch.cat([data_masked, data_unmasked], dim=dim - 1)
+        data = torch.gather(data, dim=dim - 1, index=idx_total)
+
+        return data, idx_total
+
+    def fourier_pos_encoding(self, x_static):
+        """
+        Args
+            x_static: B x C x H x W. first two channels are lat, and lon respectively
+        Returns
+            Tensor of shape B x E x H x W where E is the embedding dimension.
+        """
+
+        # B x C x H x W -> B x 1 x H/P x W/P
+        latitudes_patch = F.avg_pool2d(x_static[:, [0]], kernel_size=self.patch_size_px, stride=self.patch_size_px)
+        longitudes_patch = F.avg_pool2d(x_static[:, [1]], kernel_size=self.patch_size_px, stride=self.patch_size_px)
+
+        modes = torch.arange(self.embed_dim//4, device=x_static.device).view(1, -1, 1, 1) + 1.
+        pos_encoding = torch.cat(
+            (
+                torch.sin(latitudes_patch*modes),
+                torch.sin(longitudes_patch*modes),
+                torch.cos(latitudes_patch*modes),
+                torch.cos(longitudes_patch*modes),
+            ),
+            axis=1
+        )
+
+        return pos_encoding # B x E x H/P x W/P
+
+    def time_encoding(self, input_time, lead_time):
+        '''
+        Args:
+            input_time: Tensor of shape [batch].
+            lead_time: Tensor of shape [batch].
+        Returns:
+            Tensor of shape [batch, embed_dim, 1, 1]
+        '''
+        input_time = self.input_time_embedding(input_time.view(-1, 1, 1, 1))
+        lead_time = self.lead_time_embedding(lead_time.view(-1, 1, 1, 1))
+
+        time_encoding = torch.cat(
+            (
+                torch.cos(input_time),
+                torch.cos(lead_time),
+                torch.sin(input_time),
+                torch.sin(lead_time),
+            ),
+            axis=3
+        )
+        return time_encoding
+
+    def to_patching(self, x: torch.Tensor) -> torch.Tensor:
+        """Transform data from lat/lon space to two axis patching
+
+        Args: ->
+            x: Tesnor in lat/lon space (N, C, Nlat//P_0, Nlon//P_1)
+
+        Returns:
+            Tensor in patch space (N, G, L, C)
+        """
+        n_batch = x.shape[0]
+
+        x = x.view(
+            n_batch,
+            self.embed_dim,
+            self.global_shape_mu[0],
+            self.local_shape_mu[0],
+            self.global_shape_mu[1],
+            self.local_shape_mu[1],
+        )
+        x = x.permute(0, 2, 4, 3, 5, 1).contiguous()
+
+        s = x.shape
+        return x.view(n_batch, s[1] * s[2], s[3] * s[4], -1)
+
+    def from_patching(self, x: torch.Tensor) -> torch.Tensor:
+        """Transform data from two axis patching to lat/lon space
+
+        Args:
+            x: Tensor in patch space with shape (N, G, L, C*P_0*P_1)
+
+        Returns:
+            Tensor in lat/lon space (N, C*P_0*P_1, Nlat//P_0, Nlon // P_1)
+        """
+        n_batch = x.shape[0]
+
+        x = x.view(
+            n_batch,
+            self.global_shape_mu[0],
+            self.global_shape_mu[1],
+            self.local_shape_mu[0],
+            self.local_shape_mu[1],
+            -1,
+        )
+        x = x.permute(0, 5, 1, 3, 2, 4).contiguous()
+
+        s = x.shape
+        return x.view(n_batch, -1, s[2]*s[3], s[4]*s[5])
+
+    def forward(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
+        """
+        Args:
+            batch: Dictionary containing the keys 'x', 'y', 'input_time',
+                'lead_time' and 'static'. The associated torch tensors have the
+                following shapes:
+                x: Tensor of shape [batch, time, parameter, lat, lon]
+                y: Tensor of shape [batch, parameter, lat, lon]
+                static: Tensor of shape [batch, channel_static, lat, lon]
+                climate: Optional tensor of shape [batch, parameter, lat, lon]
+                input_time: Tensor of shape [batch]. Or none.
+                lead_time: Tensor of shape [batch]. Or none.
+        Returns:
+            Tensor of shape [batch, parameter, lat, lon].
+        """
+        assert batch["x"].shape[2] == self.in_channels
+        assert batch["x"].shape[3] == self.n_lats_px
+        assert batch["x"].shape[4] == self.n_lons_px
+        assert batch["y"].shape[1] == self.in_channels
+        assert batch["y"].shape[2] == self.n_lats_px
+        assert batch["y"].shape[3] == self.n_lons_px
+        if self.positional_encoding == 'fourier':
+            # the first two features (lat, lon) are encoded separately
+            assert batch['static'].shape[1] - 2 == self.in_channels_static, "When setting self.positional_encoding to fourier, the number of static params change in the dataset. So, in the config, reduce num_static_channels (e.g., 4 instead of 7)."
+        else:
+            assert batch['static'].shape[1] == self.in_channels_static
+        assert batch["static"].shape[2] == self.n_lats_px
+        assert batch["static"].shape[3] == self.n_lons_px
+
+        x_rescaled = (batch["x"] - self.input_scalers_mu) / (
+            self.input_scalers_sigma + self.input_scalers_epsilon
+        )
+        batch_size = x_rescaled.shape[0]
+
+        if self.positional_encoding == 'fourier':
+            x_static_pos = self.fourier_pos_encoding(batch['static']) # B, embed_dim, lat / patch_size, lon / patch_size
+            x_static = (batch['static'][:, 2:] - self.static_input_scalers_mu[:, 3:]) / ( # The first two channels in batch['static'] are used in positional encoding
+                self.static_input_scalers_sigma[:, 3:] + self.static_input_scalers_epsilon # This translates to the first three channels in 'static_input_scalers_mu'
+            )
+        else:
+            x_static = (batch["static"] - self.static_input_scalers_mu) / (
+                self.static_input_scalers_sigma + self.static_input_scalers_epsilon
+            )
+
+        if self.residual == "temporal":
+            # We create a residual of same shape as y
+            index = torch.where(batch["lead_time"] > 0, batch["x"].shape[1] - 1, 0)
+            index = index.view(-1, 1, 1, 1, 1)
+            index = index.expand(batch_size, 1, *batch["x"].shape[2:])
+            x_hat = torch.gather(batch["x"], dim=1, index=index)
+            x_hat = x_hat.squeeze(1)
+            assert (
+                batch["y"].shape == x_hat.shape
+            ), f'Shapes {batch["y"].shape} and {x_hat.shape} do not agree.'
+        elif self.residual == "climate":
+            climate_scaled = (
+                batch["climate"] - self.input_scalers_mu.view(1, -1, 1, 1)
+            ) / (
+                self.input_scalers_sigma.view(1, -1, 1, 1) + self.input_scalers_epsilon
+            )
+
+        # [batch, time, parameter, lat, lon] -> [batch, time x parameter, lat, lon]
+        x_rescaled = x_rescaled.flatten(1, 2)
+        # Parameter dropout
+        x_rescaled = self.parameter_dropout(x_rescaled)
+
+        x_embedded = self.patch_embedding(x_rescaled)
+        assert x_embedded.shape[1] == self.embed_dim
+
+        if self.residual == "climate":
+            static_embedded = self.patch_embedding_static(
+                torch.cat((x_static, climate_scaled), dim=1)
+            )
+        else:
+            static_embedded = self.patch_embedding_static(x_static)
+        assert static_embedded.shape[1] == self.embed_dim
+
+        if self.positional_encoding == 'fourier':
+            static_embedded += x_static_pos
+
+        x_embedded = self.to_patching(x_embedded)
+        static_embedded = self.to_patching(static_embedded)
+
+        time_encoding = self.time_encoding(batch['input_time'], batch['lead_time'])
+
+        tokens = x_embedded + static_embedded + time_encoding
+
+        # Now we generate masks based on masking_mode
+        indices_masked, indices_unmasked = self.generate_mask(
+            (batch_size, self._nglobal_mu)
+        )
+        indices_masked = indices_masked.to(device=tokens.device)
+        indices_unmasked = indices_unmasked.to(device=tokens.device)
+        maskdim: int = indices_masked.ndim
+
+        # Unmasking
+        unmask_view = (*indices_unmasked.shape, *[1] * (tokens.ndim - maskdim))
+        unmasked = torch.gather(
+            tokens,
+            dim=maskdim - 1,
+            index=indices_unmasked.view(*unmask_view).expand(
+                *indices_unmasked.shape, *tokens.shape[maskdim:]
+            ),
+        )
+
+        # Encoder
+        lead_time = x["lead_time"]
+        x_encoded = self.encoder(unmasked, lead_time=lead_time)
+
+        # Generate and position encode the mask tokens
+        # (1, 1, 1, embed_dim) -> (batch, global_seq_masked, local seq, embed_dim)
+        mask_view = (*indices_masked.shape, *[1] * (tokens.ndim - maskdim))
+        masking = self.mask_token.repeat(*static_embedded.shape[:3], 1)
+        masked = masking + static_embedded
+        masked = torch.gather(
+            masked,
+            dim=maskdim - 1,
+            index=indices_masked.view(*mask_view).expand(
+                *indices_masked.shape, *tokens.shape[maskdim:]
+            ),
+        )
+
+        recon, _ = self.reconstruct_batch(
+            indices_masked, indices_unmasked, masked, x_encoded
+        )
+
+        x_decoded = self.decoder(recon, lead_time=lead_time)
+
+        # Output: (batch, global sequence, local sequence, in_channels * patch_size[0] * patch_size[1])
+        x_unembed = self.unembed(x_decoded)
+
+        # Reshape to (batch, global_lat, global_lon, local_lat, local_lon, in_channels * patch_size[0] * patch_size[1])
+        assert x_unembed.shape[0] == batch_size
+        assert x_unembed.shape[1] == self.global_shape_mu[0] * self.global_shape_mu[1]
+        assert x_unembed.shape[2] == self.local_shape_mu[0] * self.local_shape_mu[1]
+        assert (
+            x_unembed.shape[3]
+            == self.in_channels * self.patch_size_px[0] * self.patch_size_px[1]
+        )
+
+        x_out = self.from_patching(x_unembed)
+
+        # Pixel shuffle to (batch, in_channels, lat, lon)
+        x_out = F.pixel_shuffle(x_out, self.patch_size_px[0])
+
+        if self.residual == "temporal":
+            x_out = self.output_scalers * x_out + x_hat
+        elif self.residual == "climate":
+            x_out = self.output_scalers * x_out + batch["climate"]
+        elif self.residual == "none":
+            x_out = self.output_scalers * x_out + self.input_scalers_mu.reshape(
+                1, -1, 1, 1
+            )
+
+        return x_out
 
 class PrithviWxCObs(PrithviWxC):
     """
@@ -1078,7 +1814,7 @@ class LocalGlobalLocalBlock(nn.Module):
         n_heads: int,
         dropout: float,
         n_blocks: int,
-        drop_path: float,
+        drop_path: Tuple[float, float],
         shifter: nn.Module | None = None,
         checkpoint: list[int]=[],
         obs_features: Optional[int] = None,
@@ -1511,7 +2247,6 @@ class PrithviWxCXObs(nn.Module):
                 dropout=dropout,
                 drop_path=0.,
                 shifter=d_shifter,
-                checkpoint=checkpoint_decoder,
             )
 
             self.unembed = nn.Linear(

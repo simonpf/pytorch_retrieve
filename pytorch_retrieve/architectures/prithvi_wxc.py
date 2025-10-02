@@ -148,8 +148,7 @@ class BackboneConfig:
             output_scalers,
             static_input_scalers,
         )
-        from PrithviWxC.model import PrithviWxC
-        from pytorch_retrieve.models.prithvi_wxc import PrithviWxCObs, PrithviWxCXObs, PrithviWxCRegional
+        from pytorch_retrieve.models.prithvi_wxc import PrithviWxC, PrithviWxCObs, PrithviWxCXObs, PrithviWxCRegional
 
         if self.scaling_factors is None:
             self.scaling_factors = Path(os.environ["PRITHVI_DATA_PATH"])
