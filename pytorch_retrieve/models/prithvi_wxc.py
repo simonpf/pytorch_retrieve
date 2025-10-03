@@ -129,7 +129,12 @@ class Transformer(nn.Module):
         self.mlp_multiplier = mlp_multiplier
         self.n_heads = n_heads
         self.dropout = dropout
-        self.drop_path = LeadTimeDropPath(drop_path) if drop_path > 0.0 else None
+        if isinstance(drop_path, (list, tuple)):
+            self.drop_path = LeadTimeDropPath(drop_path)
+        elif drop_path > 0.0:
+            self.drop_path = LeadTimeDropPath((drop_path, drop_path))
+        else:
+            self.drop_path = None
 
         self.attention = nn.Sequential(
             LayerNormPassThrough(features),
@@ -570,7 +575,12 @@ class MergingModule(nn.Module):
         self.linear_2 = nn.Linear(2 * embed_dim, embed_dim)
         self.cond_norm_2 = CondNorm(embed_dim, 32)
 
-    def forward(self, x_latent: torch.Tensor, obs_latent, total_lead_time: torch.Tensor):
+    def forward(
+            self,
+            x_latent: torch.Tensor,
+            obs_latent: torch.Tensor,
+            total_lead_time: torch.Tensor
+    ):
         """
         Merge modell state 'x_latent' and latent observations 'obs_latent' conditioned on total_lead_time.
         """
