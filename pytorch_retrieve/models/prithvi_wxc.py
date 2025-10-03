@@ -45,6 +45,7 @@ except ImportError:
 
 TORCH_VERSION = version('torch')
 
+
 def drop_path(
     x: torch.Tensor,
     drop_prob: torch.Tensor,
@@ -93,8 +94,8 @@ class LeadTimeDropPath(nn.Module):
         if lead_time is None:
             drop_prob = self.drop_probs[0] * torch.ones(x.shape[0], device=x.device, dtype=x.dtype)
         else:
-            weights = (lead_time - self.lead_time_min) / (self.lead_time_max - self.lead_time_min)
-            drop_prob = weights * self.drop_probs[1] + (1.0 - weights) * self.drop_probs[0]
+            rel_dist = (lead_time - self.lead_time_min) / (self.lead_time_max - self.lead_time_min)
+            drop_prob = self.drop_probs[0] + (self.drop_probs[1] - self.drop_probs[0]) * rel_dist
             drop_prob = torch.clip(drop_prob, torch.zeros_like(drop_prob), torch.ones_like(drop_prob))
 
         return drop_path(x, drop_prob, self.training, self.scale_by_keep)
@@ -146,8 +147,7 @@ class Transformer(nn.Module):
 
     def forward(
             self,
-            d: tuple[torch.Tensor, torch.Tensor | None],
-            lead_time: Optional[torch.Tensor] = None
+            d: tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]
     ) -> torch.Tensor:
         """
         Args:
@@ -156,13 +156,13 @@ class Transformer(nn.Module):
         Returns:
             Tensor of shape [..., sequence, features]
         """
-        x, attn_mask = d
+        x, attn_mask, lead_time = d
         if not x.shape[-1] == self.features:
             raise ValueError(
                 f"Expecting tensor with last dimension of size {self.features}."
             )
 
-        attention_x = self.attention(d)
+        attention_x = self.attention(d[:2])
 
         if self.drop_path is None:
             x = x + attention_x
@@ -1063,20 +1063,22 @@ class PrithviWxC(nn.Module):
         assert batch["static"].shape[2] == self.n_lats_px
         assert batch["static"].shape[3] == self.n_lons_px
 
-        x_rescaled = (batch["x"] - self.input_scalers_mu) / (
+        dtype = batch["x"].dtype
+        x_rescaled = (batch["x"].to(dtype=torch.float32) - self.input_scalers_mu) / (
             self.input_scalers_sigma + self.input_scalers_epsilon
-        )
+        ).to(dtype=dtype)
+        x_rescaled = torch.clip(x_rescaled, -20, 20).to(dtype=dtype)
         batch_size = x_rescaled.shape[0]
 
         if self.positional_encoding == 'fourier':
             x_static_pos = self.fourier_pos_encoding(batch['static']) # B, embed_dim, lat / patch_size, lon / patch_size
-            x_static = (batch['static'][:, 2:] - self.static_input_scalers_mu[:, 3:]) / ( # The first two channels in batch['static'] are used in positional encoding
+            x_static = (batch['static'][:, 2:].to(dtype=torch.float32) - self.static_input_scalers_mu[:, 3:]) / ( # The first two channels in batch['static'] are used in positional encoding
                 self.static_input_scalers_sigma[:, 3:] + self.static_input_scalers_epsilon # This translates to the first three channels in 'static_input_scalers_mu'
-            )
+            ).to(dtype=dtype)
         else:
             x_static = (batch["static"] - self.static_input_scalers_mu) / (
                 self.static_input_scalers_sigma + self.static_input_scalers_epsilon
-            )
+            ).to(dtype=dtype)
 
         if self.residual == "temporal":
             # We create a residual of same shape as y
@@ -1090,10 +1092,11 @@ class PrithviWxC(nn.Module):
             ), f'Shapes {batch["y"].shape} and {x_hat.shape} do not agree.'
         elif self.residual == "climate":
             climate_scaled = (
-                batch["climate"] - self.input_scalers_mu.view(1, -1, 1, 1)
+                batch["climate"].to(dtype=torch.float32) - self.input_scalers_mu.view(1, -1, 1, 1)
             ) / (
                 self.input_scalers_sigma.view(1, -1, 1, 1) + self.input_scalers_epsilon
-            )
+            ).to(dtype=dtype)
+            climate_scaled = torch.clip(climate_scaled, -20, 20).to(dtype=dtype)
 
         # [batch, time, parameter, lat, lon] -> [batch, time x parameter, lat, lon]
         x_rescaled = x_rescaled.flatten(1, 2)
@@ -1477,9 +1480,9 @@ class PrithviWxCObs(PrithviWxC):
         assert batch["static"].shape[3] == self.n_lons_px
 
         dtype = batch["x"].dtype
-        x_rescaled = (batch["x"].to(dtype=torch.float32) - self.input_scalers_mu) / (
+        x_rescaled = ((batch["x"].to(dtype=torch.float32) - self.input_scalers_mu) / (
             self.input_scalers_sigma + self.input_scalers_epsilon
-        ).to(dtype=dtype)
+        )).to(dtype=dtype)
         x_rescaled = torch.clip(x_rescaled, -20, 20).to(dtype=dtype)
         batch_size = x_rescaled.shape[0]
 
@@ -1886,7 +1889,8 @@ class LocalGlobalLocalBlock(nn.Module):
             self,
             x: torch.Tensor,
             obs: Optional[torch.Tensor],
-            obs_mask: Optional[torch.Tensor]
+            obs_mask: Optional[torch.Tensor],
+            lead_time: Optional[torch.Tensor]
     ) -> torch.Tensor:
         """
         Args:
@@ -1913,8 +1917,8 @@ class LocalGlobalLocalBlock(nn.Module):
 
         evaluator, transformer = next(transformer_iter)
         if self.obs_transformers is not None:
-            x = evaluator(self.obs_transformers[0], x, obs, obs_mask)
-        x = evaluator(transformer, (x, attn_mask[local]))
+            x = evaluator(self.obs_transformers[0], x, obs, obs_mask, lead_time)
+        x = evaluator(transformer, (x, attn_mask[local], lead_time))
 
         cntr = 1
         for evaluator, transformer in transformer_iter:
@@ -1924,10 +1928,10 @@ class LocalGlobalLocalBlock(nn.Module):
             x = x.transpose(1, 2)
 
             if self.obs_transformers is not None and local:
-                x = evaluator(self.obs_transformers[cntr], x, obs, obs_mask)
+                x = evaluator(self.obs_transformers[cntr], x, obs, obs_mask, lead_time)
                 cntr += 1
 
-            x = evaluator(transformer, (x, attn_mask[local]))
+            x = evaluator(transformer, (x, attn_mask[local], lead_time))
 
             if not local:
                 x, attn_mask = self.shifter(x)
@@ -1989,7 +1993,8 @@ class PrithviWxCEncoderDecoder(nn.Module):
         self,
         x: torch.Tensor,
         obs: Optional[torch.Tensor] = None,
-        obs_mask: Optional[torch.Tensor] = None
+        obs_mask: Optional[torch.Tensor] = None,
+        lead_time: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """
         Args:
@@ -1999,7 +2004,7 @@ class PrithviWxCEncoderDecoder(nn.Module):
             Identical in shape to the input x.
         """
 
-        x = self.lgl_block(x, obs=obs, obs_mask=obs_mask)
+        x = self.lgl_block(x, obs=obs, obs_mask=obs_mask, lead_time=lead_time)
 
         return x
 

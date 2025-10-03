@@ -567,7 +567,7 @@ class PrithviWxCModel(RetrievalModel):
             name: head(y) for name, head in self.heads.items()
         }
         if self.return_latent:
-            preds["y"] = latent_preds
+            preds["y"] = y
 
         return preds
 
@@ -609,9 +609,9 @@ def new_forward(
     assert batch["static"].shape[3] == self.n_lons_px
 
     dtype = batch["x"].dtype
-    x_rescaled = (batch["x"].to(dtype=torch.float32) - self.input_scalers_mu) / (
+    x_rescaled = ((batch["x"].to(dtype=torch.float32) - self.input_scalers_mu) / (
         self.input_scalers_sigma + self.input_scalers_epsilon
-    )
+    )).to(dtype=dtype)
     batch_size = x_rescaled.shape[0]
 
     if self.positional_encoding == 'fourier':
@@ -689,7 +689,8 @@ def new_forward(
     )
 
     # Encoder
-    x_encoded = self.encoder(unmasked)
+    lead_time = batch["lead_time"]
+    x_encoded = self.encoder(unmasked, lead_time=lead_time)
 
     # Generate and position encode the mask tokens
     # (1, 1, 1, embed_dim) -> (batch, global_seq_masked, local seq, embed_dim)
@@ -708,7 +709,7 @@ def new_forward(
         indices_masked, indices_unmasked, masked, x_encoded
     )
 
-    x_decoded = self.decoder(recon)
+    x_decoded = self.decoder(recon, lead_time=lead_time)
 
     # Output: (batch, global sequence, local sequence, in_channels * patch_size[0] * patch_size[1])
     x_unembed = self.unembed(x_decoded)
