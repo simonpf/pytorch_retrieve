@@ -41,7 +41,7 @@ class BackboneConfig:
     mlp_multiplier: int = 4
     n_heads: int = 16
     dropout: int = 0.0
-    drop_path: int = 0.0
+    drop_path: Union[float, Tuple[float, float]] = 0.0
     parameter_dropout: int = 0.0
     positional_encoding: str = "fourier"
     obs_patch_size: Optional[Tuple[int, int]] = None,
@@ -81,7 +81,7 @@ class BackboneConfig:
         mlp_multiplier = get_config_attr("mlp_multiplier", int, backbone_config, "backbone", default=4)
         n_heads = get_config_attr("n_heads", int, backbone_config, "backbone", default=16)
         dropout = get_config_attr("dropout", float, backbone_config, "backbone", default=0.0)
-        drop_path = get_config_attr("drop_path", float, backbone_config, "backbone", default=0.0)
+        drop_path = get_config_attr("drop_path", None, backbone_config, "backbone", default=0.0)
         parameter_dropout = get_config_attr("parameter_dropout", float, backbone_config, "backbone", default=0.0)
         positional_encoding = get_config_attr("positional_encoding", str, backbone_config, "backbone", default="fourier")
         obs_patch_size = get_config_attr("obs_patch_size", None, backbone_config, "backbone", required=False)

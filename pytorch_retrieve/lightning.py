@@ -542,12 +542,12 @@ class LightningRetrieval(L.LightningModule):
             if isinstance(pred_s, DetectionTensor):
                 mlc = pred_s.most_likely_class()
                 for metric in cat_detection_metrics:
-                    metric = metric.to(device=mlc.device)
+                    metric = metric.to(device=mlc.device, dtype=mlc.dtype)
                     metric.update(mlc, target_s, conditional=cond)
                 prob = pred_s.probability()
                 for metric in porb_detection_metrics:
-                    metric = metric.to(device=mlc.device)
-                    metric.update(mlc, target_s, conditional=cond)
+                    metric = metric.to(device=mlc.device, dtype=prob.dtype)
+                    metric.update(prob, target_s, conditional=cond)
 
         for metric in other_metrics:
             metric = metric.to(device=pred_s.device)

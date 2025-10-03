@@ -514,6 +514,7 @@ class TrainingConfigBase:
             for output_name in outputs:
                 # Instantiate metrics for all outputs.
                 for margs in self.metrics:
+                    margs = margs.copy()
                     # Metric defined using dictionary.
                     if isinstance(margs, dict):
                         name = margs.pop("name", None)
