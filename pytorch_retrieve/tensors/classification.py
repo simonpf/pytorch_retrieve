@@ -108,6 +108,12 @@ class DetectionTensor(torch.Tensor):
         """
         return torch.sigmoid(self.base)
 
+    def most_likely_class(self) -> torch.Tensor:
+        """
+        Calculate most likely class.
+        """
+        return (0.5 < self.probability()).astype(self.dtype)
+
 
 class ClassificationTensor(torch.Tensor):
     """

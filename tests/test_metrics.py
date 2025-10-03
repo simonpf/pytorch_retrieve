@@ -16,6 +16,8 @@ from pytorch_retrieve.metrics import (
     MSE,
     SMAPE,
     PlotSamples,
+    HeidkeSkillScore,
+    BrierScore
 )
 from pytorch_retrieve.tensors import MaskedTensor, MeanTensor
 
@@ -391,3 +393,43 @@ def test_plot_samples_sequence():
     assert "target" in images[0]
     assert len(images[0]["pred"]) == 4
     assert len(images[0]["target"]) == 4
+
+
+def test_heidke_skill_score():
+    """
+    Test the Heidke Skill Score metric.
+    """
+    metric = HeidkeSkillScore()
+
+    target = torch.rand(1_000) > 0.5
+    pred = target
+    metric.update(pred, target)
+    val = metric.compute()
+    assert torch.isclose(val, torch.tensor(1.0))
+
+    metric = HeidkeSkillScore()
+    target = torch.rand(100_000) > 0.5
+    pred = torch.rand(100_000) > 0.5
+    metric.update(pred, target)
+    val = metric.compute()
+    assert torch.isclose(val, torch.tensor(0.0), atol=0.01)
+
+
+def test_brier_score():
+    """
+    Test the Brier Score metric.
+    """
+    metric = BrierScore()
+
+    target = torch.rand(1_000) > 0.5
+    pred = target.to(torch.float32)
+    metric.update(pred, target)
+    val = metric.compute()
+    assert torch.isclose(val, torch.tensor(0.0))
+
+    metric = BrierScore()
+    target = torch.rand(100_000) > 0.5
+    pred = 0.5 * torch.ones(100_000)
+    metric.update(pred, target)
+    val = metric.compute()
+    assert torch.isclose(val, torch.tensor(0.25), atol=0.01)

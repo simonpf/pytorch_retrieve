@@ -30,13 +30,11 @@ LOGGER = logging.getLogger(__name__)
 
 BinSpec = Union[int, Tuple[float, float, int]]
 
-
-class ScalarMetric:
+class MetricBase:
     """
-    Dummy class to identify metrics that evaluate scalar predictions,
-    i.e., predictions that consists of a single value.
+    Base class for metrics providing shared functionality for logging and the calculation of buffer
+    shapes.
     """
-
     def __init__(self, conditional: Optional[Dict[str, BinSpec]] = None):
         conds = []
         bins = []
@@ -94,6 +92,23 @@ class ScalarMetric:
         lightning_module.log(
             name, value, on_step=False, on_epoch=True, sync_dist=sync_dist
         )
+
+
+class ScalarMetric(MetricBase):
+    """
+    Helper class to identify metrics that evaluate deterministic scalar predictions,
+    i.e., predictions that consists of a single value.
+    """
+
+class CategoricalDetectionMetric:
+    """
+    Helper class to identify metrics that evaluate deterministic detection tasks.
+    """
+
+class ProbabilisticDetectionMetric:
+    """
+    Helper class to identify metrics that evaluate probabilistic detection tasks.
+    """
 
 
 class Bias(ScalarMetric, tm.Metric):
@@ -431,11 +446,108 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
         return corr
 
 
-class MSE(ScalarMetric, tm.Metric):
+class MSEBase(tm.Metric):
     """
     The mean-squared error.
     """
+    def __init__(self, conditional: Optional[Dict[str, BinSpec]] = None):
+        ScalarMetric.__init__(self, conditional=conditional)
+        tm.Metric.__init__(self)
+        error = torch.zeros(self.shape)
+        counts = torch.zeros(self.shape)
+        self.add_state("error", default=error, dist_reduce_fx="sum")
+        self.add_state("counts", default=counts, dist_reduce_fx="sum")
 
+    def update(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        weights: Optional[torch.Tensor] = None,
+        conditional: Optional[Dict[str, torch.Tensor]] = None,
+    ) -> None:
+        """
+        Args:
+            pred: A tensor containing the point predictions from the
+                retrieval model.
+            target: A tensor containing the reference values corresponding
+                to 'pred'.
+            weights: An optional tensor of weights to apply to all validation samples.
+            conditional: An optional dictionary containing values to
+                condition the calculation of the bias onto.
+        """
+        pred = pred.squeeze()
+        target = target.squeeze()
+        if weights is None:
+            weights = torch.ones_like(target)
+        else:
+            weights = weights.squeeze()
+
+        mask = None
+        if isinstance(target, MaskedTensor):
+            mask = target.mask
+            target = target.base
+            if isinstance(weights, MaskedTensor):
+                weights = weights.base
+            if isinstance(pred, MaskedTensor):
+                mask = mask | pred.mask
+                pred = pred.base
+            pred = pred[~mask]
+            target = target[~mask]
+            weights = weights[~mask]
+
+        if self.conditional is None:
+
+            if pred.dim() > 2:
+                pred = pred.flatten()
+                target = target.flatten()
+                weights = weights.flatten()
+
+            self.error += (((pred - target) ** 2) * weights).sum()
+            self.counts += weights.sum()
+        else:
+            device = torch.device("cpu")
+            self.to(device)
+
+            coords = []
+            for cond in self.conditional:
+
+                coords_c = conditional[cond].squeeze()
+
+                if mask is None:
+                    if coords_c.ndim < target.ndim:
+                        coords_c = coords_c.reshape(coords_c.shape + (1,) * (target.ndim - coords_c.ndim))
+                        coords_c = torch.broadcast_to(coords_c, target.shape)
+                    coords.append(coords_c)
+                else:
+                    mask = mask.to(device=device)
+                    mask_s = mask.squeeze()
+                    # Expand channel dimension if necessary
+                    if coords_c.ndim < mask_s.ndim:
+                        coords_c = coords_c.reshape(coords_c.shape + (1,) * (mask_s.ndim - coords_c.ndim))
+                        coords_c = torch.broadcast_to(coords_c, mask_s.shape)
+                    coords.append(coords_c[~mask_s])
+
+            coords = torch.stack(coords, -1).to(device=device)
+            bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
+            pred = pred.to(device=device)
+            target = target.to(device=device)
+            weights = weights.to(device=device)
+            self.error += torch.histogramdd(
+                coords, bins=bins, weight=((pred - target) ** 2) * weights
+            )[0]
+            self.counts += torch.histogramdd(coords, bins=bins, weight=weights)[0]
+
+    def compute(self) -> torch.Tensor:
+        """
+        Calculate the MSE.
+        """
+        return self.error / self.counts
+
+
+class MSE(ScalarMetric, MSEBase):
+    """
+    The mean-squared error.
+    """
     name = "MSE"
 
     def __init__(self, conditional: Optional[Dict[str, BinSpec]] = None):
@@ -530,7 +642,6 @@ class MSE(ScalarMetric, tm.Metric):
         Calculate the MSE.
         """
         return self.error / self.counts
-
 
 class MAE(ScalarMetric, tm.Metric):
     """
@@ -751,6 +862,123 @@ class SMAPE(ScalarMetric, tm.Metric):
         Calculate the SMAPE.
         """
         return self.error / self.counts
+
+
+class HeidkeSkillScore(CategoricalDetectionMetric, tm.Metric):
+    """
+    The Heidke Skill score.
+    """
+
+    name = "Bias"
+
+    def __init__(self, conditional: Optional[Dict[str, BinSpec]] = None, **kwargs):
+        ScalarMetric.__init__(self, conditional)
+        tm.Metric.__init__(self, **kwargs)
+        counts = torch.zeros(self.shape)
+        self.add_state("hits", default=torch.zeros(self.shape), dist_reduce_fx="sum")
+        self.add_state("false_alarms", default=torch.zeros(self.shape), dist_reduce_fx="sum")
+        self.add_state("misses", default=torch.zeros(self.shape), dist_reduce_fx="sum")
+        self.add_state("correct_rejections", default=torch.zeros(self.shape), dist_reduce_fx="sum")
+
+    def update(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        weights: Optional[torch.Tensor] = None,
+        conditional: Optional[Dict[str, torch.Tensor]] = None,
+    ) -> None:
+        """
+        Args:
+            pred: A tensor containing the predicted classes as a float tensor containing
+                ones and zeros.
+            target: The true classes.
+            weights: Optional weight tensor used to weigh the contribution of each
+                sample to the overall bias.
+            conditional: An optional dictionary containing values to
+                condition the calculation of the bias onto.
+        """
+        pred = pred.squeeze()
+        target = target.squeeze()
+        if weights is None:
+            weights = torch.ones_like(target)
+        else:
+            weights = weights.squeeze()
+
+        mask = None
+        if isinstance(target, MaskedTensor):
+            mask = target.mask
+            target = target.base
+            if isinstance(weights, MaskedTensor):
+                weights = weights.base
+            if isinstance(pred, MaskedTensor):
+                mask = mask | pred.mask
+                pred = pred.base
+            pred = pred[~mask]
+            target = target[~mask]
+            weights = weights[~mask]
+
+        if self.conditional is None:
+            self.hits += (weights * (0.5 < pred) * (0.5 < target)).sum()
+            self.false_alarms += (weights * (0.5 < pred) * (target < 0.5)).sum()
+            self.misses += (weights * (pred < 0.5) * (0.5 < target)).sum()
+            self.correct_rejections += (weights * (pred < 0.5) * (target < 0.5)).sum()
+            return None
+
+        device = torch.device("cpu")
+        self.to(device=device)
+
+        coords = []
+        for cond in self.conditional:
+
+            coords_c = conditional[cond].squeeze()
+
+            if mask is None:
+                if coords_c.ndim < target.ndim:
+                    coords_c = coords_c.reshape(coords_c.shape + (1,) * (target.ndim - coords_c.ndim))
+                    coords_c = torch.broadcast_to(coords_c, target.shape)
+                coords.append(coords_c)
+            else:
+                mask = mask.to(device=device)
+                mask_s = mask.squeeze()
+                # Expand channel dimension if necessary
+                if coords_c.ndim < mask_s.ndim:
+                    coords_c = coords_c.reshape(coords_c.shape + (1,) * (mask_s.ndim - coords_c.ndim))
+                    coords_c = torch.broadcast_to(coords_c, mask_s.shape)
+                coords.append(coords_c[~mask_s])
+
+        coords = torch.stack(coords, -1).to(device=device)
+
+        bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
+        wgts = ((pred - target) * weights).to(device=device)
+
+        hits = (weights * (0.5 < pred) * (0.5 < target)).sum()
+        self.hits += torch.histogramdd(hits, bins=bins, weight=wgts)[0]
+
+        false_alarms = (weights * (0.5 < pred) * (target < 0.5)).sum()
+        self.false_alarms += torch.histogramdd(false_alarms, bins=bins, weight=wgts)[0]
+
+        misses = (weights * (pred < 0.5) * (0.5 < target)).sum()
+        self.misses += torch.histogramdd(misses, bins=bins, weight=wgts)[0]
+
+        correct_rejections = (weights * (pred < 0.5) * (target < 0.5)).sum()
+        self.correct_rejection += torch.histogramdd(correct_rejections, bins=bins, weight=weights.to(device=device))[0]
+
+    def compute(self) -> torch.Tensor:
+        """
+        Compute the mean error.
+
+        Return:
+            The bias over all data.
+        """
+        n_tp = self.hits
+        n_fp = self.false_alarms
+        n_tn = self.correct_rejections
+        n_fn = self.misses
+
+        hss = 2.0 * (n_tp * n_tn - n_fp * n_fn) / ((n_tp + n_fn) * (n_fn + n_tn) + (n_tp + n_fp) * (n_fp + n_tn))
+        return hss
+
+
 
 
 class PlotSamples(tm.Metric):
@@ -1246,3 +1474,135 @@ class Histogram(ScalarMetric, tm.Metric):
     @rank_zero_only
     def compute(self) -> Dict[str, torch.Tensor]:
         pass
+
+
+class BrierScore(ScalarMetric, tm.Metric):
+    """
+    The mean-squared error.
+    """
+
+    name = "MSE"
+
+    def __init__(self, conditional: Optional[Dict[str, BinSpec]] = None):
+        ScalarMetric.__init__(self, conditional=conditional)
+        tm.Metric.__init__(self)
+        error = torch.zeros(self.shape)
+        counts = torch.zeros(self.shape)
+        self.add_state("error", default=error, dist_reduce_fx="sum")
+        self.add_state("counts", default=counts, dist_reduce_fx="sum")
+
+    def update(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        weights: Optional[torch.Tensor] = None,
+        conditional: Optional[Dict[str, torch.Tensor]] = None,
+    ) -> None:
+        """
+        Args:
+            pred: A tensor containing the point predictions from the
+                retrieval model.
+            target: A tensor containing the reference values corresponding
+                to 'pred'.
+            weights: An optional tensor of weights to apply to all validation samples.
+            conditional: An optional dictionary containing values to
+                condition the calculation of the bias onto.
+        """
+        pred = pred.squeeze()
+        target = target.squeeze()
+        if weights is None:
+            weights = torch.ones_like(target)
+        else:
+            weights = weights.squeeze()
+
+        mask = None
+        if isinstance(target, MaskedTensor):
+            mask = target.mask
+            target = target.base
+            if isinstance(weights, MaskedTensor):
+                weights = weights.base
+            if isinstance(pred, MaskedTensor):
+                mask = mask | pred.mask
+                pred = pred.base
+            pred = pred[~mask]
+            target = target[~mask]
+            weights = weights[~mask]
+
+        if self.conditional is None:
+
+            if pred.dim() > 2:
+                pred = pred.flatten()
+                target = target.flatten()
+                weights = weights.flatten()
+
+            self.error += (((pred - target) ** 2) * weights).sum()
+            self.counts += weights.sum()
+        else:
+            device = torch.device("cpu")
+            self.to(device)
+
+            coords = []
+            for cond in self.conditional:
+
+                coords_c = conditional[cond].squeeze()
+
+                if mask is None:
+                    if coords_c.ndim < target.ndim:
+                        coords_c = coords_c.reshape(coords_c.shape + (1,) * (target.ndim - coords_c.ndim))
+                        coords_c = torch.broadcast_to(coords_c, target.shape)
+                    coords.append(coords_c)
+                else:
+                    mask = mask.to(device=device)
+                    mask_s = mask.squeeze()
+                    # Expand channel dimension if necessary
+                    if coords_c.ndim < mask_s.ndim:
+                        coords_c = coords_c.reshape(coords_c.shape + (1,) * (mask_s.ndim - coords_c.ndim))
+                        coords_c = torch.broadcast_to(coords_c, mask_s.shape)
+                    coords.append(coords_c[~mask_s])
+
+            coords = torch.stack(coords, -1).to(device=device)
+            bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
+            pred = pred.to(device=device)
+            target = target.to(device=device)
+            weights = weights.to(device=device)
+            self.error += torch.histogramdd(
+                coords, bins=bins, weight=((pred - target) ** 2) * weights
+            )[0]
+            self.counts += torch.histogramdd(coords, bins=bins, weight=weights)[0]
+
+    def compute(self) -> torch.Tensor:
+        """
+        Calculate the MSE.
+        """
+        return self.error / self.counts
+
+
+class BrierScore(ProbabilisticDetectionMetric, MSEBase):
+    """
+    The Brier score, which is just the MSE applied to probabilities.
+    """
+    name = "Brier Score"
+
+    def update(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        weights: Optional[torch.Tensor] = None,
+        conditional: Optional[Dict[str, torch.Tensor]] = None,
+    ) -> None:
+        """
+        Args:
+            pred: A tensor containing the point predictions from the
+                retrieval model.
+            target: A tensor containing the reference values corresponding
+                to 'pred'.
+            weights: An optional tensor of weights to apply to all validation samples.
+            conditional: An optional dictionary containing values to
+                condition the calculation of the bias onto.
+        """
+        super().update(
+            pred,
+            target.to(dtype=pred.dtype),
+            weights,
+            conditional
+        )

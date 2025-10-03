@@ -17,8 +17,12 @@ from torchmetrics import Metric
 import lightning as L
 from lightning.pytorch import loggers
 
-from pytorch_retrieve.tensors.masked_tensor import MaskedTensor
-from pytorch_retrieve.metrics import ScalarMetric
+from pytorch_retrieve.tensors import DetectionTensor, MaskedTensor
+from pytorch_retrieve.metrics import (
+    CategoricalDetectionMetric,
+    ProbabilisticDetectionMetric,
+    ScalarMetric
+)
 from pytorch_retrieve.utils import WarmupLR
 
 RetrievalInput = Union[torch.Tensor, list, dict]
@@ -497,9 +501,15 @@ class LightningRetrieval(L.LightningModule):
         scalar_metrics = [
             metric for metric in metrics if isinstance(metric, ScalarMetric)
         ]
+        prob_detection_metrics = [
+            metric for metric in metrics if isinstance(metric, ProbabilisticDetectionMetric)
+        ]
+        cat_detection_metrics = [
+            metric for metric in metrics if isinstance(metric, CategoricalDetectionMetric)
+        ]
         # Other metrics
         other_metrics = [
-            metric for metric in metrics if not isinstance(metric, ScalarMetric)
+            metric for metric in metrics if not isinstance(metric, (ScalarMetric, DetectionMetric))
         ]
 
         if weights is None:
@@ -528,6 +538,16 @@ class LightningRetrieval(L.LightningModule):
                 for metric in scalar_metrics:
                     metric = metric.to(device=scalar_pred.device)
                     metric.update(scalar_pred, target_s, conditional=cond)
+
+            if isinstance(pred_s, DetectionTensor):
+                mlc = pred_s.most_likely_class()
+                for metric in cat_detection_metrics:
+                    metric = metric.to(device=mlc.device)
+                    metric.update(mlc, target_s, conditional=cond)
+                prob = pred_s.probability()
+                for metric in porb_detection_metrics:
+                    metric = metric.to(device=mlc.device)
+                    metric.update(mlc, target_s, conditional=cond)
 
         for metric in other_metrics:
             metric = metric.to(device=pred_s.device)
