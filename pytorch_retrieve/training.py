@@ -377,6 +377,10 @@ class TrainingConfigBase:
             but 'previous_optimizer' is none.
 
         """
+        LOGGER.info(
+            "Configuring optimizer and scheduler for %s steps per epoch.",
+            steps_per_epoch
+        )
         if self.reuse_optimizer:
             if previous_optimizer is None:
                 raise RuntimeError(
