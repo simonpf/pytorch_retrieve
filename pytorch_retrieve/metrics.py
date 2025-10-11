@@ -170,7 +170,8 @@ class Bias(ScalarMetric, tm.Metric):
             return None
 
         device = torch.device("cpu")
-        self.to(device=device)
+        dtype = pred.dtype
+        self.to(device=device, dtype=dtype)
 
         coords = []
         for cond in self.conditional:
@@ -191,12 +192,12 @@ class Bias(ScalarMetric, tm.Metric):
                     coords_c = torch.broadcast_to(coords_c, mask_s.shape)
                 coords.append(coords_c[~mask_s])
 
-        coords = torch.stack(coords, -1).to(device=device)
-
-        wgts = ((pred - target) * weights).to(device=device)
+        coords = torch.stack(coords, -1).to(device=device, dtype=dtype)
+        wgts = ((pred - target) * weights).to(device=device, dtype=dtype)
         bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
         self.error += torch.histogramdd(coords, bins=bins, weight=wgts)[0]
-        self.counts += torch.histogramdd(coords, bins=bins, weight=weights.to(device=device))[0]
+        self.counts += torch.histogramdd(coords, bins=bins, weight=weights.to(device=device, dtype=dtype))[0]
+
 
     def compute(self) -> torch.Tensor:
         """
@@ -381,7 +382,8 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
             self.counts += weights.sum()
         else:
             device = torch.device("cpu")
-            self.to(device=device)
+            dtype = pred.dtype
+            self.to(device=device, dtype=dtype)
 
             coords = []
             for cond in self.conditional:
@@ -402,13 +404,11 @@ class CorrelationCoef(ScalarMetric, tm.regression.PearsonCorrCoef):
                         coords_c = torch.broadcast_to(coords_c, mask_s.shape)
                     coords.append(coords_c[~mask_s])
 
-            coords = torch.stack(coords, -1).to(device=device)
-
+            coords = torch.stack(coords, -1).to(device=device, dtype=dtype)
             bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
-
-            pred = pred.to(device=device)
-            target = target.to(device=device)
-            weights = weights.to(device=device)
+            pred = pred.to(device=device, dtype=dtype)
+            target = target.to(device=device, dtype=dtype)
+            weights = weights.to(device=device, dtype=dtype)
 
             self.x += torch.histogramdd(coords, bins=bins, weight=pred * weights)[0]
             self.x2 += torch.histogramdd(
