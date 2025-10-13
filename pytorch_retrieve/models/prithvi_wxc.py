@@ -1430,7 +1430,8 @@ class PrithviWxCObs(PrithviWxC):
         meta = batch["obs_meta"]
 
         if self.training:
-            obs_dropout = (torch.rand(*obs.shape[:-2]) < self.obs_dropout)[..., None, None]
+            obs_dropout = (torch.rand(*obs.shape[:-2], device=obs.device, dtype=obs.dtype) < self.obs_dropout)
+            obs_dropout = obs_dropout[..., None, None]
             obs = torch.where(obs_dropout, -1.5, obs)
             meta = torch.where(obs_dropout, -1.5, meta)
             mask[obs_dropout[..., 0, 0, 0]] = torch.tensor(True)
