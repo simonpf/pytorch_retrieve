@@ -847,7 +847,10 @@ class LightningRetrieval(L.LightningModule):
 
     def configure_optimizers(self):
         if self.training_schedule is None:
-            optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-3)
+            optimizer = torch.optim.Adam(
+                [param for param in self.model.parameters() if param.requires_grad],
+                lr=1e-3
+            )
             return optimizer
 
         curr_config = self.current_training_config

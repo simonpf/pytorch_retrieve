@@ -395,7 +395,8 @@ class TrainingConfigBase:
 
         else:
             optimizer_cls = getattr(torch.optim, self.optimizer)
-            optimizer = optimizer_cls(model.parameters(), **self.optimizer_args)
+            params = [param for param in model.parameters() if param.requires_grad]
+            optimizer = optimizer_cls(params, **self.optimizer_args)
 
         scheduler = self.scheduler
         if scheduler is None:
