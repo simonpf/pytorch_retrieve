@@ -173,7 +173,7 @@ def test_parse_prithvi_config(prithvi_wxc_config):
 @NEEDS_PRITHVI_DATA
 def test_prithvi_model_unroll(prithvi_wxc_config):
     """
-    Test parsing of PrithviWxC model config.
+    Test prediction using unrolling.
     """
     from pytorch_retrieve.architectures import prithvi_wxc
     model = prithvi_wxc.PrithviWxCModel.from_config_dict(prithvi_wxc_config)
@@ -188,6 +188,7 @@ def test_prithvi_model_unroll(prithvi_wxc_config):
         pred = model(x)
     assert "surface_precip" in pred
     assert len(pred["surface_precip"]) == 2
+
 
 
 @NEEDS_PRITHVI
@@ -211,14 +212,54 @@ def test_prithvi_model_direct(prithvi_wxc_config):
     assert pred["surface_precip"].shape == (1, 1, 360, 576)
 
 
+PRITHVI_OBS_CONFIG = """
+[architecture.name]
+name = "PrithviWxC"
+
+[architecture.backbone]
+in_channels = 160
+input_size_time = 2
+in_channels_static = 8
+input_scalers_epsilon = 0.0
+static_input_scalers_epsilon = 0.0
+n_lats_px = 360
+n_lons_px = 576
+patch_size_px = [2, 2]
+mask_unit_size_px = [30, 32]
+embed_dim = 256
+n_blocks_encoder = 8
+n_blocks_decoder = 2
+mlp_multiplier = 4
+n_heads = 16
+dropout = 0.0
+drop_path = 0.0
+parameter_dropout = 0.0
+positional_encoding = "fourier"
+variant = "obs"
+obs_features = 16
+obs_layers = 16
+obs_patch_size = [6, 4]
+
+[input.geo_ir]
+n_features = 1
+
+[output.surface_precip]
+kind = "Mean"
+"""
+
+@pytest.fixture
+def prithvi_wxc_obs_config():
+    return toml.loads(PRITHVI_OBS_CONFIG)
+
 @NEEDS_PRITHVI
 @NEEDS_PRITHVI_DATA
-def test_prithvi_wxc_obs():
+def test_prithvi_wxc_obs(prithvi_wxc_obs_config):
     """
-
-
+    Test propagating input and observations through Prithvi-WxC Obs.
     """
-    mdl = compile_prithvi_wxc_obs()
+    from pytorch_retrieve.architectures import prithvi_wxc
+    model = prithvi_wxc.PrithviWxCModel.from_config_dict(prithvi_wxc_obs_config)
+
     inpt = {
         "x": torch.rand(1, 2, 160, 360, 576),
         "climate": torch.rand(1, 160, 360, 576),
@@ -230,4 +271,26 @@ def test_prithvi_wxc_obs():
         "input_time": torch.tensor([3.0]),
         "lead_time": torch.tensor([3.0]),
     }
-    pred = mdl(inpt)
+    pred = model(inpt)
+
+
+@NEEDS_PRITHVI
+@NEEDS_PRITHVI_DATA
+def test_prithvi_wxc_obs_unroll(prithvi_wxc_obs_config):
+    """
+    Test propagating input and observations through Prithvi-WxC Obs.
+    """
+    from pytorch_retrieve.architectures import prithvi_wxc
+    model = prithvi_wxc.PrithviWxCModel.from_config_dict(prithvi_wxc_obs_config)
+    inpt = {
+        "x": torch.rand(1, 2, 160, 360, 576),
+        "climate": torch.rand(1, 2, 160, 360, 576),
+        "static": torch.rand(1, 2, 10, 360, 576),
+        "y": torch.rand(1, 2, 1, 360, 576),
+        "obs": torch.rand(1, 2, 12, 18, 32, 1, 30, 32),
+        "obs_meta": torch.rand(1, 2, 12, 18, 32, 8, 30, 32),
+        "obs_mask": torch.rand(1, 2, 12, 18, 32, 1, 30, 32),
+        "input_time": torch.tensor([3.0]),
+        "lead_time": torch.tensor([3.0]),
+    }
+    pred = model(inpt)

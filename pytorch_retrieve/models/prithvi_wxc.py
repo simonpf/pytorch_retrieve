@@ -541,15 +541,10 @@ class CondLayerNorm(nn.Module):
         """
         B = x.shape[0]
         F = x.shape[-1]
-        # Normalize over last dim
         z = self.ln(x)
 
-        # Generate FiLM params per batch item
-        gmmabeta = self.film_mlp(cond)                  # [B, 2F]
-        gamma, beta = gammabeta.chunk(2, dim=-1)         # [B, F], [B, F]
-
-        # Reshape for broadcasting over non-batch leading dims
-        # target shape: [B, 1, 1, ..., 1, F] to match z's rank
+        gammabeta = self.film_mlp(cond)
+        gamma, beta = gammabeta.chunk(2, dim=-1)
         expand_shape = [B] + [1] * (z.dim() - 2) + [F]
         gamma = gamma.view(*expand_shape)
         beta  = beta.view(*expand_shape)
@@ -570,10 +565,10 @@ class MergingModule(nn.Module):
         super().__init__()
         self.encoding = nn.Linear(1, 32)
         self.linear_1 = nn.Linear(2 * embed_dim, embed_dim)
-        self.cond_norm_1 = CondNorm(embed_dim, 32)
+        self.cond_norm_1 = CondLayerNorm(embed_dim, 32)
         self.act = nn.GELU()
-        self.linear_2 = nn.Linear(2 * embed_dim, embed_dim)
-        self.cond_norm_2 = CondNorm(embed_dim, 32)
+        self.linear_2 = nn.Linear(embed_dim, embed_dim)
+        self.cond_norm_2 = CondLayerNorm(embed_dim, 32)
 
     def forward(
             self,
@@ -584,9 +579,11 @@ class MergingModule(nn.Module):
         """
         Merge modell state 'x_latent' and latent observations 'obs_latent' conditioned on total_lead_time.
         """
-        B, *_ = x.shape
+        B, *_ = x_latent.shape
+        total_lead_time = torch.tensor([[total_lead_time]]).to(device=x_latent.device, dtype=x_latent.dtype)
+        total_lead_time = total_lead_time.repeat_interleave(B, 0)
 
-        enc = self.encoding(torch.tensor(total_lead_time))
+        enc = self.encoding(total_lead_time)
         x = self.linear_1(torch.cat([x_latent, obs_latent], -1))
         x = self.act(self.cond_norm_1(x, enc))
         x = self.linear_2(x)
@@ -1077,7 +1074,8 @@ class PrithviWxC(nn.Module):
         x_rescaled = (batch["x"].to(dtype=torch.float32) - self.input_scalers_mu) / (
             self.input_scalers_sigma + self.input_scalers_epsilon
         ).to(dtype=dtype)
-        x_rescaled = torch.clip(x_rescaled, -20, 20).to(dtype=dtype)
+        #x_rescaled = torch.clip(x_rescaled, -20, 20).to(dtype=dtype)
+        print("noclip")
         batch_size = x_rescaled.shape[0]
 
         if self.positional_encoding == 'fourier':
@@ -1106,7 +1104,7 @@ class PrithviWxC(nn.Module):
             ) / (
                 self.input_scalers_sigma.view(1, -1, 1, 1) + self.input_scalers_epsilon
             ).to(dtype=dtype)
-            climate_scaled = torch.clip(climate_scaled, -20, 20).to(dtype=dtype)
+            #climate_scaled = torch.clip(climate_scaled, -20, 20).to(dtype=dtype)
 
         # [batch, time, parameter, lat, lon] -> [batch, time x parameter, lat, lon]
         x_rescaled = x_rescaled.flatten(1, 2)
@@ -1462,7 +1460,7 @@ class PrithviWxCObs(PrithviWxC):
             obs_only: bool = False,
             model_only: bool = False,
             obs_latent: Optional[torch.Tensor] = None,
-            tot_lead_time: int = 0
+            total_lead_time: int = 0
     ) -> torch.Tensor:
         """
         Args:

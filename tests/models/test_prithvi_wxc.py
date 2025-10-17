@@ -36,7 +36,7 @@ NEEDS_PRITHVI_DATA = pytest.mark.skipif(
     reason="Needs PrithviWxC data."
 )
 
-def compile_prithvi_wxc_obs():
+def compile_prithvi_wxc_obs(conditional_merging: bool):
     """
     Compiles a slimmed-down PrithviWxCObs model.
     """
@@ -114,6 +114,7 @@ def compile_prithvi_wxc_obs():
     kwargs["masking_mode"] = "local"
     kwargs["decoder_shifting"] = False
     kwargs["mask_ratio_inputs"] = 0.0
+    kwargs["conditional_merging"] = conditional_merging
 
     model = PrithviWxCObs(**kwargs)
     return model
@@ -124,7 +125,7 @@ def test_prithvi_wxc_obs():
     """
     Test the PrithviWxC obs model.
     """
-    mdl = compile_prithvi_wxc_obs()
+    mdl = compile_prithvi_wxc_obs(conditional_merging=False)
     batch = {
         "x": torch.rand((1, 2, 160, 360, 576)),
         "static": torch.rand((1, 10, 360, 576)),
@@ -136,6 +137,20 @@ def test_prithvi_wxc_obs():
         "obs_mask": torch.rand((1, 2, 12, 18, 32, 30, 32)) > 0.5,
     }
     pred = mdl(batch)
+
+    mdl = compile_prithvi_wxc_obs(conditional_merging=True)
+    batch = {
+        "x": torch.rand((1, 2, 160, 360, 576)),
+        "static": torch.rand((1,  10, 360, 576)),
+        "input_time": torch.tensor(3.0)[None],
+        "lead_time": torch.tensor(3.0)[None],
+        "climate": torch.rand((1,  160, 360, 576)),
+        "obs": torch.rand((1, 2, 12, 18, 32, 1, 30, 32)),
+        "obs_meta": torch.rand((1, 2, 12, 18, 32, 8, 30, 32)),
+        "obs_mask": torch.rand((1, 2, 12, 18, 32, 30, 32)) > 0.5,
+    }
+    obs_latent = mdl.encode_observations(batch)
+    pred = mdl(batch, obs_latent=obs_latent, total_lead_time=1)
 
 
 def compile_prithvi_wxc_xobs():
