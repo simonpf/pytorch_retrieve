@@ -704,7 +704,7 @@ class TrainingConfig(TrainingConfigBase):
             "persistent_workers", bool, config_dict, f"training stage {name}", True
         )
         freeze = get_config_attr(
-            "freeze", list, config_dict, f"training state {name}", []
+            "freeze", None, config_dict, f"training state {name}", None
         )
         debug = get_config_attr(
             "debug", bool, config_dict, f"training stage {name}", False
@@ -850,7 +850,8 @@ def run_training(
             training_loader = training_config.get_training_data_loader()
             validation_loader = training_config.get_validation_data_loader()
 
-            freeze_modules(module, training_config.freeze)
+            if training_config.freeze is not None:
+                freeze_modules(module, training_config.freeze)
 
             trainer = L.Trainer(
                 max_epochs=training_config.n_epochs,
