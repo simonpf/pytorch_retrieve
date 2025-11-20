@@ -280,6 +280,7 @@ class PrithviWxCConfig:
     Dataclass reprsentation the configuration of a PrithviWxC model.
     """
     return_latent: bool
+    full_output: bool
     stem_configs: Dict[str, StemConfig]
     backbone_config: BackboneConfig
     head_configs: Dict[str, HeadConfig]
@@ -303,6 +304,9 @@ class PrithviWxCConfig:
         backbone_config = BackboneConfig.parse(backbone_config_dict)
         return_latent = get_config_attr(
             "return_latent", bool, arch_config, "model config", default=False
+        )
+        full_output = get_config_attr(
+            "full_output", bool, arch_config, "model config", default=False
         )
 
         stem_config_dict = arch_config.get("stem", {})
@@ -340,6 +344,7 @@ class PrithviWxCConfig:
 
         return PrithviWxCConfig(
             return_latent=return_latent,
+            full_output=full_output,
             stem_configs=stem_configs,
             backbone_config=backbone_config,
             head_configs=head_configs,
@@ -362,6 +367,7 @@ class PrithviWxCConfig:
         return {
             "name": "PrithviWxC",
             "return_latent": self.return_latent,
+            "full_output": self.full_output,
             "backbone": backbone_config,
             "stem": stem_configs,
             "head": head_configs,
@@ -474,6 +480,7 @@ class PrithviWxCModel(RetrievalModel):
             }
         )
         self.return_latent = arch_config.return_latent
+        self.full_output = arch_config.full_output
         self.stems = nn.ModuleDict(
             {name: cfg.compile() for name, cfg in arch_config.stem_configs.items()}
         )
@@ -537,6 +544,7 @@ class PrithviWxCModel(RetrievalModel):
 
         x_step = x["x"]
         latent_preds = []
+        full_output = []
         preds = {}
 
         forward_kwargs = {}
@@ -544,7 +552,6 @@ class PrithviWxCModel(RetrievalModel):
             obs_latent = self.backbone.encode_observations(x)
             forward_kwargs["obs_latent"] = obs_latent
         obs_latent = None
-
 
         for step in range(n_steps):
 
@@ -579,12 +586,20 @@ class PrithviWxCModel(RetrievalModel):
                 )
             x_step = torch.stack([x_step[:, -1], y_out], 1)
 
-            latent_preds.append(y)
+            if self.return_latent:
+                latent_preds.append(y)
+
+            if self.full_output:
+                full_output.append(y_out)
+
             for name, head in self.heads.items():
                 preds.setdefault(name, []).append(head(y))
 
         if self.return_latent:
             preds["y"] = [MeanTensor(y) for y in latent_preds]
+
+        if self.full_output:
+            preds["y"] = [MeanTensor(y) for y in full_output]
 
         return preds
 
