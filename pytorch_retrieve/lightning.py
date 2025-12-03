@@ -509,7 +509,10 @@ class LightningRetrieval(L.LightningModule):
         ]
         # Other metrics
         other_metrics = [
-            metric for metric in metrics if not isinstance(metric, (ScalarMetric, DetectionMetric))
+            metric for metric in metrics if not isinstance(
+                metric,
+                (ScalarMetric, ProbabilisticDetectionMetric, CategoricalDetectionMetric)
+            )
         ]
 
         if weights is None:
@@ -545,7 +548,7 @@ class LightningRetrieval(L.LightningModule):
                     metric = metric.to(device=mlc.device, dtype=mlc.dtype)
                     metric.update(mlc, target_s, conditional=cond)
                 prob = pred_s.probability()
-                for metric in porb_detection_metrics:
+                for metric in prob_detection_metrics:
                     metric = metric.to(device=mlc.device, dtype=prob.dtype)
                     metric.update(prob, target_s, conditional=cond)
 
@@ -739,9 +742,18 @@ class LightningRetrieval(L.LightningModule):
             scalar_metrics = [
                 metric for metric in metrics_k if isinstance(metric, ScalarMetric)
             ]
+            prob_detection_metrics = [
+                metric for metric in metrics_k if isinstance(metric, ProbabilisticDetectionMetric)
+            ]
+            cat_detection_metrics = [
+                metric for metric in metrics_k if isinstance(metric, CategoricalDetectionMetric)
+            ]
             # Other metrics
             other_metrics = [
-                metric for metric in metrics_k if not isinstance(metric, ScalarMetric)
+                metric for metric in metrics_k if not isinstance(
+                    metric,
+                    (ScalarMetric, ProbabilisticDetectionMetric, CategoricalDetectionMetric)
+                )
             ]
 
             if isinstance(pred_k, list):
@@ -782,6 +794,12 @@ class LightningRetrieval(L.LightningModule):
                     if hasattr(pred_k_s, "expected_value") and len(scalar_metrics) > 0:
                         pred_k_s = pred_k_s.expected_value()
                         for metric in scalar_metrics:
+                            metric = metric.to(device=pred_k_s.device)
+                            metric.update(pred_k_s, target_k_s, conditional=cond)
+
+                    if isinstance(pred_k_s, DetectionTensor) and len(prob_detection_metrics) > 0:
+                        pred_k_s = pred_k_s.probability()
+                        for metric in prob_detection_metrics:
                             metric = metric.to(device=pred_k_s.device)
                             metric.update(pred_k_s, target_k_s, conditional=cond)
 
