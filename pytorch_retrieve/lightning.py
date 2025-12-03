@@ -791,13 +791,13 @@ class LightningRetrieval(L.LightningModule):
                     tot_loss = tot_loss + loss_k_s * n_samples
                     losses[name] += loss_k_s.item()
 
-                    if hasattr(pred_k_s, "expected_value") and len(scalar_metrics) > 0:
+                    if hasattr(pred_k_s, "expected_value") and 0 < len(scalar_metrics):
                         pred_k_s = pred_k_s.expected_value()
                         for metric in scalar_metrics:
                             metric = metric.to(device=pred_k_s.device)
                             metric.update(pred_k_s, target_k_s, conditional=cond)
 
-                    if isinstance(pred_k_s, DetectionTensor) and len(prob_detection_metrics) > 0:
+                    if isinstance(pred_k_s, DetectionTensor) and 0 < len(prob_detection_metrics):
                         pred_k_s = pred_k_s.probability()
                         for metric in prob_detection_metrics:
                             metric = metric.to(device=pred_k_s.device)
@@ -836,6 +836,12 @@ class LightningRetrieval(L.LightningModule):
                 if hasattr(pred_k, "expected_value") and len(scalar_metrics) > 0:
                     pred_k = pred_k.expected_value()
                     for metric in scalar_metrics:
+                        metric = metric.to(device=pred_k.device)
+                        metric.update(pred_k, target_k, conditional=inputs)
+
+                if isinstance(pred_k, DetectionTensor) and 0 < len(prob_detection_metrics):
+                    pred_k = pred_k.probability()
+                    for metric in prob_detection_metrics:
                         metric = metric.to(device=pred_k.device)
                         metric.update(pred_k, target_k, conditional=inputs)
 
