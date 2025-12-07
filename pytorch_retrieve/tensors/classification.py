@@ -97,9 +97,13 @@ class DetectionTensor(torch.Tensor):
                 "If provided, 'weights' must match the reference tensor 'y_true'."
             )
 
+        # Non-reduced output returns only returns unmasked elements.
         loss = nn.functional.binary_cross_entropy_with_logits(
             self.base.squeeze(), y_true.squeeze(), reduction="none"
         )
+        if isinstance(y_true, MaskedTensor):
+            weights = weights[~y_true.mask]
+
         return (loss * weights).sum() / weights.sum()
 
     def probability(self):
@@ -198,7 +202,10 @@ class ClassificationTensor(torch.Tensor):
                 "If provided, 'weights' must match the reference tensor 'y_true'."
             )
 
+        # Non-reduced output returns only returns unmasked elements.
         loss = nn.functional.cross_entropy(self.base, y_true, reduction="none")
+        if isinstance(y_true, MaskedTensor):
+            weights = weights[~y_true.mask]
         return (loss * weights).sum() / weights.sum()
 
     def probability(self) -> torch.Tensor:

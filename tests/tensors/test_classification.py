@@ -29,6 +29,33 @@ def test_detection_tensor():
     assert (probs >= 0.0).all()
     assert (probs <= 1.0).all()
 
+    # Also test weighted loss.
+    tensor = DetectionTensor(100 * torch.rand(10, 10, 10))
+    mask = torch.rand(10, 10, 10) - 0.5 > 0
+    target = torch.ones_like(tensor.base)
+    target[mask] = 0
+    weights = torch.ones_like(target)
+    weights[mask] = 0.0
+    loss = tensor.loss(target, weights=weights)
+    loss_masked = tensor[~mask].loss(target[~mask])
+    assert torch.isclose(loss, loss_masked)
+
+    # Test weighted and masked loss.
+    tensor = DetectionTensor(100 * torch.rand(10, 10, 10))
+    mask_1 = torch.rand(10, 10, 10) - 0.5 > 0
+    mask_2 = torch.rand(10, 10, 10) - 0.5 > 0
+    mask_cmb = mask_1 + mask_2
+    target = torch.ones_like(tensor.base)
+    target[mask_1] = 0
+    target[mask_1] = 0
+
+    target = MaskedTensor(target, mask=mask_1)
+    weights = torch.ones_like(target)
+    weights[mask_2] = 0.0
+    loss = tensor.loss(target, weights=weights)
+    loss_masked = tensor[~mask_cmb].loss(target[~mask_cmb])
+    assert torch.isclose(loss, loss_masked)
+
 
 def test_classification_tensor():
     """
@@ -49,6 +76,31 @@ def test_classification_tensor():
     probs = tensor.probability()
     assert (probs >= 0.0).all()
     assert (probs <= 1.0).all()
+
+    # Weighted loss.
+    target = torch.ones(10, 30).to(dtype=torch.int64)
+    mask = torch.rand(10, 30) - 0.5 > 0
+    target[mask] = 0
+    weights = torch.ones_like(target)
+    weights[mask] = 0.0
+    loss = tensor.loss(target, weights=weights)
+    loss_masked = tensor.transpose(1, -1)[~mask].loss(target[~mask])
+    assert torch.isclose(loss, loss_masked)
+
+    # Weighted and masked loss.
+    target = torch.ones(10, 30).to(dtype=torch.int64)
+    mask_2 = torch.rand(10, 30) - 0.5 > 0
+    mask_1 = torch.rand(10, 30) - 0.5 > 0
+    mask_cmb = mask_2 + mask_1
+
+    target[mask_cmb] = 0
+    target = MaskedTensor(target, mask=mask_1)
+    weights = torch.ones_like(target)
+    weights[mask_2] = 0.0
+
+    loss = tensor.loss(target, weights=weights)
+    loss_masked = tensor.transpose(1, -1)[~mask_cmb].loss(target[~mask_cmb])
+    assert torch.isclose(loss, loss_masked)
 
 
 def test_any_all():
