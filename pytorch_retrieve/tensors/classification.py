@@ -116,7 +116,7 @@ class DetectionTensor(torch.Tensor):
         """
         Calculate most likely class.
         """
-        return (0.5 < self.probability()).astype(self.dtype)
+        return (0.5 < self.probability()).to(self.dtype)
 
 
 class ClassificationTensor(torch.Tensor):

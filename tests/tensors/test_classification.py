@@ -56,6 +56,9 @@ def test_detection_tensor():
     loss_masked = tensor[~mask_cmb].loss(target[~mask_cmb])
     assert torch.isclose(loss, loss_masked)
 
+    mlc = tensor.most_likely_class()
+    assert ((mlc == 0.0) + (mlc == 1.0)).all()
+
 
 def test_classification_tensor():
     """

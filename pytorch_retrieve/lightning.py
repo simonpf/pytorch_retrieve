@@ -31,6 +31,7 @@ RetrievalInput = Union[torch.Tensor, list, dict]
 LOGGER = logging.getLogger(__name__)
 
 
+
 class LightningRetrieval(L.LightningModule):
     """
     The RetrievalModule implements a LightningModule for the training
@@ -316,8 +317,18 @@ class LightningRetrieval(L.LightningModule):
                         if weights_k_s is not None:
                             weights_k_s = MaskedTensor(weights_k_s, mask=mask)
 
-                    if mask.all() or torch.isnan(pred_k_s).any():
+                    if mask.all():
+                        LOGGER.warning(
+                            "Encountered empty tensor for target %s.",
+                            name
+                        )
                         continue
+
+                    if torch.isnan(pred_k_s).any():
+                        LOGGER.warning(
+                            "Encountered NAN in prediction for target %s.",
+                            name
+                        )
 
                     if weights_k_s is None:
                         n_samples = (~mask).sum()
@@ -610,9 +621,17 @@ class LightningRetrieval(L.LightningModule):
         scalar_metrics = [
             metric for metric in metrics if isinstance(metric, ScalarMetric)
         ]
-        # Other metrics
+        prob_detection_metrics = [
+            metric for metric in metrics if isinstance(metric, ProbabilisticDetectionMetric)
+        ]
+        cat_detection_metrics = [
+            metric for metric in metrics if isinstance(metric, CategoricalDetectionMetric)
+        ]
         other_metrics = [
-            metric for metric in metrics if not isinstance(metric, ScalarMetric)
+            metric for metric in metrics if not isinstance(
+                metric,
+                (ScalarMetric, ProbabilisticDetectionMetric, CategoricalDetectionMetric)
+            )
         ]
 
         if isinstance(pred, list):
@@ -646,10 +665,20 @@ class LightningRetrieval(L.LightningModule):
                 tot_loss = tot_loss + loss_s * n_samples
 
                 if hasattr(pred_s, "expected_value") and len(scalar_metrics) > 0:
-                    pred_s = pred_s.expected_value()
+                    exp = pred_s.expected_value()
                     for metric in scalar_metrics:
-                        metric = metric.to(device=pred_s.device)
-                        metric.update(pred_s, target_s, cond=cond)
+                        metric = metric.to(device=exp.device)
+                        metric.update(exp, target_s, cond=cond)
+
+                if isinstance(pred_s, DetectionTensor):
+                    mlc = pred_s.most_likely_class()
+                    for metric in cat_detection_metrics:
+                        metric = metric.to(device=mlc.device, dtype=mlc.dtype)
+                        metric.update(mlc, target_s, conditional=cond)
+                    prob = pred_s.probability()
+                    for metric in prob_detection_metrics:
+                        metric = metric.to(device=mlc.device, dtype=prob.dtype)
+                        metric.update(prob, target_s, conditional=cond)
 
             if tot_samples > 0:
                 tot_loss = tot_loss / tot_samples
@@ -674,10 +703,20 @@ class LightningRetrieval(L.LightningModule):
                 metric.update(pred, target, conditional=inputs)
 
             if hasattr(pred, "expected_value") and len(scalar_metrics) > 0:
-                pred = pred.expected_value()
+                exp = pred.expected_value()
                 for metric in scalar_metrics:
-                    metric = metric.to(device=pred.device)
-                    metric.update(pred, target, conditional=inputs)
+                    metric = metric.to(device=exp.device)
+                    metric.update(exp, target, conditional=inputs)
+
+            if isinstance(pred, DetectionTensor):
+                mlc = pred.most_likely_class()
+                for metric in cat_detection_metrics:
+                    metric = metric.to(device=mlc.device, dtype=mlc.dtype)
+                    metric.update(mlc, target, conditional=cond)
+                prob = pred.probability()
+                for metric in prob_detection_metrics:
+                    metric = metric.to(device=mlc.device, dtype=prob.dtype)
+                    metric.update(prob, target, conditional=cond)
 
         self.log("Validation loss", tot_loss)
         return tot_loss
@@ -797,11 +836,15 @@ class LightningRetrieval(L.LightningModule):
                             metric = metric.to(device=pred_k_s.device)
                             metric.update(pred_k_s, target_k_s, conditional=cond)
 
-                    if isinstance(pred_k_s, DetectionTensor) and 0 < len(prob_detection_metrics):
-                        pred_k_s = pred_k_s.probability()
+                    if isinstance(pred_k_s, DetectionTensor):
+                        mlc = pred_k_s.most_likely_class()
+                        for metric in cat_detection_metrics:
+                            metric = metric.to(device=mlc.device, dtype=mlc.dtype)
+                            metric.update(mlc, target_k_s, conditional=cond)
+                        prob = pred_k_s.probability()
                         for metric in prob_detection_metrics:
-                            metric = metric.to(device=pred_k_s.device)
-                            metric.update(pred_k_s, target_k_s, conditional=cond)
+                            metric = metric.to(device=mlc.device, dtype=prob.dtype)
+                            metric.update(prob, target_k_s, conditional=cond)
 
                     for metric in other_metrics:
                         metric = metric.to(device=pred_k_s.device)
@@ -839,11 +882,15 @@ class LightningRetrieval(L.LightningModule):
                         metric = metric.to(device=pred_k.device)
                         metric.update(pred_k, target_k, conditional=inputs)
 
-                if isinstance(pred_k, DetectionTensor) and 0 < len(prob_detection_metrics):
-                    pred_k = pred_k.probability()
+                if isinstance(pred_k, DetectionTensor):
+                    mlc = pred_k.most_likely_class()
+                    for metric in cat_detection_metrics:
+                        metric = metric.to(device=mlc.device, dtype=mlc.dtype)
+                        metric.update(mlc, target_k, conditional=inputs)
+                    prob = pred_k.probability()
                     for metric in prob_detection_metrics:
-                        metric = metric.to(device=pred_k.device)
-                        metric.update(pred_k, target_k, conditional=inputs)
+                        metric = metric.to(device=mlc.device, dtype=prob.dtype)
+                        metric.update(prob, target_k, conditional=inputs)
 
         log_dict = {}
         for name, loss in losses.items():

@@ -75,8 +75,8 @@ class BackboneConfig:
         in_channels = get_config_attr("in_channels", int, backbone_config, "backbone", default=160)
         input_size_time = get_config_attr("input_size_time", int, backbone_config, "backbone", default=2)
         in_channels_static = get_config_attr("in_channels_static", int, backbone_config, "backbone", default=8)
-        input_scalers_epsilon = get_config_attr("input_scalers_epsilon", float, backbone_config, "backbone", default=1e-3)
-        static_input_scalers_epsilon = get_config_attr("static_input_scalers_epsilon", float, backbone_config, "backbone", default=1e-3)
+        input_scalers_epsilon = get_config_attr("input_scalers_epsilon", float, backbone_config, "backbone", default=0.0)
+        static_input_scalers_epsilon = get_config_attr("static_input_scalers_epsilon", float, backbone_config, "backbone", default=0.0)
         n_lats_px = get_config_attr("n_lats_px", int, backbone_config, "backbone", default=360)
         n_lons_px = get_config_attr("n_lons_px", int, backbone_config, "backbone", default=576)
         patch_size_px = get_config_attr("patch_size_px", list, backbone_config, "backbone", default=[2, 2])
@@ -269,6 +269,7 @@ class BackboneConfig:
             kwargs.pop("drop_dynamic")
             kwargs.pop("drop_obs")
             kwargs.pop("conditional_merging")
+            from PrithviWxC.model import PrithviWxC
             model = PrithviWxC(**kwargs)
             model.forward = types.MethodType(new_forward, model)
         return model
