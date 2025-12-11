@@ -498,7 +498,7 @@ def mean(inpt, dim=None):
     Test mean of masked tensors.
     """
     inpt_sum = inpt.sum()
-    n_elem = (~inpt.mask).sum()
+    n_elem = torch.maximum((~inpt.mask).sum(), torch.tensor(1.0))
     return inpt_sum / n_elem
 
 
@@ -508,7 +508,7 @@ def tmean(inpt, dim=None):
     Test mean of masked tensors.
     """
     inpt_sum = inpt.sum()
-    n_elem = (~inpt.mask).sum()
+    n_elem = torch.maximum((~inpt.mask).sum(), torch.tensor(1.0))
     return inpt_sum / n_elem
 
 

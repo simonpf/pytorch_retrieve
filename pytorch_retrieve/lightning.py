@@ -322,7 +322,6 @@ class LightningRetrieval(L.LightningModule):
                             "Encountered empty tensor for target %s.",
                             name
                         )
-                        continue
 
                     if torch.isnan(pred_k_s).any():
                         LOGGER.warning(
@@ -542,8 +541,6 @@ class LightningRetrieval(L.LightningModule):
             mask = torch.isnan(target_s)
             if mask.any():
                 target_s = MaskedTensor(target_s, mask=mask)
-            if mask.all():
-                continue
 
             loss += pred_s.loss(target_s, weights=weights_s)
 
