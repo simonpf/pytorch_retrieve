@@ -96,6 +96,7 @@ def load_weights(path: Union[Path, Dict[str, Path]], model: nn.Module) -> None:
             else:
                 ignored.append(key)
 
+
         model.load_state_dict(matched_state, strict=False)
         if len(mismatch) > 0:
             LOGGER.warning(
@@ -110,6 +111,14 @@ def load_weights(path: Union[Path, Dict[str, Path]], model: nn.Module) -> None:
                 "because the current model contains no matching layer: %s",
                 path,
                 ignored,
+            )
+        missing = [key for key in model_state if key not in state]
+        if len(missing) > 0:
+            LOGGER.warning(
+                "The following modules remain uninitialized because they are "
+                " missing from the model loaded from '%s': %s",
+                path,
+                missing,
             )
     else:
         LOGGER.error(
