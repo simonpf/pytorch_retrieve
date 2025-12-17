@@ -53,9 +53,11 @@ def calc_train_loss(
     """
     mask = torch.isnan(target)
     if mask.any():
+        target = torch.nan_to_num(target, 0.0)
         target = MaskedTensor(target, mask=mask)
         if weights is not None:
             weights = MaskedTensor(weights, mask=mask)
+
     if weights is None:
         n_samples = (~mask).sum()
     else:
