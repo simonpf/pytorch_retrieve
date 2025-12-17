@@ -647,3 +647,61 @@ def test_freeze_modules(
 
     for param in model.body.parameters():
         assert not param.requires_grad
+
+
+TRAINING_CONFIG_DEBUG = """
+[stage_1]
+dataset_module = "pytorch_retrieve.data.synthetic"
+training_dataset = "Synthetic1d"
+training_dataset_args = {"n_samples"=256}
+validation_dataset_args = {"n_samples"=128}
+n_epochs = 2
+batch_size = 64
+optimizer = "SGD"
+optimizer_args = {"lr"= 1e-3}
+metrics = ["Bias", "CorrelationCoef"]
+debug = true
+"""
+
+
+@pytest.fixture
+def training_config_file_debug(tmp_path):
+    """
+    Provides a path to a trainign config file with the debug flag set.
+    """
+    output_path = tmp_path / "training.toml"
+    with open(output_path, "w") as output:
+        output.write(TRAINING_CONFIG_DEBUG)
+    return output_path
+
+
+def test_debug_modules(
+        monkeypatch,
+        model_config_file,
+        model_config_file_extra_inputs,
+        training_config_file_debug,
+        tmp_path,
+        cpu_compute_config
+):
+    """
+    Test training with debug flag.
+    """
+    monkeypatch.chdir(tmp_path)
+    model = load_and_compile_model(model_config_file)
+    schedule = parse_training_config(read_config_file(training_config_file_debug))
+    module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+    run_eda(
+        tmp_path / "stats",
+        model.input_config,
+        model.output_config,
+        schedule["stage_1"],
+        compute_config=cpu_compute_config
+    )
+
+    model = load_and_compile_model(model_config_file)
+    module = LightningRetrieval(model, training_schedule=schedule, model_dir=tmp_path)
+    run_training(tmp_path, module, compute_config=cpu_compute_config)
+
+    # Assert that checkpoint files are created.
+    ckpts = list((tmp_path / "checkpoints").glob("*.ckpt"))
+    assert len(ckpts) > 0

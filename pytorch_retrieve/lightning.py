@@ -72,7 +72,7 @@ def calc_train_loss(
                 name
             )
 
-        if torch.isnan(pred_k_s).any():
+        if torch.isnan(pred).any():
             LOGGER.warning(
                 "Encountered NAN in prediction for target %s.",
                 name
@@ -398,8 +398,8 @@ class LightningRetrieval(L.LightningModule):
                     n_samples_k += n_samples
                     loss_k = loss_k + n_samples * loss_k_s
 
-                losses[name] += loss_k.item() / n_samples
-                tot_loss  += loss_k / torch.max(torch.tensor(n_samples), torch.tensor(1.0))
+                losses[name] = loss_k.item() / n_samples_k
+                tot_loss  += loss_k / torch.max(torch.tensor(n_samples_k), torch.tensor(1.0))
 
             else:
                 n_samples, loss_k = calc_train_loss(
