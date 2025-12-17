@@ -6,7 +6,7 @@ pytorch_retrieve.lightning
 import copy
 import logging
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -30,6 +30,118 @@ RetrievalInput = Union[torch.Tensor, list, dict]
 
 LOGGER = logging.getLogger(__name__)
 
+
+def calc_train_loss(
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        weights: Optional[torch.Tensor],
+        debug: Optional[bool] = False,
+        name: Optional[str] = None
+) -> Tuple[int, torch.Tensor]:
+    """
+    Calculate training loss for a single output and target.
+
+    Args:
+        pred: The prediction
+        target: The target..
+        weights: Optional weights tensor to weigh the output.
+        bool: Set to True to print warnings when predictions contain NAN or target tensors are empty.
+        name: Optional output name to simplify tracking the warnings.
+
+    Return:
+        A tuple ``(n_samples, loss)`` containing the number of samples and the loss tensor for this output.
+    """
+    mask = torch.isnan(target)
+    if mask.any():
+        target = MaskedTensor(target, mask=mask)
+        if weights is not None:
+            weights = MaskedTensor(weights, mask=mask)
+    if weights is None:
+        n_samples = (~mask).sum()
+    else:
+        n_samples = weights.sum()
+
+    loss = pred.loss(target, weights=weights)
+
+    if debug:
+        if name is None:
+            name = ""
+        if mask.all():
+            LOGGER.warning(
+                "Encountered empty tensor for target %s.",
+                name
+            )
+
+        if torch.isnan(pred_k_s).any():
+            LOGGER.warning(
+                "Encountered NAN in prediction for target %s.",
+                name
+            )
+    return n_samples, loss
+
+
+
+
+
+def calc_val_loss(
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        weights: Optional[torch.Tensor],
+        cond: Dict[str, torch.Tensor],
+        scalar_metrics: List[ScalarMetric],
+        cat_detection_metrics: List[CategoricalDetectionMetric],
+        prob_detection_metrics: List[ProbabilisticDetectionMetric],
+        other_metrics: List[Metric]
+) -> Tuple[int, torch.Tensor]:
+    """
+    Calculate validation loss and log metrics for a single output and target.
+
+    Args:
+        pred: The prediction
+        target: The target..
+        weights: Optional weights tensor to weigh the output.
+        cond: Optional dictionary containing the inputs to condition the validation on.
+        scalar_metrics: List containing the scalar metrics to track.
+        cat_detection_metrics: List containing the categorical detection metrics to track.
+        prob_detection_metrics: List containing the probabilistic detection metrics to track.
+        other_metrics: List containing the other metrics to track.
+
+    Return:
+        A tuple ``(n_samples, loss)`` containing the number of samples and the loss tensor for this output.
+    """
+    mask = torch.isnan(target)
+    if mask.any():
+        target = MaskedTensor(target, mask=mask)
+        if weights is not None:
+            weights = MaskedTensor(weights, mask=mask)
+    if weights is None:
+        n_samples = (~mask).sum()
+    else:
+        n_samples = weights.sum()
+
+    loss = pred.loss(target, weights=weights)
+
+    if hasattr(pred, "expected_value") and 0 < len(scalar_metrics):
+        pred = pred.expected_value()
+        for metric in scalar_metrics:
+            metric = metric.to(device=pred.device)
+            metric.update(pred, target, conditional=cond)
+
+    if isinstance(pred, DetectionTensor):
+        mlc = pred.most_likely_class()
+        for metric in cat_detection_metrics:
+            metric = metric.to(device=mlc.device, dtype=mlc.dtype)
+            metric.update(mlc, target, conditional=cond)
+        prob = pred.probability()
+        for metric in prob_detection_metrics:
+            metric = metric.to(device=mlc.device, dtype=prob.dtype)
+            metric.update(prob, target, conditional=cond)
+
+    for metric in other_metrics:
+        metric = metric.to(device=pred.device)
+        metric.update(pred, target, conditional=cond)
+
+    return n_samples, loss
 
 
 class LightningRetrieval(L.LightningModule):
@@ -154,6 +266,7 @@ class LightningRetrieval(L.LightningModule):
             return False
         return self.current_training_config.debug
 
+
     def training_step_single_pred(
         self, pred: torch.Tensor, target: Union[torch.Tensor, dict]
     ) -> torch.Tensor:
@@ -183,44 +296,7 @@ class LightningRetrieval(L.LightningModule):
         else:
             name = None
 
-        if isinstance(target, tuple):
-            target, weights = target
-        else:
-            weights = None
-
-        if isinstance(pred, list):
-            if not isinstance(target, list):
-                raise RuntimeError(
-                    "Model predicts a sequence but the reference data is not."
-                )
-            loss = torch.tensor(0.0, device=self.device, dtype=self.dtype)
-
-            if weights is None:
-                weights = [None] * len(target)
-
-            for pred_s, target_s, weights_s in zip(pred, target, weights):
-                mask = torch.isnan(target_s)
-                if mask.any():
-                    target_s = torch.nan_to_num(target_s, 0.0)
-                    target_s = MaskedTensor(target_s, mask=mask)
-                    if weights_s is not None:
-                        weights_s = MaskedTensor(weights_s, mask=mask)
-                loss += pred_s.loss(target_s, weights=weights_s)
-
-            if name is not None:
-                self.log("Training loss", loss, prog_bar=True)
-            else:
-                self.log(f"Training loss ({name})", loss, prog_bar=True)
-            return loss
-
-        mask = torch.isnan(target)
-        if mask.any():
-            target = torch.nan_to_num(target, 0.0)
-            target = MaskedTensor(target, mask=mask)
-            if weights is not None:
-                weights = MaskedTensor(weights, mask=mask)
-
-        loss = pred.loss(target, weights=weights)
+        n_samples, loss = calc_train_loss(pred, target, weights, debug=self.debug)
 
         if name is not None:
             self.log("Training loss", loss)
@@ -228,6 +304,7 @@ class LightningRetrieval(L.LightningModule):
             self.log(f"Training loss ({name})", loss)
 
         return loss
+
 
     def training_step(self, batch: tuple, batch_idx: int):
         """
@@ -287,8 +364,7 @@ class LightningRetrieval(L.LightningModule):
             device = inputs.device
             dtype = inputs.dtype
 
-        tot_loss = torch.tensor(0.0, requires_grad=True, device=device, dtype=dtype)
-        tot_samples = 0
+        tot_loss = 0.0
 
         for name in pred:
             key = name.split("::")[-1]
@@ -306,74 +382,43 @@ class LightningRetrieval(L.LightningModule):
                 if weights_k is None:
                     weights_k = [None] * len(target_k)
 
-                losses[key] = 0.0
+                n_samples_k = 0
+                loss_k = 0.0
+
                 for pred_k_s, target_k_s, weights_k_s in zip(
                     pred_k, target_k, weights_k
                 ):
-                    mask = torch.isnan(target_k_s)
-                    if mask.any():
-                        target_k_s = torch.nan_to_num(target_k_s, 0.0)
-                        target_k_s = MaskedTensor(target_k_s, mask=mask)
-                        if weights_k_s is not None:
-                            weights_k_s = MaskedTensor(weights_k_s, mask=mask)
+                    n_samples, loss_k_s = calc_train_loss(
+                        pred_k_s,
+                        target_k_s,
+                        weights_k_s,
+                        debug=self.debug,
+                        name=name
+                    )
+                    n_samples_k += n_samples
+                    loss_k = loss_k + n_samples * loss_k_s
 
-                    if mask.all():
-                        LOGGER.warning(
-                            "Encountered empty tensor for target %s.",
-                            name
-                        )
-
-                    if torch.isnan(pred_k_s).any():
-                        LOGGER.warning(
-                            "Encountered NAN in prediction for target %s.",
-                            name
-                        )
-
-                    if weights_k_s is None:
-                        n_samples = (~mask).sum()
-                    else:
-                        n_samples = weights_k_s.sum()
-
-                    if n_samples == 0:
-                        pred_k_s = 0.0 * pred_k_s
-                        target_k_s = 0.0 * target_k_s
-
-                    tot_samples += n_samples
-                    loss_k_s = pred_k_s.loss(target_k_s, weights=weights_k_s)
-                    tot_loss = tot_loss + n_samples * loss_k_s
-                    losses[name] += loss_k_s.item()
+                losses[name] += loss_k.item() / n_samples
+                tot_loss  += loss_k / torch.max(torch.tensor(n_samples), torch.tensor(1.0))
 
             else:
-                mask = torch.isnan(target_k)
-                if mask.any():
-                    target_k = torch.nan_to_num(target_k, 0.0)
-                    target_k = MaskedTensor(target_k, mask=mask)
-                    if weights_k is not None:
-                        weights_k = MaskedTensor(weights_k, mask=mask)
-
-                if weights_k is None:
-                    n_samples = (~mask).sum()
-                else:
-                    n_samples = weights_k.sum()
-
-                loss_k = pred[name].loss(target_k, weights=weights_k)
-                tot_loss = tot_loss + n_samples * loss_k
-                tot_samples += n_samples
+                n_samples, loss_k = calc_train_loss(
+                    pred_k,
+                    target_k,
+                    weights_k,
+                    debug=self.debug,
+                    name=name
+                )
+                tot_loss += loss_k
                 losses[name] = loss_k.item()
-                pred_k_s = pred[name]
-
-        if tot_samples > 0:
-            tot_loss = tot_loss / tot_samples
-        else:
-            tot_loss = tot_loss + 0.0 * pred_k_s.sum()
 
         self.track_mean_loss(inputs, pred, target, tot_loss)
 
         log_dict = {}
         for name, loss in losses.items():
             log_dict[f"Training loss ({name})"] = loss
-        self.log_dict(log_dict)
-        self.log("Training loss", tot_loss)
+        self.log_dict(log_dict, sync_dist=True)
+        self.log("Training loss", tot_loss, sync_dist=True)
         losses["loss"] = tot_loss
 
         return losses
@@ -528,7 +573,8 @@ class LightningRetrieval(L.LightningModule):
         if weights is None:
             weights = [None] * len(target)
 
-        loss = 0.0
+        tot_loss = 0.0
+        tot_samples = 0
 
         for step, (pred_s, target_s, weights_s) in enumerate(zip(pred, target, weights)):
 
@@ -538,34 +584,23 @@ class LightningRetrieval(L.LightningModule):
             else:
                 cond = inputs | {"step": step}
 
-            mask = torch.isnan(target_s)
-            if mask.any():
-                target_s = MaskedTensor(target_s, mask=mask)
+            n_samples, loss = calc_val_loss(
+                pred_s,
+                target_s,
+                weights_s,
+                cond,
+                scalar_metrics,
+                cat_detection_metrics,
+                prob_detection_metrics,
+                other_metrics
+            )
+            tot_loss += n_samples * loss
+            tot_samples += n_samples
 
-            loss += pred_s.loss(target_s, weights=weights_s)
-
-            if hasattr(pred_s, "expected_value"):
-                scalar_pred = pred_s.expected_value()
-                for metric in scalar_metrics:
-                    metric = metric.to(device=scalar_pred.device)
-                    metric.update(scalar_pred, target_s, conditional=cond)
-
-            if isinstance(pred_s, DetectionTensor):
-                mlc = pred_s.most_likely_class()
-                for metric in cat_detection_metrics:
-                    metric = metric.to(device=mlc.device, dtype=mlc.dtype)
-                    metric.update(mlc, target_s, conditional=cond)
-                prob = pred_s.probability()
-                for metric in prob_detection_metrics:
-                    metric = metric.to(device=mlc.device, dtype=prob.dtype)
-                    metric.update(prob, target_s, conditional=cond)
-
-        for metric in other_metrics:
-            metric = metric.to(device=pred_s.device)
-            metric.update(pred, target, conditional=cond)
-
-        self.log("Validation loss", loss)
+        tot_loss = tot_loss / torch.maximum(torch.tensor(n_samples), 1.0)
+        self.log("Validation loss", tot_loss)
         return loss
+
 
     def validation_step_single_pred(
             self,
@@ -613,7 +648,6 @@ class LightningRetrieval(L.LightningModule):
         if mask.any():
             target = MaskedTensor(target, mask=mask)
 
-        loss = pred.loss(target, weights=weights)
 
         scalar_metrics = [
             metric for metric in metrics if isinstance(metric, ScalarMetric)
@@ -631,91 +665,17 @@ class LightningRetrieval(L.LightningModule):
             )
         ]
 
-        if isinstance(pred, list):
-            tot_samples = 0
-            tot_loss = torch.tensor(0.0, device=self.device, dtype=self.dtype)
-
-            for step, (pred_s, target_s) in enumerate(zip(pred, target)):
-
-                if inputs is None:
-                    cond = {"step": step * torch.ones_like(pred_s)}
-                else:
-                    cond = inputs | {"step": step * torch.ones_like(pred_s)}
-
-                mask = torch.isnan(target_s)
-                if mask.any():
-                    target_s = MaskedTensor(target_s, mask=mask)
-                if mask.all():
-                    continue
-
-                if weights is  None:
-                    n_samples = (~mask).sum()
-                else:
-                    n_samples = weights.sum()
-
-                if n_samples == 0:
-                    pred_s = 0.0 * pred_s
-                    target_s = 0.0 * target_s
-                tot_samples += n_samples
-
-                loss_s = pred_s.loss(target_s)
-                tot_loss = tot_loss + loss_s * n_samples
-
-                if hasattr(pred_s, "expected_value") and len(scalar_metrics) > 0:
-                    exp = pred_s.expected_value()
-                    for metric in scalar_metrics:
-                        metric = metric.to(device=exp.device)
-                        metric.update(exp, target_s, cond=cond)
-
-                if isinstance(pred_s, DetectionTensor):
-                    mlc = pred_s.most_likely_class()
-                    for metric in cat_detection_metrics:
-                        metric = metric.to(device=mlc.device, dtype=mlc.dtype)
-                        metric.update(mlc, target_s, conditional=cond)
-                    prob = pred_s.probability()
-                    for metric in prob_detection_metrics:
-                        metric = metric.to(device=mlc.device, dtype=prob.dtype)
-                        metric.update(prob, target_s, conditional=cond)
-
-            if tot_samples > 0:
-                tot_loss = tot_loss / tot_samples
-
-            for metric in other_metrics:
-                metric = metric.to(device=pred_s.device)
-                metric.update(pred, target, cond=cond)
-
-        else:
-
-            mask = torch.isnan(target)
-            if mask.any():
-                target = MaskedTensor(target, mask=mask)
-                n_samples = (~mask).sum()
-            else:
-                n_samples = target.numel()
-
-            tot_loss = pred.loss(target)
-
-            for metric in other_metrics:
-                metric = metric.to(device=pred.device)
-                metric.update(pred, target, conditional=inputs)
-
-            if hasattr(pred, "expected_value") and len(scalar_metrics) > 0:
-                exp = pred.expected_value()
-                for metric in scalar_metrics:
-                    metric = metric.to(device=exp.device)
-                    metric.update(exp, target, conditional=inputs)
-
-            if isinstance(pred, DetectionTensor):
-                mlc = pred.most_likely_class()
-                for metric in cat_detection_metrics:
-                    metric = metric.to(device=mlc.device, dtype=mlc.dtype)
-                    metric.update(mlc, target, conditional=cond)
-                prob = pred.probability()
-                for metric in prob_detection_metrics:
-                    metric = metric.to(device=mlc.device, dtype=prob.dtype)
-                    metric.update(prob, target, conditional=cond)
-
-        self.log("Validation loss", tot_loss)
+        n_samples, tot_loss = calc_val_loss(
+            pred,
+            target,
+            weights,
+            inputs,
+            scalar_metrics,
+            cat_detection_metrics,
+            prob_detection_metrics,
+            other_metrics
+        )
+        self.log("Validation loss", tot_loss, sync_dist=True)
         return tot_loss
 
     def validation_step(self, batch: tuple, batch_idx: int, dataloader_idx=0):
@@ -737,9 +697,12 @@ class LightningRetrieval(L.LightningModule):
         inputs, target = batch
         pred = self.model(inputs)
 
+        # If prediction is not a dict, it is a list of tensors, or a single tensor.
         if not isinstance(pred, dict):
+            # Prediction is a sequence.
             if isinstance(pred, list):
                 return self.validation_step_single_sequence(pred, target, inputs=inputs)
+            # Prediction is a single tensor.
             else:
                 return self.validation_step_single_pred(pred, target, inputs=inputs)
 
@@ -798,102 +761,46 @@ class LightningRetrieval(L.LightningModule):
                     weights_k = [None] * len(target_k)
 
                 tot_samples = 0
+                tot_loss_k = 0.0
 
                 for step, (pred_k_s, target_k_s, weights_k_s) in enumerate(zip(
                     pred_k, target_k, weights_k
                 )):
-
                     cond = inputs | {"step": step * torch.ones_like(pred_k_s)}
-
-                    mask = torch.isnan(target_k_s)
-                    if mask.any():
-                        target_k_s = MaskedTensor(target_k_s, mask=mask)
-                        if weights_k_s is not None:
-                            weights_k_s = MaskedTensor(weights_k_s, mask=mask)
-                    if mask.all():
-                        continue
-
-                    if weights_k_s is None:
-                        n_samples = (~mask).sum()
-                    else:
-                        n_samples = weights_k_s.sum()
-
-                    if n_samples == 0:
-                        pred_k_s = 0.0 * pred_k_s
-                        target_k_s = 0.0 * target_k_s
+                    n_samples, loss_k_s = calc_val_loss(
+                        pred_k_s,
+                        target_k_s,
+                        weights_k_s,
+                        cond,
+                        scalar_metrics,
+                        cat_detection_metrics,
+                        prob_detection_metrics,
+                        other_metrics
+                    )
                     tot_samples += n_samples
-
-                    loss_k_s = pred_k_s.loss(target_k_s, weights=weights_k_s)
-                    tot_loss = tot_loss + loss_k_s * n_samples
+                    tot_loss_k = tot_loss + loss_k_s * n_samples
                     losses[name] += loss_k_s.item()
-
-                    if hasattr(pred_k_s, "expected_value") and 0 < len(scalar_metrics):
-                        pred_k_s = pred_k_s.expected_value()
-                        for metric in scalar_metrics:
-                            metric = metric.to(device=pred_k_s.device)
-                            metric.update(pred_k_s, target_k_s, conditional=cond)
-
-                    if isinstance(pred_k_s, DetectionTensor):
-                        mlc = pred_k_s.most_likely_class()
-                        for metric in cat_detection_metrics:
-                            metric = metric.to(device=mlc.device, dtype=mlc.dtype)
-                            metric.update(mlc, target_k_s, conditional=cond)
-                        prob = pred_k_s.probability()
-                        for metric in prob_detection_metrics:
-                            metric = metric.to(device=mlc.device, dtype=prob.dtype)
-                            metric.update(prob, target_k_s, conditional=cond)
-
-                    for metric in other_metrics:
-                        metric = metric.to(device=pred_k_s.device)
-                        metric.update(pred_k, target_k, conditional=cond)
-
-                if tot_samples > 0:
-                    tot_loss = tot_loss / tot_samples
-
+                tot_loss += tot_loss_k / torch.max(torch.tensor(tot_samples), torch.tensor(1.0))
             else:
-                mask = torch.isnan(target_k)
-                if mask.any():
-                    target_k = MaskedTensor(target_k, mask=mask)
-                    if weights_k is not None:
-                        weights_k = MaskedTensor(weights_k, mask=mask)
-                        n_samples = weights_k.sum()
-                    else:
-                        n_samples = (~mask).sum()
-                else:
-                    if weights_k is None:
-                        n_samples = target_k.numel()
-                    else:
-                        n_samples = weights_k.sum()
 
-                loss_k = pred_k.loss(target_k, weights=weights_k)
-                tot_loss += loss_k if n_samples > 0 else 0
-                losses[name] += loss_k.item() if n_samples > 0 else 0
-
-                for metric in other_metrics:
-                    metric = metric.to(device=pred_k.device)
-                    metric.update(pred_k, target_k, conditional=inputs)
-
-                if hasattr(pred_k, "expected_value") and len(scalar_metrics) > 0:
-                    pred_k = pred_k.expected_value()
-                    for metric in scalar_metrics:
-                        metric = metric.to(device=pred_k.device)
-                        metric.update(pred_k, target_k, conditional=inputs)
-
-                if isinstance(pred_k, DetectionTensor):
-                    mlc = pred_k.most_likely_class()
-                    for metric in cat_detection_metrics:
-                        metric = metric.to(device=mlc.device, dtype=mlc.dtype)
-                        metric.update(mlc, target_k, conditional=inputs)
-                    prob = pred_k.probability()
-                    for metric in prob_detection_metrics:
-                        metric = metric.to(device=mlc.device, dtype=prob.dtype)
-                        metric.update(prob, target_k, conditional=inputs)
+                _, loss_k = calc_val_loss(
+                    pred_k,
+                    target_k,
+                    weights_k,
+                    inputs,
+                    scalar_metrics,
+                    cat_detection_metrics,
+                    prob_detection_metrics,
+                    other_metrics
+                )
+                tot_loss = tot_loss + loss_k
+                losses[name] += loss_k.item()
 
         log_dict = {}
         for name, loss in losses.items():
             log_dict[f"Validation loss ({name})"] = loss
-        self.log_dict(log_dict)
-        self.log("Validation loss", tot_loss)
+        self.log_dict(log_dict, sync_dist=True)
+        self.log("Validation loss", tot_loss, sync_dist=True)
 
     def on_validation_epoch_end(self):
         """
