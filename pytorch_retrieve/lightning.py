@@ -52,11 +52,10 @@ def calc_train_loss(
         A tuple ``(n_samples, loss)`` containing the number of samples and the loss tensor for this output.
     """
     mask = torch.isnan(target)
-    if mask.any():
-        target = torch.nan_to_num(target, 0.0)
-        target = MaskedTensor(target, mask=mask)
-        if weights is not None:
-            weights = MaskedTensor(weights, mask=mask)
+    target = torch.nan_to_num(target, 0.0)
+    target = MaskedTensor(target, mask=mask)
+    if weights is not None:
+        weights = MaskedTensor(weights, mask=mask)
 
     if weights is None:
         n_samples = (~mask).sum()
@@ -80,9 +79,6 @@ def calc_train_loss(
                 name
             )
     return n_samples, loss
-
-
-
 
 
 def calc_val_loss(
@@ -112,14 +108,12 @@ def calc_val_loss(
         A tuple ``(n_samples, loss)`` containing the number of samples and the loss tensor for this output.
     """
     mask = torch.isnan(target)
-    if mask.any():
-        target = MaskedTensor(target, mask=mask)
-        if weights is not None:
-            weights = MaskedTensor(weights, mask=mask)
-    if weights is None:
-        n_samples = (~mask).sum()
-    else:
+    target = MaskedTensor(target, mask=mask)
+    if weights is not None:
+        weights = MaskedTensor(weights, mask=mask)
         n_samples = weights.sum()
+    else:
+        n_samples = (~mask).sum()
 
     loss = pred.loss(target, weights=weights)
 
@@ -803,7 +797,7 @@ class LightningRetrieval(L.LightningModule):
                 )
                 tot_loss_k = n_samples_k * loss_k
 
-            losses[name] += loss_k.item()
+            losses[name] += tot_loss_k.item() / n_samples_k
             tot_loss += tot_loss_k
             tot_samples += n_samples_k
 
