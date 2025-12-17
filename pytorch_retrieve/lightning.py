@@ -365,6 +365,7 @@ class LightningRetrieval(L.LightningModule):
             dtype = inputs.dtype
 
         tot_loss = 0.0
+        tot_samples = 0
 
         for name in pred:
             key = name.split("::")[-1]
@@ -396,10 +397,11 @@ class LightningRetrieval(L.LightningModule):
                         name=name
                     )
                     n_samples_k += n_samples
-                    loss_k = loss_k + n_samples * loss_k_s
+                    loss_k += n_samples * loss_k_s
 
                 losses[name] = loss_k.item() / n_samples_k
-                tot_loss  += loss_k / torch.max(torch.tensor(n_samples_k), torch.tensor(1.0))
+                tot_samples += n_samples_k
+                tot_loss  += loss_k
 
             else:
                 n_samples, loss_k = calc_train_loss(
@@ -409,8 +411,11 @@ class LightningRetrieval(L.LightningModule):
                     debug=self.debug,
                     name=name
                 )
-                tot_loss += loss_k
+                tot_loss += loss_k * n_samples
+                tot_samples += n_samples
                 losses[name] = loss_k.item()
+
+        tot_loss = tot_loss / torch.maximum(torch.tensor(tot_samples), torch.tensor(1.0))
 
         self.track_mean_loss(inputs, pred, target, tot_loss)
 
@@ -597,7 +602,7 @@ class LightningRetrieval(L.LightningModule):
             tot_loss += n_samples * loss
             tot_samples += n_samples
 
-        tot_loss = tot_loss / torch.maximum(torch.tensor(n_samples), 1.0)
+        tot_loss = tot_loss / torch.maximum(torch.tensor(tot_samples), 1.0)
         self.log("Validation loss", tot_loss)
         return loss
 
@@ -728,7 +733,10 @@ class LightningRetrieval(L.LightningModule):
         metrics = self.metrics
 
         losses = {}
+
         tot_loss = 0.0
+        tot_samples = 0
+
         for name, pred_k in pred.items():
             key = name.split("::")[-1]
             target_k = target[key]
@@ -760,7 +768,7 @@ class LightningRetrieval(L.LightningModule):
                 if weights_k is None:
                     weights_k = [None] * len(target_k)
 
-                tot_samples = 0
+                tot_samples_k = 0
                 tot_loss_k = 0.0
 
                 for step, (pred_k_s, target_k_s, weights_k_s) in enumerate(zip(
@@ -777,13 +785,11 @@ class LightningRetrieval(L.LightningModule):
                         prob_detection_metrics,
                         other_metrics
                     )
-                    tot_samples += n_samples
-                    tot_loss_k = tot_loss + loss_k_s * n_samples
-                    losses[name] += loss_k_s.item()
-                tot_loss += tot_loss_k / torch.max(torch.tensor(tot_samples), torch.tensor(1.0))
-            else:
+                    tot_samples_k += n_samples
+                    tot_loss_k += loss_k_s * n_samples
 
-                _, loss_k = calc_val_loss(
+            else:
+                n_samples_k, loss_k = calc_val_loss(
                     pred_k,
                     target_k,
                     weights_k,
@@ -793,8 +799,13 @@ class LightningRetrieval(L.LightningModule):
                     prob_detection_metrics,
                     other_metrics
                 )
-                tot_loss = tot_loss + loss_k
-                losses[name] += loss_k.item()
+                tot_loss_k = n_samples_k * loss_k
+
+            losses[name] += loss_k.item()
+            tot_loss += tot_loss_k
+            tot_samples += n_samples_k
+
+        tot_loss = tot_loss / torch.maximum(torch.tensor(tot_samples), torch.tensor(1.0))
 
         log_dict = {}
         for name, loss in losses.items():
