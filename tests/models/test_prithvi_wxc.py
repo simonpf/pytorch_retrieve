@@ -353,6 +353,7 @@ def test_prithvi_wxc_regional():
     pred = mdl(batch)
 
 
+@pytest.mark.skipif(not HAS_PRITHVI, reason="Needs PrithviWxC package installed.")
 def test_lead_time_drop_path():
     """
     Test lead-time drop path.
