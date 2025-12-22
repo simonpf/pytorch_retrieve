@@ -639,6 +639,7 @@ class InferenceConfig:
     batch_size: int = 8
     tile_size: Optional[Tuple[int, int]] = None
     spatial_overlap: Optional[Tuple[int, int]] = None
+    wrap_columns: bool = False
     temporal_overlap: Optional[int] = None
     input_loader: Optional[str] = None
     input_loader_args: Optional[Dict[str, Any]] = None
@@ -676,6 +677,9 @@ class InferenceConfig:
 
         spatial_overlap = get_config_attr(
             "spatial_overlap", None, config_dict, "inference config", default=None
+        )
+        wrap_columns = get_config_attr(
+            "wrap_columns", None, config_dict, "inference config", default=None
         )
 
         temporal_overlap = get_config_attr(
@@ -721,6 +725,7 @@ class InferenceConfig:
             batch_size=batch_size,
             tile_size=tile_size,
             spatial_overlap=spatial_overlap,
+            wrap_columns=wrap_columns,
             temporal_overlap=temporal_overlap,
             input_loader=input_loader,
             input_loader_args=input_loader_args,

@@ -247,6 +247,7 @@ batch_size = 12
 tile_size = [32, 32]
 spatial_overlap = 8
 temporal_overlap = 0
+wrap_columns = true
 
 [retrieval_output.surface_precip]
 surface_precip_quantiles = {retrieval_output="Full"}
@@ -273,6 +274,7 @@ def test_inference_config():
     assert inference_config.tile_size == (32, 32)
     assert inference_config.spatial_overlap == 8
     assert inference_config.temporal_overlap == 0
+    assert inference_config.wrap_columns == True
 
     qty = inference_config.retrieval_output["surface_precip"]["surface_precip_mean"]
     assert qty.retrieval_output == "ExpectedValue"
