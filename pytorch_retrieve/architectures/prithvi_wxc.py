@@ -269,7 +269,6 @@ class BackboneConfig:
             kwargs.pop("drop_dynamic")
             kwargs.pop("drop_obs")
             kwargs.pop("conditional_merging")
-            from PrithviWxC.model import PrithviWxC
             model = PrithviWxC(**kwargs)
             model.forward = types.MethodType(new_forward, model)
         return model
