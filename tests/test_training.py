@@ -5,6 +5,7 @@ import os
 
 import pytest
 import torch
+from torch import nn
 import toml
 from typing import List
 
@@ -15,7 +16,8 @@ from pytorch_retrieve.training import (
     TrainingConfig,
     parse_training_config,
     run_training,
-    freeze_modules
+    freeze_modules,
+    load_weights
 )
 from pytorch_retrieve.architectures import load_and_compile_model
 from pytorch_retrieve.lightning import LightningRetrieval
@@ -481,6 +483,21 @@ def test_load_weights_non_strict(
     schedule["warm_up"].load_weights = str(ckpts[0])
     module = LightningRetrieval(model_new, training_schedule=schedule, model_dir=tmp_path)
     run_training(tmp_path, module, compute_config=cpu_compute_config)
+
+
+def test_load_weights_partial(
+        tmp_path,
+):
+    """
+    Test that loading of weights works even for slightly difference architectures.
+    """
+    mod_1 = nn.Linear(10, 30)
+    mod_2 = nn.Linear(5, 15)
+    assert (mod_1.weight[:15, :5] != mod_2.weight[:15, :5]).any()
+
+    torch.save({"state_dict": mod_1.state_dict()}, tmp_path / "module.pt")
+    load_weights(tmp_path / "module.pt", mod_2)
+    assert (mod_1.weight[:15, :5] == mod_2.weight[:15, :5]).all()
 
 
 def test_freeze(

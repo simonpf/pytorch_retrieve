@@ -83,27 +83,42 @@ def load_weights(path: Union[Path, Dict[str, Path]], model: nn.Module) -> None:
         model_state = model.state_dict()
         matched_state = {}
         mismatch = []
+        partial = []
         ignored = []
         for key, tensor in state.items():
             if key in model_state:
+                target = model_state[key]
                 if not isinstance(tensor, torch.Tensor):
                     continue
 
-                if model_state[key].shape == tensor.shape:
+                if target.shape == tensor.shape:
                     matched_state[key] = tensor
+                elif target.ndim == tensor.ndim:
+                    target = target.clone()
+                    min_shape = [min(*shapes) for shapes in zip(target.shape, tensor.shape)]
+                    slcs = tuple([slice(0, ext) for ext in min_shape])
+                    target[slcs] = tensor[slcs]
+                    matched_state[key] = target
+                    partial.append(key)
                 else:
                     mismatch.append(key)
             else:
                 ignored.append(key)
-
-
         model.load_state_dict(matched_state, strict=False)
+
         if len(mismatch) > 0:
             LOGGER.warning(
                 "The following layers loaded from the model at %s were discarded "
                 "due to shape mis-match: %s",
                 path,
                 mismatch,
+            )
+        if len(partial) > 0:
+            LOGGER.warning(
+                "The following layers loaded from the model at %s were only partially "
+                "initialized due to shape mis-match: %s",
+                path,
+                partial,
             )
         if len(ignored) > 0:
             LOGGER.warning(
