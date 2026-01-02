@@ -337,13 +337,7 @@ class LightningRetrieval(L.LightningModule):
             pred = next(iter(pred.values()))
             loss = self.training_step_single_pred(pred, target)
             self.track_mean_loss(inputs, pred, target, loss)
-
             return loss
-
-            raise RuntimeError(
-                "If the model output is a 'dict' the reference data must also "
-                "be a 'dict'."
-            )
 
         losses = {}
 
@@ -365,8 +359,7 @@ class LightningRetrieval(L.LightningModule):
 
         for name in pred:
             key = name.split("::")[-1]
-
-            pred_k = pred[key]
+            pred_k = pred[name]
             target_k = target[key]
             weights_k = target.get(key + "_weights", None)
 
@@ -644,11 +637,6 @@ class LightningRetrieval(L.LightningModule):
                 "the model provided only a single, unnamed output."
             )
         metrics = next(iter(metrics.values()))
-
-        mask = torch.isnan(target)
-        if mask.any():
-            target = MaskedTensor(target, mask=mask)
-
 
         scalar_metrics = [
             metric for metric in metrics if isinstance(metric, ScalarMetric)

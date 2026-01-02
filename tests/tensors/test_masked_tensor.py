@@ -553,3 +553,13 @@ def test_transformation():
 
     tnsr_new = tnsr_new + tnsr_new
     assert tnsr_new.__transformation__ is not None
+
+
+def test_getitem():
+    """
+    Ensur that transformations are passed on when new tensors are created.
+    """
+    mask = torch.rand(4, 32, 64) - 0.5 > 0
+    tnsr = MaskedTensor(torch.rand(4, 32, 64), mask=mask, transformation=SquareRoot)
+    sel = tnsr[~mask]
+    assert torch.isclose(sel, tnsr.base[~tnsr.mask]).all()
