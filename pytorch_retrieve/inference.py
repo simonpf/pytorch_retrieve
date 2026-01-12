@@ -21,7 +21,6 @@ import numpy as np
 import torch
 import toml
 from torch import nn
-from rich.progress import Progress
 import xarray as xr
 
 from pytorch_retrieve.tensors import (
@@ -30,6 +29,7 @@ from pytorch_retrieve.tensors import (
     QuantileTensor,
 )
 import pytorch_retrieve
+from pytorch_retrieve.logging import MaybeProgress
 from pytorch_retrieve.tiling import Tiler
 from pytorch_retrieve.architectures import RetrievalModel, load_model
 from pytorch_retrieve.config import get_config_attr, OutputConfig, InferenceConfig
@@ -594,6 +594,7 @@ class InferenceRunner:
         input_loader: Any,
         inference_config: InferenceConfig,
         n_input_loaders: int = 1,
+        progress: bool = True
     ):
         self.model = model
         self.input_loader = input_loader
@@ -602,6 +603,7 @@ class InferenceRunner:
         self.input_queue = mp.JoinableQueue(n_input_loaders)
         self.output_queue = mp.Queue(4)
         self.result_queue = mp.Queue()
+        self.progress = progress
 
     @contextmanager
     def start_workers(self, n_input_loaders: int, output_path: Optional[Path]) -> None:
@@ -723,7 +725,7 @@ class InferenceRunner:
             exclude_from_tiling = []
 
         with self.start_workers(self.n_input_loaders, output_path):
-            with Progress() as progress:
+            with MaybeProgress(show=self.progress) as progress:
                 task = progress.add_task(
                     "Processing input:", total=len(self.input_loader)
                 )
@@ -848,6 +850,8 @@ class SequentialInferenceRunner:
         model: nn.Module,
         input_loader: Any,
         inference_config: InferenceConfig,
+        progress: bool = False,
+        robust: bool = True
     ):
         """
         Args:
@@ -858,7 +862,9 @@ class SequentialInferenceRunner:
         self.model = model
         self.input_loader = input_loader
         self.inference_config = inference_config
-        self.tile_callback = None
+        self.tile_callback = None,
+        self.progress = progress
+        self.robust = robust
 
     def process_simple(
             self,
@@ -899,6 +905,8 @@ class SequentialInferenceRunner:
                 try:
                     results = input_loader.finalize_results(results, *input_args, output_path=output_path)
                 except Exception as exc:
+                    if not self.robust:
+                        raise exc
                     LOGGER.exception(
                         "Encoutered an error when finalizing retrieval results."
                     )
@@ -942,7 +950,7 @@ class SequentialInferenceRunner:
             tile_size: Tuple[int, int],
             overlap: Optional[int] = None,
             exclude_from_tiling: Optional[List[str]] = None,
-            progress_bar: Optional[Progress] = None
+            progress_bar: Optional[MaybeProgress] = None
     ):
         """
         Processes inputs with tiling.
@@ -1042,6 +1050,8 @@ class SequentialInferenceRunner:
             try:
                 results = input_loader.finalize_results(results_ass, *input_args, output_path=output_path)
             except Exception as exc:
+                if not self.robust:
+                    raise exc
                 LOGGER.exception("An error occurred when finalizing the results.")
                 return None
         else:
@@ -1130,7 +1140,7 @@ class SequentialInferenceRunner:
         except AttributeError:
             total = "?"
 
-        with Progress() as progress:
+        with MaybeProgress(show=self.progress) as progress:
             task = progress.add_task(
                 f"[bold dark_orange]Processing retrieval input: 1/{total}", total=len(self.input_loader)
             )
@@ -1141,6 +1151,8 @@ class SequentialInferenceRunner:
                 except StopIteration:
                     break
                 except Exception as exc:
+                    if not self.robust:
+                        raise exc
                     LOGGER.exception(
                         "Encountered an error when loading input data."
                     )
@@ -1209,7 +1221,9 @@ def run_inference(
     device: torch.device = torch.device("cpu"),
     dtype: torch.dtype = torch.float32,
     exclude_from_tiling: Optional[List[str]] = None,
-    tile_callback = None
+    tile_callback = None,
+    progress: bool = True,
+    robust: bool = True
 ) -> Union[List[Path], List[xr.Dataset]]:
     """
     Run inference using the given model on a sequence of inputs provided by an
@@ -1224,6 +1238,9 @@ def run_inference(
         device: The device on which to perform the inference.
         dtype: The floating point type to use for the inference.
         exclude_from_tiling: List of input tensor names to exclude from tiling.
+        tile_callback: Callback function to call after processing of each tile.
+        progress: Whether or not to display a progress bar.
+        robust: Set to False to raise exceptions encountered during processing.
 
     Return:
         If an output path is provided, a list of the output files that were written is returned.
@@ -1232,7 +1249,7 @@ def run_inference(
     if isinstance(input_loader, (torch.Tensor, list, dict)):
         input_loader = SimpleInput(input_loader)
     runner = SequentialInferenceRunner(
-        model, input_loader, inference_config
+        model, input_loader, inference_config, progress=progress, robust=robust
     )
     runner.tile_callback = tile_callback
     return runner.run(output_path=output_path, device=device, dtype=dtype)

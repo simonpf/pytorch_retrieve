@@ -4,6 +4,7 @@ pytorch_retrieve.cli
 
 Defines the pytorch_retrieve command line interface.
 """
+from importlib.metadata import version
 import logging
 
 import click
@@ -25,6 +26,7 @@ from pytorch_retrieve import inference
 
 
 @click.group()
+@click.version_option(version("pytorch_retrieve"))
 def pytorch_retrieve():
     """
     Welcome to the pytorch_retrieve command-line interface.
