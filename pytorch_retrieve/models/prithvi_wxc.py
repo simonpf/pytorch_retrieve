@@ -1551,6 +1551,7 @@ class PrithviWxCObs(PrithviWxC):
         n_batch = x_embedded.shape[0]
         if self.training:
             drop_dynamic = torch.rand(n_batch, 1, 1, 1, device=x_embedded.device, dtype=x_embedded.dtype) < self.drop_dynamic
+            drop_dynamic = drop_dynamic * (total_lead_time <= batch["lead_time"])
             tokens = torch.where(drop_dynamic, 0.0, x_embedded) + static_embedded + time_encoding
         elif obs_only:
             tokens = 0.0 * x_embedded + static_embedded + time_encoding
