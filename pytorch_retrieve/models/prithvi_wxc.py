@@ -67,6 +67,96 @@ def drop_path(
     return x * keep_mask.view(shape)
 
 
+class ResNeXtBlock(nn.Module):
+    """
+    Implements a ResNeXt block.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: Union[Tuple[int, int], int] = (3, 3),
+        downsample: Optional[int] = None,
+        padding: Optional[int] = None,
+        dilation: int = 1,
+        cardinality: int = 32,
+        bottleneck: int = 2,
+        activation_factory: Callable[[], nn.Module] = nn.ReLU,
+        normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm2d,
+        padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
+    ):
+        super().__init__()
+
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size,) * 2
+
+        if padding is None:
+            padding = (
+                (dilation * kernel_size[0]) // 2,
+                (dilation * kernel_size[1]) // 2,
+            )
+
+        if isinstance(downsample, int):
+            downsample = (downsample,) * 2
+
+        bias = normalization_factory is not None
+
+        stride = (1, 1)
+        if downsample is not None and max(downsample) > 1:
+            stride = downsample
+
+        # Short cut
+        if in_channels != out_channels or max(stride) > 1:
+            self.projection = nn.Conv2d(
+                in_channels, out_channels, kernel_size=stride, stride=stride
+            )
+        else:
+            self.projection = nn.Identity()
+
+        # Actual body
+        blocks = []
+
+        activation_kwargs = {}
+        if activation_factory == nn.ReLU:
+            activation_kwargs["inplace"] = True
+
+        blocks += [
+            normalization_factory(in_channels),
+            activation_factory(**activation_kwargs),
+            nn.Conv2d(
+                in_channels, out_channels // bottleneck, kernel_size=1, bias=bias
+            ),
+            padding_factory(padding),
+            normalization_factory(out_channels // bottleneck),
+            activation_factory(**activation_kwargs),
+            nn.Conv2d(
+                out_channels // bottleneck,
+                out_channels // bottleneck,
+                groups=cardinality,
+                kernel_size=kernel_size,
+                dilation=dilation,
+                bias=bias,
+                stride=stride
+            ),
+            normalization_factory(out_channels // bottleneck),
+            activation_factory(**activation_kwargs),
+            nn.Conv2d(
+                out_channels // bottleneck, out_channels, kernel_size=1, bias=bias
+            ),
+        ]
+        self.body = nn.Sequential(*blocks)
+        self.final_act = activation_factory(**activation_kwargs)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Propagate tensor through block.
+        """
+        y = self.body(x)
+        y = y + self.projection(x)
+        return y
+
+
 class LeadTimeDropPath(nn.Module):
     """
     Lead-time conditioned drop path.
@@ -564,11 +654,12 @@ class MergingModule(nn.Module):
         """
         super().__init__()
         self.encoding = nn.Linear(1, 32)
-        self.linear_1 = nn.Linear(2 * embed_dim, embed_dim)
-        self.cond_norm_1 = CondLayerNorm(embed_dim, 32)
+        self.linear_1 = nn.Linear(2 * embed_dim, 2 * embed_dim)
+        self.cond_norm_1 = CondLayerNorm(2 * embed_dim, 32)
+        self.linear_2 = nn.Linear(2 * embed_dim, 2 * embed_dim)
+        self.cond_norm_2 = CondLayerNorm(2 * embed_dim, 32)
         self.act = nn.GELU()
-        self.linear_2 = nn.Linear(embed_dim, embed_dim)
-        self.cond_norm_2 = CondLayerNorm(embed_dim, 32)
+        self.linear_3 = nn.Linear(2 * embed_dim, embed_dim)
 
     def forward(
             self,
@@ -588,6 +679,7 @@ class MergingModule(nn.Module):
         x = self.act(self.cond_norm_1(x, enc))
         x = self.linear_2(x)
         x = self.act(self.cond_norm_2(x, enc))
+        x = self.linear_3(x)
         return x
 
 
@@ -1358,14 +1450,14 @@ class PrithviWxCObs(PrithviWxC):
             self.obs_merger = MergingModule(self.embed_dim)
         else:
             self.obs_merger = nn.Sequential(
-                nn.Linear(2 * self.embed_dim, self.embed_dim),
-                nn.LayerNorm(self.embed_dim),
+                nn.Linear(2 * self.embed_dim, 2 * self.embed_dim),
+                nn.LayerNorm(2 *self.embed_dim),
                 nn.GELU(),
-                nn.Linear(self.embed_dim, self.embed_dim),
-                nn.LayerNorm(self.embed_dim),
-                nn.GELU()
+                nn.Linear(2 * self.embed_dim, 2 * self.embed_dim),
+                nn.LayerNorm(2 * self.embed_dim),
+                nn.GELU(),
+                nn.Linear(2 * self.embed_dim, self.embed_dim),
             )
-        self.obs_scale = nn.Parameter(torch.tensor(1e-2))
 
         self.drop_dynamic = drop_dynamic
         self.drop_obs = drop_obs
@@ -2945,7 +3037,7 @@ class LocalGlobalLocalCrossAttentionBlock(nn.Module):
 
         evaluator, transformer = next(transformer_iter)
         #x_target = evaluator(transformer, (x_target, None))
-        x_target = evaluator(transformer, (x_target, None))
+        x_target = evaluator(transformer, (x_target, None, None))
         x_source = x_source.transpose(1, 2)
 
         cntr = 1
@@ -2956,7 +3048,7 @@ class LocalGlobalLocalCrossAttentionBlock(nn.Module):
             x_target = x_target.transpose(1, 2)
 
             if local:
-                x_target = evaluator(transformer, (x_target, None))
+                x_target = evaluator(transformer, (x_target, None, None))
             else:
                 x_target = evaluator(transformer, x_target, x_source)
 
@@ -3522,7 +3614,8 @@ class PrithviWxCRegional(nn.Module):
                 *indices_unmasked.shape, *tokens.shape[maskdim:]
             ),
         )
-        x_encoded = self.encoder(unmasked)
+        lead_time = batch["lead_time"]
+        x_encoded = self.encoder(unmasked, lead_time=lead_time)
 
 
         #

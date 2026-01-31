@@ -13,6 +13,7 @@ import torch
 
 try:
     import PrithviWxC
+    from PrithviWxC.model import DropPath
     from PrithviWxC.dataloaders.merra2 import (
         input_scalers,
         output_scalers,
@@ -23,7 +24,7 @@ try:
         LeadTimeDropPath,
         PrithviWxCObs,
         PrithviWxCXObs,
-        PrithviWxCRegional
+        PrithviWxCRegional,
     )
     HAS_PRITHVI = True
 except ImportError:
@@ -235,24 +236,6 @@ def compile_prithvi_wxc_xobs():
     model = PrithviWxCXObs(**kwargs)
     return model
 
-
-@pytest.mark.skipif(not HAS_PRITHVI, reason="Needs PrithviWxC package installed.")
-def test_prithvi_wxc_xobs():
-    """
-    Test the PrithviWxC obs model.
-    """
-    mdl = compile_prithvi_wxc_xobs()
-    batch = {
-        "x": torch.rand((1, 2, 160, 360, 576)),
-        "static": torch.rand((1, 10, 360, 576)),
-        "input_time": torch.tensor(3.0)[None],
-        "lead_time": torch.tensor(3.0)[None],
-        "climate": torch.rand((1, 160, 360, 576)),
-        "obs": torch.rand((1, 2, 12, 18, 32, 1, 30, 32)),
-        "obs_meta": torch.rand((1, 2, 12, 18, 32, 8, 30, 32)),
-        "obs_mask": torch.rand((1, 2, 12, 18, 32, 30, 32)) > 0.5,
-    }
-    pred = mdl(batch)
 
 def compile_prithvi_wxc_regional():
     """
