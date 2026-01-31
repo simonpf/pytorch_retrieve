@@ -548,10 +548,10 @@ class PrithviWxCModel(RetrievalModel):
         preds = {}
 
         forward_kwargs = {}
+        obs_latent = None
         if "obs" in x:
             obs_latent = self.backbone.encode_observations(x)
             forward_kwargs["obs_latent"] = obs_latent
-        obs_latent = None
 
         for step in range(n_steps):
 
@@ -569,7 +569,7 @@ class PrithviWxCModel(RetrievalModel):
             }
 
             if obs_latent is not None:
-                forward_kwargs["total_lead_time"] = (step + 1) * x["lead_time"]
+                forward_kwargs["total_lead_time"] = (step + 1) * x["lead_time"].item()
 
             y = self.backbone(inpt, apply_residual=False, **backbone_kwargs, **forward_kwargs)
 

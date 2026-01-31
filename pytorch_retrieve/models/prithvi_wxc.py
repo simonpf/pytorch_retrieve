@@ -588,7 +588,7 @@ class MergingModule(nn.Module):
         x = self.act(self.cond_norm_1(x, enc))
         x = self.linear_2(x)
         x = self.act(self.cond_norm_2(x, enc))
-        return self.act(x)
+        return x
 
 
 class PrithviWxC(nn.Module):
@@ -1075,7 +1075,6 @@ class PrithviWxC(nn.Module):
             self.input_scalers_sigma + self.input_scalers_epsilon
         ).to(dtype=dtype)
         #x_rescaled = torch.clip(x_rescaled, -20, 20).to(dtype=dtype)
-        print("noclip")
         batch_size = x_rescaled.shape[0]
 
         if self.positional_encoding == 'fourier':
@@ -1551,7 +1550,7 @@ class PrithviWxCObs(PrithviWxC):
         n_batch = x_embedded.shape[0]
         if self.training:
             drop_dynamic = torch.rand(n_batch, 1, 1, 1, device=x_embedded.device, dtype=x_embedded.dtype) < self.drop_dynamic
-            drop_dynamic = drop_dynamic * (total_lead_time <= batch["lead_time"])
+            drop_dynamic = drop_dynamic * (total_lead_time <= 1.5 * batch["lead_time"])
             tokens = torch.where(drop_dynamic, 0.0, x_embedded) + static_embedded + time_encoding
         elif obs_only:
             tokens = 0.0 * x_embedded + static_embedded + time_encoding
@@ -1565,7 +1564,6 @@ class PrithviWxCObs(PrithviWxC):
         indices_masked = indices_masked.to(device=tokens.device)
         indices_unmasked = indices_unmasked.to(device=tokens.device)
         maskdim: int = indices_masked.ndim
-
 
         # Unmasking
         unmask_view = (*indices_unmasked.shape, *[1] * (tokens.ndim - maskdim))
@@ -1611,7 +1609,6 @@ class PrithviWxCObs(PrithviWxC):
                 *indices_masked.shape, *tokens.shape[maskdim:]
             ),
         )
-
 
         recon, _ = self.reconstruct_batch(
             indices_masked, indices_unmasked, masked, x_encoded
@@ -2692,7 +2689,6 @@ class MultiheadCrossAttention(nn.Module):
             features_target: The number of features of the PrithviWxC encoding.
             features_source: The number of features of the encoded observations.
             n_heads: Number of attention heads.
-            obs_path_size: The size of the observation patches in pixels
         """
         super().__init__()
 
