@@ -595,6 +595,8 @@ class PrithviWxCModel(RetrievalModel):
             for name, head in self.heads.items():
                 preds.setdefault(name, []).append(head(y))
 
+            forward_kwargs["obs_latent"] = -1
+
         if self.return_latent:
             preds["y"] = [MeanTensor(y) for y in latent_preds]
 

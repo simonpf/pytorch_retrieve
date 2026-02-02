@@ -1673,7 +1673,9 @@ class PrithviWxCObs(PrithviWxC):
             if obs_latent is None:
                 obs_latent = self.encode_observations(batch)
 
-            if isinstance(self.obs_merger, MergingModule):
+            if obs_latent == -1:
+                obs_merged = torch.zeros_like(unmasked)
+            elif isinstance(self.obs_merger, MergingModule):
                 obs_merged = self.obs_merger(unmasked, obs_latent, total_lead_time)
             else:
                 obs_merged = self.obs_merger(torch.cat((obs_latent, unmasked), -1))
