@@ -52,7 +52,6 @@ class BackboneConfig:
     obs_features: Optional[int] = None
     drop_dynamic: float = 0.0
     drop_obs: float = 0.0
-    conditional_merging: bool = False
     mask_ratio_targets: float = 0.0
     residual: str = "ignore"
     variant: Optional[str] = None
@@ -96,7 +95,6 @@ class BackboneConfig:
         drop_dynamic = get_config_attr("drop_dynamic", float, backbone_config, "backbone", default=0.0)
         drop_obs = get_config_attr("drop_obs", float, backbone_config, "backbone", default=0.0)
         obs_features = get_config_attr("obs_features", None, backbone_config, "backbone", required=False)
-        conditional_merging = get_config_attr("conditional_merging", None, backbone_config, "backbone", required=False, default=False)
         residual = get_config_attr("residual", str, backbone_config, "backbone", default="ignore", required=False)
         variant = get_config_attr("variant", str, backbone_config, "backbone", default=None, required=False)
         encoder_shifting = get_config_attr("encoder_shifting", bool, backbone_config, "backbone", default=True, required=False)
@@ -128,7 +126,6 @@ class BackboneConfig:
             positional_encoding=positional_encoding,
             obs_patch_size=obs_patch_size,
             obs_features=obs_features,
-            conditional_merging=conditional_merging,
             drop_dynamic=drop_dynamic,
             drop_obs=drop_obs,
             residual=residual,
@@ -228,7 +225,6 @@ class BackboneConfig:
             "positional_encoding": self.positional_encoding,
             "obs_patch_size": self.obs_patch_size,
             "obs_features": self.obs_features,
-            "conditional_merging": self.conditional_merging,
             "drop_dynamic": self.drop_dynamic,
             "drop_obs": self.drop_obs,
             "encoder_shifting": self.encoder_shifting,
@@ -261,14 +257,12 @@ class BackboneConfig:
             kwargs.pop("obs_patch_size")
             kwargs.pop("drop_dynamic")
             kwargs.pop("drop_obs")
-            kwargs.pop("conditional_merging")
             model = PrithviWxCRegional(**kwargs)
         else:
             kwargs.pop("obs_features")
             kwargs.pop("obs_patch_size")
             kwargs.pop("drop_dynamic")
             kwargs.pop("drop_obs")
-            kwargs.pop("conditional_merging")
             model = PrithviWxC(**kwargs)
             model.forward = types.MethodType(new_forward, model)
         return model
@@ -552,6 +546,7 @@ class PrithviWxCModel(RetrievalModel):
         if "obs" in x:
             obs_latent = self.backbone.encode_observations(x)
             forward_kwargs["obs_latent"] = obs_latent
+            forward_kwargs["step"] = 0
 
         for step in range(n_steps):
 
@@ -568,10 +563,9 @@ class PrithviWxCModel(RetrievalModel):
                 "climate": climate,
             }
 
-            if obs_latent is not None:
-                forward_kwargs["total_lead_time"] = (step + 1) * x["lead_time"].item()
-
             y = self.backbone(inpt, apply_residual=False, **backbone_kwargs, **forward_kwargs)
+            if obs_latent is not None:
+                forward_kwargs["step"] += 1
 
             if self.backbone.residual == "temporal":
                 raise ValueError(
@@ -594,8 +588,6 @@ class PrithviWxCModel(RetrievalModel):
 
             for name, head in self.heads.items():
                 preds.setdefault(name, []).append(head(y))
-
-            forward_kwargs["obs_latent"] = -1
 
         if self.return_latent:
             preds["y"] = [MeanTensor(y) for y in latent_preds]

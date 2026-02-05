@@ -643,46 +643,6 @@ class CondLayerNorm(nn.Module):
         return out
 
 
-class MergingModule(nn.Module):
-    """
-    Conditional merging module to merge latent observations with latent model state.
-    """
-    def __init__(self, embed_dim: int):
-        """
-        Args:
-            embed_dim: The dimenionality of the latent observation and model states.
-        """
-        super().__init__()
-        self.encoding = nn.Linear(1, 32)
-        self.linear_1 = nn.Linear(2 * embed_dim, 2 * embed_dim)
-        self.cond_norm_1 = CondLayerNorm(2 * embed_dim, 32)
-        self.linear_2 = nn.Linear(2 * embed_dim, 2 * embed_dim)
-        self.cond_norm_2 = CondLayerNorm(2 * embed_dim, 32)
-        self.act = nn.GELU()
-        self.linear_3 = nn.Linear(2 * embed_dim, embed_dim)
-
-    def forward(
-            self,
-            x_latent: torch.Tensor,
-            obs_latent: torch.Tensor,
-            total_lead_time: torch.Tensor
-    ):
-        """
-        Merge modell state 'x_latent' and latent observations 'obs_latent' conditioned on total_lead_time.
-        """
-        B, *_ = x_latent.shape
-        total_lead_time = torch.tensor([[total_lead_time]]).to(device=x_latent.device, dtype=x_latent.dtype)
-        total_lead_time = total_lead_time.repeat_interleave(B, 0)
-
-        enc = self.encoding(total_lead_time)
-        x = self.linear_1(torch.cat([x_latent, obs_latent], -1))
-        x = self.act(self.cond_norm_1(x, enc))
-        x = self.linear_2(x)
-        x = self.act(self.cond_norm_2(x, enc))
-        x = self.linear_3(x)
-        return x
-
-
 class PrithviWxC(nn.Module):
     """
     Encoder-decoder fusing Hiera with MaxViT. See
@@ -1327,7 +1287,6 @@ class PrithviWxCObs(PrithviWxC):
         positional_encoding: str,
         obs_patch_size: Tuple[int, int] = (3, 2),
         obs_features: int = 64,
-        conditional_merging: bool = False,
         encoder_shifting: bool = False,
         decoder_shifting: bool = False,
         checkpoint_encoder: list[int] | None = (),
@@ -1446,18 +1405,15 @@ class PrithviWxCObs(PrithviWxC):
         )
 
 
-        if conditional_merging:
-            self.obs_merger = MergingModule(self.embed_dim)
-        else:
-            self.obs_merger = nn.Sequential(
-                nn.Linear(2 * self.embed_dim, 2 * self.embed_dim),
-                nn.LayerNorm(2 *self.embed_dim),
-                nn.GELU(),
-                nn.Linear(2 * self.embed_dim, 2 * self.embed_dim),
-                nn.LayerNorm(2 * self.embed_dim),
-                nn.GELU(),
-                nn.Linear(2 * self.embed_dim, self.embed_dim),
-            )
+        self.obs_merger = nn.Sequential(
+            nn.Linear(2 * self.embed_dim + 1, 2 * self.embed_dim),
+            nn.LayerNorm(2 *self.embed_dim),
+            nn.GELU(),
+            nn.Linear(2 * self.embed_dim, 2 * self.embed_dim),
+            nn.LayerNorm(2 * self.embed_dim),
+            nn.GELU(),
+            nn.Linear(2 * self.embed_dim, self.embed_dim),
+        )
 
         self.drop_dynamic = drop_dynamic
         self.drop_obs = drop_obs
@@ -1551,7 +1507,7 @@ class PrithviWxCObs(PrithviWxC):
             obs_only: bool = False,
             model_only: bool = False,
             obs_latent: Optional[torch.Tensor] = None,
-            total_lead_time: int = 0
+            step: int = 0
     ) -> torch.Tensor:
         """
         Args:
@@ -1642,7 +1598,6 @@ class PrithviWxCObs(PrithviWxC):
         n_batch = x_embedded.shape[0]
         if self.training:
             drop_dynamic = torch.rand(n_batch, 1, 1, 1, device=x_embedded.device, dtype=x_embedded.dtype) < self.drop_dynamic
-            drop_dynamic = drop_dynamic * (total_lead_time <= 1.5 * batch["lead_time"])
             tokens = torch.where(drop_dynamic, 0.0, x_embedded) + static_embedded + time_encoding
         elif obs_only:
             tokens = 0.0 * x_embedded + static_embedded + time_encoding
@@ -1669,19 +1624,17 @@ class PrithviWxCObs(PrithviWxC):
 
         # Observations
         if self.obs_encoder is not None:
-
             if obs_latent is None:
                 obs_latent = self.encode_observations(batch)
-
-            if obs_latent == -1:
-                obs_merged = torch.zeros_like(unmasked)
-            elif isinstance(self.obs_merger, MergingModule):
-                obs_merged = self.obs_merger(unmasked, obs_latent, total_lead_time)
-            else:
-                obs_merged = self.obs_merger(torch.cat((obs_latent, unmasked), -1))
+            slice_ = torch.full(
+                unmasked.shape[:-1] + (1,),
+                step,
+                dtype=unmasked.dtype,
+                device=unmasked.device
+            )
+            obs_merged = self.obs_merger(torch.cat((obs_latent, unmasked, slice_), -1))
 
         # Encoder
-        #return unmasked, obs_enc, obs_mask_enc
         n_batch = unmasked.shape[0]
         if model_only:
             x_encoded = self.encoder(unmasked + 0.0 * obs_merged)
