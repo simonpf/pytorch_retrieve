@@ -432,6 +432,69 @@ def test_run_inference_tiled_sequential(tmp_path):
 
 
 
+class FailingInputLoader:
+    """
+    An input loader that fails.
+    """
+    def __init__(self, n_inputs: int, n_rows: int, n_cols: int):
+        self.n_inputs = n_inputs
+        self.n_rows = n_rows
+        self.n_cols = n_cols
+
+    def __len__(self) -> int:
+        return self.n_inputs
+
+    def __iter__(self):
+        quantiles = np.linspace(0, 1, 33)[1:-1]
+        tensor = norm.ppf(quantiles).astype(np.float32)[..., None, None]
+        tensor = np.broadcast_to(tensor, (31, self.n_rows, self.n_cols))
+        offsets = np.arange(self.n_rows)[None, :, None]
+        tensor = torch.tensor(tensor + offsets)#QuantileTensor(torch.tensor(tensor + offsets), tau=quantiles)
+        cntr = 0
+        for ind in range(self.n_inputs):
+            yield {
+                "input": tensor[None],
+                "mask": torch.isfinite(tensor[None]).any(-1).any(-1)
+            }
+            raise ValueError(
+                "Error loading input."
+            )
+
+
+
+def test_run_inference_failure(tmp_path):
+    """
+    Test running inference with tabular data.
+    """
+    inference_config = toml.loads(TILED_INFERENCE_CONFIG)
+    output_config = {
+        "surface_precip": OutputConfig("surface_precip", kind="Quantiles", shape=(32,))
+    }
+    inference_config = InferenceConfig.parse(output_config, inference_config)
+    model = MaskedQuantileOutput("output", 1, np.linspace(0, 1, 33)[1:-1])
+    input_loader = FailingInputLoader(4, 234, 453)
+
+    # Ensure robust setting returns None on failure
+    runner = SequentialInferenceRunner(
+        model,
+        input_loader,
+        inference_config=inference_config,
+        robust=True
+    )
+    results = runner.run(output_path=None, device="cpu", dtype=torch.float32)
+    assert len(results) == 1
+
+    # Ensure non-robust setting raises exception.
+    runner = SequentialInferenceRunner(
+        model,
+        input_loader,
+        inference_config=inference_config,
+        robust=False
+    )
+    with pytest.raises(ValueError):
+        results = runner.run(output_path=None, device="cpu", dtype=torch.float32)
+
+
 MLP_INFERENCE_CFG = """
 [architecture]
 name = "MLP"

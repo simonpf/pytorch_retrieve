@@ -452,6 +452,9 @@ def test_probability_less_than():
     p = quantile_tensor.probability_less_than(0.0)
     assert np.all(np.isclose(p, 0.5))
 
+    p = quantile_tensor.probability_less_than(torch.zeros((3, 4, 5, 6)))
+    assert np.all(np.isclose(p, 0.5))
+
     p = quantile_tensor.probability_less_than(-1)
     assert np.all(np.isclose(p, 0.5 - 0.341, rtol=0.01))
 
@@ -592,6 +595,14 @@ def test_loss():
     with pytest.raises(ValueError):
         weights = torch.zeros((1,))
         loss = tensor_1.loss(tensor_2, weights=weights)
+
+    # Test masked loss with all elements masked. Should return 0.
+    mask = torch.repeat_interleave(torch.arange(100)[..., None], 100, 1)
+    mask = torch.isfinite(mask)
+    tensor_2 = MaskedTensor(100 * torch.rand(100, 100), mask=mask)
+    tensor_2 = tensor_2[:, None]
+    loss = tensor_1.loss(tensor_2)
+    assert torch.isclose(loss, torch.tensor(0.0))
 
 
 def test_transformation():

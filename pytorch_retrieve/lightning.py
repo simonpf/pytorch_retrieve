@@ -595,7 +595,6 @@ class LightningRetrieval(L.LightningModule):
         self.log("Validation loss", tot_loss)
         return loss
 
-
     def validation_step_single_pred(
             self,
             pred: torch.Tensor,

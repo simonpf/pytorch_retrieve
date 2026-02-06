@@ -37,7 +37,7 @@ NEEDS_PRITHVI_DATA = pytest.mark.skipif(
     reason="Needs PrithviWxC data."
 )
 
-def compile_prithvi_wxc_obs(conditional_merging: bool):
+def compile_prithvi_wxc_obs():
     """
     Compiles a slimmed-down PrithviWxCObs model.
     """
@@ -115,7 +115,6 @@ def compile_prithvi_wxc_obs(conditional_merging: bool):
     kwargs["masking_mode"] = "local"
     kwargs["decoder_shifting"] = False
     kwargs["mask_ratio_inputs"] = 0.0
-    kwargs["conditional_merging"] = conditional_merging
 
     model = PrithviWxCObs(**kwargs)
     return model
@@ -126,7 +125,7 @@ def test_prithvi_wxc_obs():
     """
     Test the PrithviWxC obs model.
     """
-    mdl = compile_prithvi_wxc_obs(conditional_merging=False)
+    mdl = compile_prithvi_wxc_obs()
     batch = {
         "x": torch.rand((1, 2, 160, 360, 576)),
         "static": torch.rand((1, 10, 360, 576)),
@@ -139,7 +138,7 @@ def test_prithvi_wxc_obs():
     }
     pred = mdl(batch)
 
-    mdl = compile_prithvi_wxc_obs(conditional_merging=True)
+    mdl = compile_prithvi_wxc_obs()
     batch = {
         "x": torch.rand((1, 2, 160, 360, 576)),
         "static": torch.rand((1,  10, 360, 576)),
@@ -151,7 +150,7 @@ def test_prithvi_wxc_obs():
         "obs_mask": torch.rand((1, 2, 12, 18, 32, 30, 32)) > 0.5,
     }
     obs_latent = mdl.encode_observations(batch)
-    pred = mdl(batch, obs_latent=obs_latent, total_lead_time=1)
+    pred = mdl(batch, obs_latent=obs_latent, step=1)
 
 
 def compile_prithvi_wxc_xobs():

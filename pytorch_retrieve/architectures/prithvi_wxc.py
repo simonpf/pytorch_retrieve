@@ -573,7 +573,7 @@ class PrithviWxCModel(RetrievalModel):
                 )
                 y_out = self.backbone.output_scalers * y + x_hat
             elif self.backbone.residual == "climate":
-                y_out = self.backbone.output_scalers * y + x["climate"][:, step]
+                y_out = self.backbone.output_scalers * y.float() + x["climate"][:, step]
             else:
                 y_out = self.backbone.output_scalers * y + self.backbone.input_scalers_mu.reshape(
                     1, -1, 1, 1
@@ -654,9 +654,7 @@ def new_forward(
     assert batch["x"].shape[2] == self.in_channels
     assert batch["x"].shape[3] == self.n_lats_px
     assert batch["x"].shape[4] == self.n_lons_px
-    #assert batch["y"].shape[1] == self.in_channels
-    #assert batch["y"].shape[2] == self.n_lats_px
-    #assert batch["y"].shape[3] == self.n_lons_px
+
     if self.positional_encoding == 'fourier':
         # the first two features (lat, lon) are encoded separately
         assert batch['static'].shape[1] - 2 == self.in_channels_static, "When setting self.positional_encoding to fourier, the number of static params change in the dataset. So, in the config, reduce num_static_channels (e.g., 4 instead of 7)."
@@ -705,16 +703,18 @@ def new_forward(
     # Parameter dropout
     x_rescaled = self.parameter_dropout(x_rescaled)
 
-    x_embedded = self.patch_embedding(x_rescaled)
-    assert x_embedded.shape[1] == self.embed_dim
 
-    if self.residual == "climate":
-        static_embedded = self.patch_embedding_static(
-            torch.cat((x_static, climate_scaled), dim=1)
-        )
-    else:
-        static_embedded = self.patch_embedding_static(x_static)
-    assert static_embedded.shape[1] == self.embed_dim
+    with torch.autocast(device_type="cuda", enabled=False):
+        x_embedded = self.patch_embedding(x_rescaled.to(dtype=torch.float32)).to(dtype=x_rescaled.dtype)
+        assert x_embedded.shape[1] == self.embed_dim
+
+        if self.residual == "climate":
+            static_embedded = self.patch_embedding_static(
+                torch.cat((x_static, climate_scaled), dim=1).float()
+            ).to(dtype=x_embedded.dtype)
+        else:
+            static_embedded = self.patch_embedding_static(x_static)
+        assert static_embedded.shape[1] == self.embed_dim
 
     if self.positional_encoding == 'fourier':
         static_embedded += x_static_pos

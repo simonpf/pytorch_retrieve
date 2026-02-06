@@ -5,7 +5,7 @@ pytorch_retrieve.inference
 This module implements generic inference functionality for pytorch_retrieve retrievals.
 """
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import logging
 import importlib
 from multiprocessing.queues import Empty
@@ -163,15 +163,29 @@ def process(
     inference_config: InferenceConfig,
     device: torch.device = torch.device("cpu"),
     dtype: torch.dtype = torch.float32,
+    mixed_precision: bool = True
 ):
     """
     Process batch of inputs.
+
+    Args:
+        model: The pytorch module implementing the model.
+        inputs: A dictionary containing the model input.
+        inference_config: The inference configuration for the model.
+        device: The device to run the inference on.
+        dtype: The dtype to run the inference with.
+        mixed_precision: Run inference using mixed precision (keeping the model in float32)
     """
-    model = to_rec(model, dtype=dtype, device=device)
-    inputs = to_rec(inputs, dtype=dtype, device=device)
+    use_autocast = dtype in (torch.bfloat16, torch.float16) and mixed_precision
+    cast_dtype = torch.float32 if use_autocast else dtype
+    autocast_ctx = (
+        torch.autocast(device_type=device.type, dtype=dtype) if use_autocast else nullcontext()
+    )
+    model = to_rec(model, dtype=cast_dtype, device=device)
+    inputs = to_rec(inputs, dtype=cast_dtype, device=device)
 
     results = {}
-    with torch.no_grad():
+    with torch.inference_mode(), autocast_ctx:
         preds = model(inputs)
         if isinstance(preds, dict):
             for key, tensor in preds.items():

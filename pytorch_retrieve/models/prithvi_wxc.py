@@ -637,7 +637,7 @@ class CondLayerNorm(nn.Module):
         gamma, beta = gammabeta.chunk(2, dim=-1)
         expand_shape = [B] + [1] * (z.dim() - 2) + [F]
         gamma = gamma.view(*expand_shape)
-        beta  = beta.view(*expand_shape)
+        beta = beta.view(*expand_shape)
 
         out = gamma * z + beta
         return out

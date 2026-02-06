@@ -271,6 +271,10 @@ class QuantileTensor(torch.Tensor, RegressionTensor):
         x_r = select(x_cdf, qdim, slice(1, None))
         d_x = torch.diff(x_cdf, dim=qdim)
 
+        if isinstance(thresh, torch.Tensor):
+            if thresh.ndim < x_cdf.ndim:
+                thresh = thresh.unsqueeze(qdim)
+
         weight_l = (x_r - thresh) / d_x
         mask = (weight_l < 0) + (weight_l > 1)
         weight_l = torch.where(mask, 0.0, weight_l)
@@ -283,10 +287,16 @@ class QuantileTensor(torch.Tensor, RegressionTensor):
         prob = (y_l * weight_l).sum(qdim) + (y_r * weight_r).sum(qdim)
         prob /= weight_l.sum(qdim) + weight_r.sum(qdim)
 
-        out_of_bounds_l = thresh < torch.min(x_cdf, dim=qdim)[0]
+        if isinstance(thresh, torch.Tensor):
+            out_of_bounds_l = thresh.squeeze() < torch.min(x_cdf, dim=qdim)[0]
+        else:
+            out_of_bounds_l = thresh < torch.min(x_cdf, dim=qdim)[0]
         prob[out_of_bounds_l] = 0.0
 
-        out_of_bounds_r = thresh > torch.max(x_cdf, dim=qdim)[0]
+        if isinstance(thresh, torch.Tensor):
+            out_of_bounds_r = thresh.squeeze() > torch.max(x_cdf, dim=qdim)[0]
+        else:
+            out_of_bounds_r = thresh > torch.max(x_cdf, dim=qdim)[0]
         prob[out_of_bounds_r] = 1.0
 
         return prob

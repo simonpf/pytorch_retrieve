@@ -245,6 +245,13 @@ def test_probability_loss():
     p_loss = y_pred.loss(y_true)
     assert torch.isclose(p_loss, torch.tensor(0.0))
 
+    y_true = 0.95 * torch.ones(10)
+    y_true[mask] = torch.nan
+    mask = torch.isfinite(y_true)
+    y_true = MaskedTensor(y_true, mask=mask)
+    p_loss = y_pred.loss(y_true)
+    assert torch.isclose(p_loss, torch.tensor(0.0))
+
 
 def test_pdf():
     """
