@@ -46,6 +46,22 @@ from pytorch_retrieve.lightning import LightningRetrieval
 LOGGER = logging.getLogger(__name__)
 
 
+def rgetattr(obj: object, attr: str) -> object:
+    """
+    Recursively get a dotted attribute from an object.
+
+    Args:
+        obj: The object whose attribute to get.
+        attr: The name of the attribute.
+
+    Return:
+        The retrieved attribute.
+    """
+    for name in attr.split("."):
+        obj = getattr(obj, name)
+    return obj
+
+
 def load_weights(path: Union[Path, Dict[str, Path]], model: nn.Module) -> None:
     """
     Load model weights from existing model file.
@@ -61,7 +77,7 @@ def load_weights(path: Union[Path, Dict[str, Path]], model: nn.Module) -> None:
     """
     if isinstance(path, dict):
         for component, pth in path.items():
-            module = getattr(model, component)
+            module = rgetattr(model, component)
             LOGGER.info(
                 "Loading weights for '%s' from '%s'.",
                 component,

@@ -1404,15 +1404,11 @@ class PrithviWxCObs(PrithviWxC):
             nn.Upsample(scale_factor=upsmpl, mode="bilinear")
         )
 
-
         self.obs_merger = nn.Sequential(
+            nn.LayerNorm(2 * self.embed_dim + 1, 2 * self.embed_dim),
             nn.Linear(2 * self.embed_dim + 1, 2 * self.embed_dim),
-            nn.LayerNorm(2 *self.embed_dim),
             nn.GELU(),
-            nn.Linear(2 * self.embed_dim, 2 * self.embed_dim),
-            nn.LayerNorm(2 * self.embed_dim),
-            nn.GELU(),
-            nn.Linear(2 * self.embed_dim, self.embed_dim),
+            nn.Linear(2 * self.embed_dim),
         )
 
         self.drop_dynamic = drop_dynamic
