@@ -13,6 +13,7 @@ from pytorch_retrieve.metrics import (
     Bias,
     CorrelationCoef,
     MAE,
+    ScatterPlot,
     MSE,
     SMAPE,
     PlotSamples,
@@ -272,6 +273,26 @@ def test_mae():
     result = mae.compute()
     assert result.shape == (4,)
     assert torch.isclose(result, torch.tensor(0.798), atol=0.2).all()
+
+
+def test_scatter_plot():
+    """
+    Test that calculating the MAE works with masked tensors.
+    """
+    scatter_plot = ScatterPlot((0, 10, 10), conditional={"val": (0, 10, 10)})
+
+    cond = torch.rand(1_000) * 10
+    pred = torch.rand(1_000) * 10
+    ref = pred
+    scatter_plot.update(pred, ref, conditional={"val": cond})
+
+    result = scatter_plot.compute()
+    assert result.shape == (10, 10, 10)
+    assert 1 <= result.max()
+    for ind in range(9):
+        assert torch.isclose(result[:, ind, ind + 1:], torch.tensor(0.0)).all()
+    for ind in range(1, 10):
+        assert torch.isclose(result[:, ind, :ind], torch.tensor(0.0)).all()
 
 
 def test_weighted_mae():

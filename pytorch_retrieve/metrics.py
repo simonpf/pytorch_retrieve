@@ -699,6 +699,7 @@ class SMAPE(ScalarMetric, tm.Metric):
         else:
             weights = weights.squeeze()
 
+        mask = None
         if isinstance(target, MaskedTensor):
             mask = target.mask
             target = target.base
@@ -775,6 +776,107 @@ class SMAPE(ScalarMetric, tm.Metric):
         Calculate the SMAPE.
         """
         return self.error / self.counts
+
+
+class ScatterPlot(ScalarMetric, tm.Metric):
+    """
+    Calculate a 2D histogram of target and predicted values.
+    """
+
+    name = "SCATTER"
+    dims = ("predicted", "retrieved")
+
+    def __init__(
+            self,
+            bins: Tuple[float, float, int],
+            conditional: Optional[Dict[str, BinSpec]] = None,
+    ):
+        ScalarMetric.__init__(self, conditional=conditional)
+        tm.Metric.__init__(self)
+        if isinstance(bins, np.ndarray):
+            self.n_bins = bins.size - 1
+            self.scatter_bins = torch.tensor(bins)
+        else:
+            start, end, n_bins = bins
+            self.n_bins = n_bins
+            self.scatter_bins = torch.tensor(np.linspace(start, end, n_bins + 1))
+
+        error = torch.zeros(self.shape + (self.n_bins, self.n_bins))
+        counts = torch.zeros(self.shape + (self.n_bins, self.n_bins))
+        self.add_state("counts", default=error, dist_reduce_fx="sum")
+
+    def update(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        weights: Optional[torch.Tensor] = None,
+        conditional: Optional[Dict[str, torch.Tensor]] = None,
+    ) -> None:
+        """
+        Args:
+            pred: A tensor containing the point predictions from the
+                retrieval model.
+            target: A tensor containing the reference values corresponding
+                to 'pred'.
+            weights: An optional tensor of weights to apply to all validation samples.
+            conditional: An optional dictionary containing values to
+                condition the calculation of the bias onto.
+        """
+        pred = pred.squeeze()
+        target = target.squeeze()
+        if weights is None:
+            weights = torch.ones_like(target)
+        else:
+            weights = weights.squeeze()
+
+        mask = None
+        if isinstance(target, MaskedTensor):
+            mask = target.mask
+            target = target.base
+            if isinstance(weights, MaskedTensor):
+                weights = weights.base
+
+            if isinstance(pred, MaskedTensor):
+                mask = mask | pred.mask
+                pred = pred.base
+            pred = pred[~mask]
+            target = target[~mask]
+            weights = weights[~mask]
+
+        device = torch.device("cpu")
+        self.to(device)
+
+        coords = []
+        for cond in self.conditional:
+            coords_c = conditional[cond].squeeze()
+            if mask is None:
+                if coords_c.ndim < target.ndim:
+                    coords_c = coords_c.reshape(coords_c.shape + (1,) * (target.ndim - coords_c.ndim))
+                    coords_c = torch.broadcast_to(coords_c, target.shape)
+                coords.append(coords_c)
+            else:
+                mask = mask.to(device=device)
+                mask_s = mask.squeeze()
+                # Expand channel dimension if necessary
+                if coords_c.ndim < mask_s.ndim:
+                    coords_c = coords_c.reshape(coords_c.shape + (1,) * (mask_s.ndim - coords_c.ndim))
+                    coords_c = torch.broadcast_to(coords_c, mask_s.shape)
+                coords.append(coords_c[~mask_s])
+
+        coords += (pred, target)
+
+        coords = torch.stack(coords, -1).to(device=device)
+        bins = tuple(
+            [bns.to(device=device, dtype=pred.dtype) for bns in self.bins + [self.scatter_bins, self.scatter_bins]]
+        )
+        weights = weights.to(device=device)
+        self.counts += torch.histogramdd(coords, bins=bins, weight=weights)[0]
+
+    def compute(self) -> torch.Tensor:
+        """
+        Return scatter fields.
+        """
+        return self.counts
 
 
 class HeidkeSkillScore(CategoricalDetectionMetric, tm.Metric):
