@@ -67,96 +67,6 @@ def drop_path(
     return x * keep_mask.view(shape)
 
 
-class ResNeXtBlock(nn.Module):
-    """
-    Implements a ResNeXt block.
-    """
-
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        kernel_size: Union[Tuple[int, int], int] = (3, 3),
-        downsample: Optional[int] = None,
-        padding: Optional[int] = None,
-        dilation: int = 1,
-        cardinality: int = 32,
-        bottleneck: int = 2,
-        activation_factory: Callable[[], nn.Module] = nn.ReLU,
-        normalization_factory: Callable[[int], nn.Module] = nn.BatchNorm2d,
-        padding_factory: Callable[[Union[Tuple[int], int]], nn.Module] = Reflect,
-    ):
-        super().__init__()
-
-        if isinstance(kernel_size, int):
-            kernel_size = (kernel_size,) * 2
-
-        if padding is None:
-            padding = (
-                (dilation * kernel_size[0]) // 2,
-                (dilation * kernel_size[1]) // 2,
-            )
-
-        if isinstance(downsample, int):
-            downsample = (downsample,) * 2
-
-        bias = normalization_factory is not None
-
-        stride = (1, 1)
-        if downsample is not None and max(downsample) > 1:
-            stride = downsample
-
-        # Short cut
-        if in_channels != out_channels or max(stride) > 1:
-            self.projection = nn.Conv2d(
-                in_channels, out_channels, kernel_size=stride, stride=stride
-            )
-        else:
-            self.projection = nn.Identity()
-
-        # Actual body
-        blocks = []
-
-        activation_kwargs = {}
-        if activation_factory == nn.ReLU:
-            activation_kwargs["inplace"] = True
-
-        blocks += [
-            normalization_factory(in_channels),
-            activation_factory(**activation_kwargs),
-            nn.Conv2d(
-                in_channels, out_channels // bottleneck, kernel_size=1, bias=bias
-            ),
-            padding_factory(padding),
-            normalization_factory(out_channels // bottleneck),
-            activation_factory(**activation_kwargs),
-            nn.Conv2d(
-                out_channels // bottleneck,
-                out_channels // bottleneck,
-                groups=cardinality,
-                kernel_size=kernel_size,
-                dilation=dilation,
-                bias=bias,
-                stride=stride
-            ),
-            normalization_factory(out_channels // bottleneck),
-            activation_factory(**activation_kwargs),
-            nn.Conv2d(
-                out_channels // bottleneck, out_channels, kernel_size=1, bias=bias
-            ),
-        ]
-        self.body = nn.Sequential(*blocks)
-        self.final_act = activation_factory(**activation_kwargs)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Propagate tensor through block.
-        """
-        y = self.body(x)
-        y = y + self.projection(x)
-        return y
-
-
 class LeadTimeDropPath(nn.Module):
     """
     Lead-time conditioned drop path.
@@ -637,10 +547,48 @@ class CondLayerNorm(nn.Module):
         gamma, beta = gammabeta.chunk(2, dim=-1)
         expand_shape = [B] + [1] * (z.dim() - 2) + [F]
         gamma = gamma.view(*expand_shape)
-        beta = beta.view(*expand_shape)
+        beta  = beta.view(*expand_shape)
 
         out = gamma * z + beta
         return out
+
+
+class MergingModule(nn.Module):
+    """
+    Conditional merging module to merge latent observations with latent model state.
+    """
+    def __init__(self, embed_dim: int):
+        """
+        Args:
+            embed_dim: The dimenionality of the latent observation and model states.
+        """
+        super().__init__()
+        self.encoding = nn.Linear(1, 32)
+        self.linear_1 = nn.Linear(2 * embed_dim, embed_dim)
+        self.cond_norm_1 = CondLayerNorm(embed_dim, 32)
+        self.act = nn.GELU()
+        self.linear_2 = nn.Linear(embed_dim, embed_dim)
+        self.cond_norm_2 = CondLayerNorm(embed_dim, 32)
+
+    def forward(
+            self,
+            x_latent: torch.Tensor,
+            obs_latent: torch.Tensor,
+            total_lead_time: torch.Tensor
+    ):
+        """
+        Merge modell state 'x_latent' and latent observations 'obs_latent' conditioned on total_lead_time.
+        """
+        B, *_ = x_latent.shape
+        total_lead_time = torch.tensor([[total_lead_time]]).to(device=x_latent.device, dtype=x_latent.dtype)
+        total_lead_time = total_lead_time.repeat_interleave(B, 0)
+
+        enc = self.encoding(total_lead_time)
+        x = self.linear_1(torch.cat([x_latent, obs_latent], -1))
+        x = self.act(self.cond_norm_1(x, enc))
+        x = self.linear_2(x)
+        x = self.act(self.cond_norm_2(x, enc))
+        return self.act(x)
 
 
 class PrithviWxC(nn.Module):
@@ -1127,6 +1075,7 @@ class PrithviWxC(nn.Module):
             self.input_scalers_sigma + self.input_scalers_epsilon
         ).to(dtype=dtype)
         #x_rescaled = torch.clip(x_rescaled, -20, 20).to(dtype=dtype)
+        print("noclip")
         batch_size = x_rescaled.shape[0]
 
         if self.positional_encoding == 'fourier':
@@ -1287,6 +1236,7 @@ class PrithviWxCObs(PrithviWxC):
         positional_encoding: str,
         obs_patch_size: Tuple[int, int] = (3, 2),
         obs_features: int = 64,
+        conditional_merging: bool = False,
         encoder_shifting: bool = False,
         decoder_shifting: bool = False,
         checkpoint_encoder: list[int] | None = (),
@@ -1405,10 +1355,13 @@ class PrithviWxCObs(PrithviWxC):
         )
 
         self.obs_merger = nn.Sequential(
-            nn.LayerNorm(2 * self.embed_dim + 1, 2 * self.embed_dim),
             nn.Linear(2 * self.embed_dim + 1, 2 * self.embed_dim),
+            nn.LayerNorm(2 * self.embed_dim),
             nn.GELU(),
-            nn.Linear(2 * self.embed_dim),
+            nn.Linear(2 * self.embed_dim, self.embed_dim),
+            nn.LayerNorm(self.embed_dim),
+            nn.GELU(),
+            nn.Linear(self.embed_dim, self.embed_dim),
         )
 
         self.drop_dynamic = drop_dynamic
@@ -1608,6 +1561,7 @@ class PrithviWxCObs(PrithviWxC):
         indices_unmasked = indices_unmasked.to(device=tokens.device)
         maskdim: int = indices_masked.ndim
 
+
         # Unmasking
         unmask_view = (*indices_unmasked.shape, *[1] * (tokens.ndim - maskdim))
         unmasked = torch.gather(
@@ -1620,8 +1574,10 @@ class PrithviWxCObs(PrithviWxC):
 
         # Observations
         if self.obs_encoder is not None:
+
             if obs_latent is None:
                 obs_latent = self.encode_observations(batch)
+
             slice_ = torch.full(
                 unmasked.shape[:-1] + (1,),
                 step,
@@ -1631,6 +1587,7 @@ class PrithviWxCObs(PrithviWxC):
             obs_merged = self.obs_merger(torch.cat((obs_latent, unmasked, slice_), -1))
 
         # Encoder
+        #return unmasked, obs_enc, obs_mask_enc
         n_batch = unmasked.shape[0]
         if model_only:
             x_encoded = self.encoder(unmasked + 0.0 * obs_merged)
@@ -1652,6 +1609,7 @@ class PrithviWxCObs(PrithviWxC):
                 *indices_masked.shape, *tokens.shape[maskdim:]
             ),
         )
+
 
         recon, _ = self.reconstruct_batch(
             indices_masked, indices_unmasked, masked, x_encoded
@@ -2732,6 +2690,7 @@ class MultiheadCrossAttention(nn.Module):
             features_target: The number of features of the PrithviWxC encoding.
             features_source: The number of features of the encoded observations.
             n_heads: Number of attention heads.
+            obs_path_size: The size of the observation patches in pixels
         """
         super().__init__()
 
@@ -2988,7 +2947,7 @@ class LocalGlobalLocalCrossAttentionBlock(nn.Module):
 
         evaluator, transformer = next(transformer_iter)
         #x_target = evaluator(transformer, (x_target, None))
-        x_target = evaluator(transformer, (x_target, None, None))
+        x_target = evaluator(transformer, (x_target, None))
         x_source = x_source.transpose(1, 2)
 
         cntr = 1
@@ -2999,7 +2958,7 @@ class LocalGlobalLocalCrossAttentionBlock(nn.Module):
             x_target = x_target.transpose(1, 2)
 
             if local:
-                x_target = evaluator(transformer, (x_target, None, None))
+                x_target = evaluator(transformer, (x_target, None))
             else:
                 x_target = evaluator(transformer, x_target, x_source)
 
@@ -3565,8 +3524,7 @@ class PrithviWxCRegional(nn.Module):
                 *indices_unmasked.shape, *tokens.shape[maskdim:]
             ),
         )
-        lead_time = batch["lead_time"]
-        x_encoded = self.encoder(unmasked, lead_time=lead_time)
+        x_encoded = self.encoder(unmasked)
 
 
         #
