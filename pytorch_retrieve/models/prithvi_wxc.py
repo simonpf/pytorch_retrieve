@@ -1074,8 +1074,6 @@ class PrithviWxC(nn.Module):
         x_rescaled = (batch["x"].to(dtype=torch.float32) - self.input_scalers_mu) / (
             self.input_scalers_sigma + self.input_scalers_epsilon
         ).to(dtype=dtype)
-        #x_rescaled = torch.clip(x_rescaled, -20, 20).to(dtype=dtype)
-        print("noclip")
         batch_size = x_rescaled.shape[0]
 
         if self.positional_encoding == 'fourier':
@@ -1359,9 +1357,6 @@ class PrithviWxCObs(PrithviWxC):
             nn.LayerNorm(2 * self.embed_dim),
             nn.GELU(),
             nn.Linear(2 * self.embed_dim, self.embed_dim),
-            nn.LayerNorm(self.embed_dim),
-            nn.GELU(),
-            nn.Linear(self.embed_dim, self.embed_dim),
         )
 
         self.drop_dynamic = drop_dynamic

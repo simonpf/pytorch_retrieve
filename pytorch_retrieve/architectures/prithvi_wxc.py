@@ -534,7 +534,22 @@ class PrithviWxCModel(RetrievalModel):
             A dictionary mapping output names to corresponding lists of output tensors.
         """
         assert x["static"].ndim == 5
-        n_steps = x["static"].shape[1]
+        n_batch = x["static"].shape[0]
+        n_steps = x["static"].shape[0]
+        device = x["static"].device
+        dtype = x["static"].dtype
+
+        drop_dynamic = None
+        training = self.backbone.training
+        if training and hasattr(self.backbone, "drop_dynamic"):
+            drop_dynamic = self.backbone.drop_dynamic
+            self.backbone.drop_dynamic = 0.0
+            drop_batch = torch.rand(n_batch, 1, 1, 1, 1, device=device, dtype=dtype) < drop_dynamic
+            x["x"] = torch.where(drop_batch, self.backbone.input_scalers_mu, x["x"])
+
+        obs_only = backbone_kwargs.pop("obs_only", False)
+        if obs_only:
+            x["x"][: ] = x["climate"][:, None]
 
         x_step = x["x"]
         latent_preds = []
@@ -594,6 +609,9 @@ class PrithviWxCModel(RetrievalModel):
 
         if self.full_output:
             preds["y"] = [MeanTensor(y) for y in full_output]
+
+        if drop_dynamic is not None:
+            self.backbone.drop_dynamic = drop_dynamic
 
         return preds
 
