@@ -535,7 +535,7 @@ class PrithviWxCModel(RetrievalModel):
         """
         assert x["static"].ndim == 5
         n_batch = x["static"].shape[0]
-        n_steps = x["static"].shape[0]
+        n_steps = x["static"].shape[1]
         device = x["static"].device
         dtype = x["static"].dtype
 
