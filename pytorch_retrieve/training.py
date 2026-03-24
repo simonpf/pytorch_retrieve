@@ -46,22 +46,6 @@ from pytorch_retrieve.lightning import LightningRetrieval
 LOGGER = logging.getLogger(__name__)
 
 
-def rgetattr(obj: object, attr: str) -> object:
-    """
-    Recursively get a dotted attribute from an object.
-
-    Args:
-        obj: The object whose attribute to get.
-        attr: The name of the attribute.
-
-    Return:
-        The retrieved attribute.
-    """
-    for name in attr.split("."):
-        obj = getattr(obj, name)
-    return obj
-
-
 def load_weights(path: Union[Path, Dict[str, Path]], model: nn.Module) -> None:
     """
     Load model weights from existing model file.
@@ -77,7 +61,7 @@ def load_weights(path: Union[Path, Dict[str, Path]], model: nn.Module) -> None:
     """
     if isinstance(path, dict):
         for component, pth in path.items():
-            module = rgetattr(model, component)
+            module = getattr(model, component)
             LOGGER.info(
                 "Loading weights for '%s' from '%s'.",
                 component,
@@ -99,29 +83,20 @@ def load_weights(path: Union[Path, Dict[str, Path]], model: nn.Module) -> None:
         model_state = model.state_dict()
         matched_state = {}
         mismatch = []
-        partial = []
         ignored = []
         for key, tensor in state.items():
             if key in model_state:
-                target = model_state[key]
                 if not isinstance(tensor, torch.Tensor):
                     continue
 
-                if target.shape == tensor.shape:
+                if model_state[key].shape == tensor.shape:
                     matched_state[key] = tensor
-                elif target.ndim == tensor.ndim:
-                    target = target.clone()
-                    min_shape = [min(*shapes) for shapes in zip(target.shape, tensor.shape)]
-                    slcs = tuple([slice(0, ext) for ext in min_shape])
-                    target[slcs] = tensor[slcs]
-                    matched_state[key] = target
-                    partial.append(key)
                 else:
                     mismatch.append(key)
             else:
                 ignored.append(key)
-        model.load_state_dict(matched_state, strict=False)
 
+        model.load_state_dict(matched_state, strict=False)
         if len(mismatch) > 0:
             LOGGER.warning(
                 "The following layers loaded from the model at %s were discarded "
@@ -129,27 +104,12 @@ def load_weights(path: Union[Path, Dict[str, Path]], model: nn.Module) -> None:
                 path,
                 mismatch,
             )
-        if len(partial) > 0:
-            LOGGER.warning(
-                "The following layers loaded from the model at %s were only partially "
-                "initialized due to shape mis-match: %s",
-                path,
-                partial,
-            )
         if len(ignored) > 0:
             LOGGER.warning(
                 "The following layers loaded from the model at %s were ignored "
                 "because the current model contains no matching layer: %s",
                 path,
                 ignored,
-            )
-        missing = [key for key in model_state if key not in state]
-        if len(missing) > 0:
-            LOGGER.warning(
-                "The following modules remain uninitialized because they are "
-                " missing from the model loaded from '%s': %s",
-                path,
-                missing,
             )
     else:
         LOGGER.error(
@@ -188,6 +148,38 @@ def freeze_modules(model: nn.Module, freeze: List[str]) -> None:
     non_trainable = sum(p.numel() for p in model.parameters() if not p.requires_grad)
 
     LOGGER.info("Freezing modules %s. [%s / %s]", frozen, trainable / 1e6, non_trainable / 1e6)
+
+
+def unfreeze_modules(model: nn.Module, unfreeze: List[str]) -> None:
+    """
+    Unfreeze a list of modules in model but keep all other frozen.
+
+    Args:
+        model: The model whose modules to freeze
+        unfreeze: A list containing the names of the modules to freeze.
+    """
+    modules = dict(model.named_modules())
+
+    for module in modules.values():
+        for param in module.parameters():
+            param.requires_grad = False
+
+    unfrozen = []
+    for name in unfreeze:
+        if name in modules:
+            unfrozen.append(name)
+            for param in modules[name].parameters():
+                param.requires_grad = True
+        else:
+            LOGGER.warning(
+                "Couldn't unfreeze module '%s' because it isn't a named module of the model.",
+                name
+            )
+
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    non_trainable = sum(p.numel() for p in model.parameters() if not p.requires_grad)
+
+    LOGGER.info("Unfreezing modules %s. [%s / %s]", unfrozen, trainable / 1e6, non_trainable / 1e6)
 
 
 def update_scheduler_args(arguments: Dict[str, Any], steps_per_epoch):
@@ -616,6 +608,7 @@ class TrainingConfig(TrainingConfigBase):
     n_data_loader_workers: int = 12
     persistent_workers: bool = True
     freeze: Optional[List[str]] = None
+    unfreeze: Optional[List[str]] = None
     debug: bool = False
 
     @classmethod
@@ -746,6 +739,9 @@ class TrainingConfig(TrainingConfigBase):
         freeze = get_config_attr(
             "freeze", None, config_dict, f"training state {name}", None
         )
+        unfreeze = get_config_attr(
+            "unfreeze", None, config_dict, f"training state {name}", None
+        )
         debug = get_config_attr(
             "debug", bool, config_dict, f"training stage {name}", False
         )
@@ -776,6 +772,7 @@ class TrainingConfig(TrainingConfigBase):
             n_data_loader_workers=n_data_loader_workers,
             persistent_workers=persistent_workers,
             freeze=freeze,
+            unfreeze=unfreeze,
             debug=debug,
         )
 
@@ -892,6 +889,9 @@ def run_training(
 
             if training_config.freeze is not None:
                 freeze_modules(module, training_config.freeze)
+
+            if training_config.unfreeze is not None:
+                unfreeze_modules(module, training_config.unfreeze)
 
             trainer = L.Trainer(
                 max_epochs=training_config.n_epochs,
