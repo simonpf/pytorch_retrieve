@@ -1339,12 +1339,12 @@ class PrithviWxCObs(PrithviWxC):
             obs_patch_size=obs_patch_size,
             channels=channels
         )
-        self.perceiver = PerceiverBlock(self.obs_latent, obs_features)
-        self.obs_projection = nn.Parameter(torch.randn(1, self.obs_latent))
+        self.perceiver = PerceiverBlock(512, obs_features, num_heads=16)
+        self.obs_projection = nn.Parameter(torch.randn(1, 512))
         upsmpl = tuple([sze // 2 for sze in self.obs_patch_size])
         self.temporal_encoder = nn.Sequential(
             ResNeXtBlock(
-                input_size_time * self.obs_latent,
+                input_size_time * 512,
                 self.embed_dim,
                 activation_factory=nn.GELU,
                 normalization_factory=LayerNormFirst
@@ -1437,8 +1437,8 @@ class PrithviWxCObs(PrithviWxC):
         latent = self.obs_projection[None].repeat_interleave(obs_enc.shape[0], 0)
         obs_latent = checkpoint(self.perceiver, latent, obs_enc, obs_mask < 1.0, use_reentrant=False)
 
-        obs_latent = obs_latent.reshape((B, T, GY, GX, LY, LX, self.obs_latent))
-        obs_latent = torch.permute(obs_latent, (0, 1, 6, 2, 4, 3, 5)).reshape(B, C * T, GY * LY, GX * LX)
+        obs_latent = obs_latent.reshape((B, T, GY, GX, LY, LX, 512))
+        obs_latent = torch.permute(obs_latent, (0, 1, 6, 2, 4, 3, 5)).reshape(B, 512 * T, GY * LY, GX * LX)
         obs_latent = checkpoint(self.temporal_encoder, obs_latent, use_reentrant=False).reshape(B, self.embed_dim, GY, 15, GX, 16)
         obs_latent = torch.permute(obs_latent, (0, 2, 4, 3, 5, 1)).reshape(B, GY *  GX, 15 * 16, -1)
         return obs_latent
