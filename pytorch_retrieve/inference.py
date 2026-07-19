@@ -1082,10 +1082,10 @@ class SequentialInferenceRunner:
                     ]
                     results[key] = (
                         tuple(dims) + (f"{key}_step", "x", "y"),
-                        np.stack(tensor),
+                        np.stack(tensor.float().cpu().numpy()),
                     )
                 elif len(dims) < tensor.ndim:
-                    tensor = torch.squeeze(tensor)
+                    tensor = torch.squeeze(tensor).float().cpu().numpy()
                     results[key] = (tuple(dims) + ("x", "y"), tensor)
             results = xr.Dataset(results)
 
