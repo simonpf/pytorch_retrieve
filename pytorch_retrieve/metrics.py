@@ -274,6 +274,7 @@ class RelativeBias(ScalarMetric, tm.Metric):
         self.to(device=device)
 
         coords = []
+
         for cond in self.conditional:
 
             coords_c = conditional[cond].squeeze()
@@ -292,14 +293,15 @@ class RelativeBias(ScalarMetric, tm.Metric):
                     coords_c = torch.broadcast_to(coords_c, mask_s.shape)
                 coords.append(coords_c[~mask_s])
 
-        coords = torch.stack(coords, -1).to(device=device)
+        coords = torch.stack(coords, -1).to(device=device, dtype=pred.dtype)
 
         wgts = ((pred - target) * weights).to(device=device)
         bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
         self.error += torch.histogramdd(coords, bins=bins, weight=wgts)[0]
-        wgts = (target * weights).to(device=device)
+        wgts = (target * weights).to(device=device, dtype=pred.dtype)
         self.mean += torch.histogramdd(coords, bins=bins, weight=wgts)[0]
-        self.counts += torch.histogramdd(coords, bins=bins, weight=weights.to(device=device))[0]
+        wgts = weights.to(device=device, dtype=pred.dtype)
+        self.counts += torch.histogramdd(coords, bins=bins, weight=wgts)[0]
 
     def compute(self) -> torch.Tensor:
         """
@@ -640,11 +642,11 @@ class MAE(ScalarMetric, tm.Metric):
                         coords_c = torch.broadcast_to(coords_c, mask_s.shape)
                     coords.append(coords_c[~mask_s])
 
-            coords = torch.stack(coords, -1).to(device=device)
+            coords = torch.stack(coords, -1).to(device=device, dtype=pred.dtype)
             bins = tuple([bns.to(device=device, dtype=pred.dtype) for bns in self.bins])
-            pred = pred.to(device=device)
-            target = target.to(device=device)
-            weights = weights.to(device=device)
+            pred = pred.to(device=device, dtype=pred.dtype)
+            target = target.to(device=device, dtype=pred.dtype)
+            weights = weights.to(device=device, dtype=pred.dtype)
             self.error += torch.histogramdd(
                 coords, bins=bins, weight=torch.abs(pred - target) * weights
             )[0]
@@ -784,7 +786,7 @@ class ScatterPlot(ScalarMetric, tm.Metric):
     """
 
     name = "SCATTER"
-    dims = ("predicted", "retrieved")
+    dims = ("predicted", "reference")
 
     def __init__(
             self,
@@ -844,32 +846,36 @@ class ScatterPlot(ScalarMetric, tm.Metric):
             weights = weights[~mask]
 
         device = torch.device("cpu")
-        self.to(device)
+        dtype = torch.float32
+        self.to(device=device, dtype=dtype)
+
 
         coords = []
-        for cond in self.conditional:
-            coords_c = conditional[cond].squeeze()
-            if mask is None:
-                if coords_c.ndim < target.ndim:
-                    coords_c = coords_c.reshape(coords_c.shape + (1,) * (target.ndim - coords_c.ndim))
-                    coords_c = torch.broadcast_to(coords_c, target.shape)
-                coords.append(coords_c)
-            else:
-                mask = mask.to(device=device)
-                mask_s = mask.squeeze()
-                # Expand channel dimension if necessary
-                if coords_c.ndim < mask_s.ndim:
-                    coords_c = coords_c.reshape(coords_c.shape + (1,) * (mask_s.ndim - coords_c.ndim))
-                    coords_c = torch.broadcast_to(coords_c, mask_s.shape)
-                coords.append(coords_c[~mask_s])
+        if self.conditional is not None:
+            for cond in self.conditional:
+                coords_c = conditional[cond].squeeze()
+                if mask is None:
+                    if coords_c.ndim < target.ndim:
+                        coords_c = coords_c.reshape(coords_c.shape + (1,) * (target.ndim - coords_c.ndim))
+                        coords_c = torch.broadcast_to(coords_c, target.shape)
+                    coords.append(coords_c)
+                else:
+                    mask = mask.to(device=device)
+                    mask_s = mask.squeeze()
+                    # Expand channel dimension if necessary
+                    if coords_c.ndim < mask_s.ndim:
+                        coords_c = coords_c.reshape(coords_c.shape + (1,) * (mask_s.ndim - coords_c.ndim))
+                        coords_c = torch.broadcast_to(coords_c, mask_s.shape)
+                    coords.append(coords_c[~mask_s])
 
         coords += (pred, target)
 
-        coords = torch.stack(coords, -1).to(device=device)
+        coords = torch.stack(coords, -1).to(device=device, dtype=dtype)
         bins = tuple(
-            [bns.to(device=device, dtype=pred.dtype) for bns in self.bins + [self.scatter_bins, self.scatter_bins]]
+            [bns.to(device=device, dtype=dtype)
+             for bns in self.bins + [self.scatter_bins, self.scatter_bins]]
         )
-        weights = weights.to(device=device)
+        weights = weights.to(device=device, dtype=dtype)
         self.counts += torch.histogramdd(coords, bins=bins, weight=weights)[0]
 
     def compute(self) -> torch.Tensor:
@@ -992,8 +998,6 @@ class HeidkeSkillScore(CategoricalDetectionMetric, tm.Metric):
 
         hss = 2.0 * (n_tp * n_tn - n_fp * n_fn) / ((n_tp + n_fn) * (n_fn + n_tn) + (n_tp + n_fp) * (n_fp + n_tn))
         return hss
-
-
 
 
 class PlotSamples(tm.Metric):
@@ -1178,6 +1182,8 @@ class PlotSamples(tm.Metric):
                     target_min = 0
                     target_max = 1
                     pred = pred.to(dtype=torch.float32).probability().to(dtype=torch.float32)[0]
+                elif isinstance(pred, torch.Tensor):
+                    pass
                 else:
                     continue
 
