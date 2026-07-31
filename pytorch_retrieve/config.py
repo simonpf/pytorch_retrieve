@@ -437,7 +437,7 @@ class ComputeConfig:
     A description of a training regime.
     """
 
-    precision: str = "16-mixed"
+    precision: str = "bf16-mixed"
     accelerator: str = "cuda"
     devices: Union[List[int]] = -1
     n_nodes: int = 1
@@ -475,7 +475,7 @@ class ComputeConfig:
 
     def __init__(
         self,
-        precision: str = "16-mixed",
+        precision: str = "bf16-mixed",
         accelerator: Optional[str] = None,
         devices: Optional[List[int]] = None,
         n_nodes: int = 1,
