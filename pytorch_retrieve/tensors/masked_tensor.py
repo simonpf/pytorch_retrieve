@@ -838,7 +838,7 @@ def tmaximum(inpt, exp, *args):
 
 
 @implements(torch.max)
-def max(inpt, dim, keepdim=False, *args, out=None):
+def max(inpt, dim=None, keepdim=False, *args, out=None):
     """
     Max function.
     """
@@ -859,7 +859,9 @@ def tmax(inpt, dim=None, keepdim=False, *args, out=None):
     """
     Member-function version of max function.
     """
-    return torch.max(inpt, dim, keepdim=False, *args, out=None)
+    if dim is None:
+        return torch.max(inpt, *args, out=None)
+    return torch.max(inpt, dim, keepdim=keepdim, *args, out=None)
 
 
 @implements(torch.minimum)
