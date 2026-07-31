@@ -1078,11 +1078,13 @@ class SequentialInferenceRunner:
                 # Discard dummy dimensions if necessary.
                 if isinstance(tensor, list):
                     tensor = [
-                        t_i.squeeze() if len(dims) < t_i.ndim else t_i for t_i in tensor
+                        t_i.squeeze().float().cpu().numpy()
+                        if len(dims) < t_i.ndim
+                        else t_i.float().cpu().numpy() for t_i in tensor
                     ]
                     results[key] = (
                         tuple(dims) + (f"{key}_step", "x", "y"),
-                        np.stack(tensor.float().cpu().numpy()),
+                        np.stack(tensor),
                     )
                 elif len(dims) < tensor.ndim:
                     tensor = torch.squeeze(tensor).float().cpu().numpy()
