@@ -889,7 +889,7 @@ def tminimum(inpt, exp, *args):
 
 
 @implements(torch.min)
-def min(inpt, dim, keepdim=False, *args, out=None):
+def min(inpt, dim=None, keepdim=False, *args, out=None):
     """
     Min function.
     """
@@ -910,7 +910,9 @@ def tmin(inpt, dim=None, keepdim=False, *args, out=None):
     """
     Member function version of min function.
     """
-    return torch.min(inpt, dim, keepdim=False, *args, out=None)
+    if dim is None:
+        return torch.min(inpt, *args, out=None)
+    return torch.min(inpt, dim, keepdim=keepdim, *args, out=None)
 
 
 @implements(torch.select)
