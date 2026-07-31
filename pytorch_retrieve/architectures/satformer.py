@@ -281,7 +281,7 @@ class DecoderConfig:
             "upsampling_factors", list, config_dict, "architecture.decoder", default
         )
 
-        block_factory = "SatformerBlock"
+        block_factory = "InvertedBottleneckBlock"
         block_factory_args = get_config_attr(
             "block_factory_args", None, config_dict, "architecture.decoder", {}
         )
@@ -360,7 +360,6 @@ class DecoderConfig:
         upsampling_factory = BilinearWNorm()
 
         if skip_connections:
-            skip_connections = self.skip_connections
             skip_connections = {
                 Scale(key): value
                 for key, value in skip_connections.items()
@@ -370,10 +369,6 @@ class DecoderConfig:
 
         channels = copy(self.channels)
         channels[-1] += token_length
-
-        if skip_connections is not None:
-            max_scale = max(skip_connections)
-            skip_connections[max_scale] = channels[0]
 
         upsampling_factors = self.upsampling_factors
 
@@ -865,27 +860,8 @@ class Satformer(RetrievalModel):
             self.outputs[output_name] = output_cfg.conditional
             if output_cfg.encoding is not None and output_cfg.encoding != "None":
                 self.encoding_map[output_name] = output_cfg.encoding
-            if output_cfg.encoding is None or output_cfg.encoding == "None":
-                perceivers[output_name] = Perceiver(
-                    arch_config.encoder_config.channels[-1],
-                    n_heads=arch_config.n_heads_perceiver
-                )
-            else:
-                channels = copy(arch_config.encoder_config.channels)
-                channels[0] += len(self.input_names)
-                channels = channels[::-1][:len(arch_config.decoder_config.channels) + 1]
 
-                perceivers[output_name] = nn.ModuleList([
-                    CondPerceiver(
-                        arch_config.output_embed_dim,
-                        enc_chans,
-                        n_heads=arch_config.n_heads_perceiver
-                    ) for enc_chans in channels
-                ])
-
-        self.perceivers = nn.ModuleDict(perceivers)
         self.token_length = len(self.input_names)
-
         n_chans = arch_config.encoder_config.channels[0]
 
         self.stems = nn.ModuleDict(
@@ -896,19 +872,26 @@ class Satformer(RetrievalModel):
         )
         self.encoder = arch_config.encoder_config.compile()
         skip_connections = copy(self.encoder.skip_connections)
-        self.enc_norms = nn.ModuleDict(
-            {str(scl): LayerNormFirst(chans) for scl, chans in skip_connections.items()}
-        )
-        self.decoders = nn.ModuleDict(
-            {
-                name: arch_config.decoder_config.compile(
-                    token_length=self.token_length,
-                    skip_connections=cfg.conditional is not None
-                    and cfg.conditional != "None",
-                )
-                for name, cfg in output_config.items()
-            }
-        )
+
+        self.perceivers = nn.ModuleDict({
+            str(scale): Perceiver(chans, arch_config.n_heads_perceiver) for scale, chans in skip_connections.items()
+        })
+
+
+        self.decoders = nn.ModuleDict()
+        for name, cfg in output_config.items():
+            extra_chans = 0
+            if cfg.conditional is not None:
+                if cfg.encoding is not None and cfg.encoding != "None":
+                    extra_chans = arch_config.encoding_configs[cfg.encoding].channels_out
+                else:
+                    extra_chans = arch_config.input_configs[cfg.encoding].channels_out
+
+            skips_new = {scale: chans + extra_chans for scale, chans in skip_connections.items()}
+            self.decoders[name] = arch_config.decoder_config.compile(
+                token_length=self.token_length,
+                skip_connections=skips_new
+            )
 
         scales = arch_config.encoder_config.scales
         max_scale = max(scales)
@@ -992,50 +975,44 @@ class Satformer(RetrievalModel):
         mask = torch.cat(masks, 1)
         inpt = torch.cat((tokens, input_sequence), 1)
 
-
-        # Drop invalid samples
-        inds = torch.argsort(mask, dim=1)
-        max_valid = (~mask).sum(dim=1).max()
-        inds_all = inds[:, None, :, None, None].expand_as(inpt)
-        inpt = torch.gather(inpt, 2, inds_all[:, :, :max_valid])
-        mask = torch.gather(mask, 1, inds[:, :max_valid])
+        ## Drop invalid samples
+        #inds = torch.argsort(mask, dim=1)
+        #max_valid = (~mask).sum(dim=1).max()
+        #inds_all = inds[:, None, :, None, None].expand_as(inpt)
+        #inpt = torch.gather(inpt, 2, inds_all[:, :, :max_valid])
+        #mask = torch.gather(mask, 1, inds[:, :max_valid])
 
         encs = self.encoder(inpt, mask=mask)
-        encs = {scl: self.enc_norms[str(scl)](enc) for scl, enc in encs.items()}
+        encs = {scl: self.perceivers[str(scl)](enc) for scl, enc in encs.items()}
 
         outputs = {}
         for name, cond in self.outputs.items():
             if cond is not None and cond != "None":
                 output = self.encodings[self.encoding_map[name]](x[cond])
-                n_batch, _, n_seq = output.shape[:3]
-                output = torch.permute(output, (0, 2, 1, 3, 4)).flatten(0, 1)
+                n_batch = output.shape[0]
+                n_seq = output.shape[2]
                 output_scaled = {}
-                for perc, downsample, scale in zip(
-                        self.perceivers[name], self.downsamplers, self.downsampler_scales
-                ):
-                    output_scaled[scale] = perc(downsample(output), encs[scale], key_padding_mask=mask)
-                #min_scale = max(self.downsampler_scales)
-                #output_scaled[min_scale] = self.perceivers[name](
-                #    output_scaled[min_scale], encs[min_scale], key_padding_mask=mask
-                #)
+                for downsample, scale in zip(self.downsamplers, self.downsampler_scales):
+                    first_dims = output.shape[:2]
+                    output_d = downsample(output.flatten(0, 1))
+                    output_d = output_d.reshape(first_dims + output_d.shape[1:])
+                    enc = torch.repeat_interleave(encs[scale], n_seq, 2)
+                    output_scaled[scale] = torch.permute(torch.cat((enc, output_d), 1), (0, 2, 1, 3, 4)).flatten(0, 1)
             else:
-                min_scale = max(list(encs.keys()))
-                output = self.perceivers[name](encs[min_scale], key_padding_mask=mask)
-                n_batch, _, n_seq = output.shape[:3]
-                output = torch.permute(output, (0, 2, 1, 3, 4)).flatten(0, 1)
-                output_scaled = output
+                output_scaled = {}
+                for scale, enc in encs.items():
+                    n_batch = enc.shape[0]
+                    n_seq = enc.shape[2]
+                    output_scaled[scale] = torch.permute(enc, (0, 2, 1, 3, 4)).flatten(0, 1)
+
 
             dec = self.decoders[name]
             head = self.heads[name]
+
+            decd = dec
+
             output = head(
-                dec(
-                    output_scaled,
-                    stage_kwargs={
-                        scl: {"x_in": tnsr.repeat_interleave(n_seq, 0)}
-                        for scl, tnsr in encs.items()
-                    },
-                    mask=mask.repeat_interleave(n_seq, 0),
-                )
+                dec(output_scaled)
             )
             outputs[name] = list(
                 torch.unbind(torch.unflatten(output, 0, (n_batch, n_seq)), 1)
@@ -1049,3 +1026,6 @@ class Satformer(RetrievalModel):
         Names of the outputs from this model.
         """
         return list(self.heads.keys())
+
+
+Satformer2 = Satformer
