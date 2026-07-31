@@ -1157,7 +1157,10 @@ class PlotSamples(tm.Metric):
             self.targets = [self.targets[ind] for ind in permutation]
             self.preds = [self.preds[ind] for ind in permutation]
 
-        images = {}
+        images = {
+            "pred": [],
+            "target": []
+        }
 
         if isinstance(self.targets[0], torch.Tensor):
             target_min = np.nanmin(
@@ -1173,6 +1176,10 @@ class PlotSamples(tm.Metric):
             for pred, target in zip(self.preds, self.targets):
                 if isinstance(pred, RegressionTensor):
                     pred = pred.expected_value()[0]
+
+                if pred.ndim < 3:
+                    return {}
+
                 elif isinstance(pred, ClassificationTensor):
                     target_min = 0
                     target_max = pred.shape[1] - 1
@@ -1209,8 +1216,8 @@ class PlotSamples(tm.Metric):
                 img_target = np.transpose(mappable.to_rgba(pred), [2, 0, 1])
                 img_pred = np.transpose(mappable.to_rgba(target), [2, 0, 1])
 
-                images.setdefault("pred", []).append(torch.tensor(img_pred))
-                images.setdefault("target", []).append(torch.tensor(img_target))
+                images["pred"].append(torch.tensor(img_pred))
+                images["target"].append(torch.tensor(img_target))
 
             return images
 
