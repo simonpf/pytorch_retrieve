@@ -1174,23 +1174,23 @@ class PlotSamples(tm.Metric):
             cmap.set_bad("grey")
 
             for pred, target in zip(self.preds, self.targets):
-                if isinstance(pred, RegressionTensor):
-                    pred = pred.expected_value()[0]
 
                 if pred.ndim < 3:
                     return {}
 
+                if isinstance(pred, RegressionTensor):
+                    pred = pred.expected_value().squeeze()
                 elif isinstance(pred, ClassificationTensor):
                     target_min = 0
                     target_max = pred.shape[1] - 1
-                    pred = pred.to(dtype=torch.float32).most_likely_class()[0]
+                    pred = pred.to(dtype=torch.float32).most_likely_class().squeeze()
                     cmap = colormaps["Set1"]
                 elif isinstance(pred, DetectionTensor):
                     target_min = 0
                     target_max = 1
-                    pred = pred.to(dtype=torch.float32).probability().to(dtype=torch.float32)[0]
+                    pred = pred.to(dtype=torch.float32).probability().to(dtype=torch.float32).squeeze()
                 elif isinstance(pred, torch.Tensor):
-                    pass
+                    pred = pred.squeeze()
                 else:
                     continue
 
@@ -1232,7 +1232,7 @@ class PlotSamples(tm.Metric):
             cmap.set_bad("grey")
 
             for pred_s, target_s in zip(pred, target):
-                pred_s = pred_s.expected_value()[0]
+                pred_s = pred_s.expected_value().squeeze()
                 if pred_s.dim() == 3:
                     pred_s = pred_s[0]
                 if pred_s.dim() != 2:
@@ -1242,7 +1242,7 @@ class PlotSamples(tm.Metric):
                     )
                     return {}
 
-                target_s = target_s[0]
+                target_s = target_s.squeeze()
                 if target_s.dim() == 3:
                     target_s = target_s[0]
 
@@ -1394,8 +1394,14 @@ class Histogram(ScalarMetric, tm.Metric):
     Plots a histogram of the predicted and reference data.
     """
     name = "Histogram"
+    dims = ("predicted_and_reference", "bins")
 
-    def __init__(self, v_min: float = 0.0, v_max: float = 100.0):
+    def __init__(
+            self,
+            v_min: float = 0.0,
+            v_max: float = 100.0,
+            bins: Optional[np.ndarray] = None
+    ):
         """
         Args:
             n_samples: The number of samples to display.
@@ -1407,7 +1413,10 @@ class Histogram(ScalarMetric, tm.Metric):
         self.v_min = v_min
         self.v_max = v_max
 
-        self.bins = torch.tensor(np.linspace(self.v_min, self.v_max).astype(np.float32))
+        if bins is None:
+            self.bins = torch.tensor(np.linspace(self.v_min, self.v_max).astype(np.float32))
+        else:
+            self.bins = torch.tensor(bins.astype(np.float32))
         counts = torch.zeros((2, self.bins.shape[0] - 1))
         self.add_state("counts", default=counts, dist_reduce_fx="sum")
         self.step = 0
@@ -1501,7 +1510,7 @@ class Histogram(ScalarMetric, tm.Metric):
 
     @rank_zero_only
     def compute(self) -> Dict[str, torch.Tensor]:
-        pass
+        return self.counts
 
 
 class BrierScore(ProbabilisticDetectionMetric, MSEBase):
